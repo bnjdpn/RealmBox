@@ -1,38 +1,38 @@
-export type WorldPreset = "calm" | "living" | "crowded";
-export type AppView = "welcome" | "data" | "experience" | "preparing" | "dashboard" | "starting" | "running";
+export type LauncherPhase =
+  | "checking"
+  | "needsGameData"
+  | "installing"
+  | "ready"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "error";
 
-export interface Companion {
-  id: string;
-  name: string;
-  role: "tank" | "healer" | "damage";
-  level: number;
-  ready: boolean;
+export type ComponentState = "missing" | "installing" | "ready" | "running" | "stopped" | "error";
+
+export interface LauncherComponent {
+  id: "client" | "database" | "server" | "bots";
+  label: string;
+  state: ComponentState;
+  detail: string;
 }
 
-export interface Dashboard {
-  playerName: string;
-  className: string;
-  level: number;
-  preset: WorldPreset;
-  localAiReady: boolean;
-  companions: Companion[];
-  sessionRunning: boolean;
-  evidence: string;
+export interface LauncherStatus {
+  phase: LauncherPhase;
+  message: string;
+  detail: string | null;
+  progress: number;
+  installed: boolean;
+  botsEnabled: boolean;
+  gameDataPath: string | null;
+  accountName: string | null;
+  accountPassword: string | null;
+  components: LauncherComponent[];
 }
 
-export const fakeDashboard: Dashboard = {
-  playerName: "Benjamin",
-  className: "Paladin",
-  level: 17,
-  preset: "living",
-  localAiReady: true,
-  sessionRunning: false,
-  evidence: "Mode démonstration — aucun service réel ni donnée de jeu",
-  companions: [
-    { id: "thoran", name: "Thoran", role: "tank", level: 17, ready: true },
-    { id: "melya", name: "Melya", role: "healer", level: 17, ready: true },
-    { id: "kael", name: "Kael", role: "damage", level: 16, ready: true },
-    { id: "lyra", name: "Lyra", role: "damage", level: 18, ready: true },
-  ],
-};
-
+export interface LauncherProgress {
+  phase: LauncherPhase;
+  message: string;
+  detail: string | null;
+  progress: number;
+}

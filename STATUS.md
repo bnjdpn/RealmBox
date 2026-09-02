@@ -2,23 +2,30 @@
 
 Mis à jour le 2 septembre 2026 sur macOS 26.6.2 arm64.
 
-| Fonction | macOS arm64 | macOS x86-64 | Windows x64 | Preuve |
-|---|---|---|---|---|
-| UI RealmBox | testé + QA visuelle | non commencé | non commencé | Vitest, build Vite, Playwright 1200 px et 390 px |
-| Machine à états | testé automatiquement | testé automatiquement | testé automatiquement | tests Rust indépendants plateforme |
-| SQLite/migrations | testé automatiquement | testé automatiquement | testé automatiquement | tests mémoire + chemin Unicode |
-| Faux onboarding complet | testé avec fake | non commencé | workflow créé | tests frontend |
-| Faux Jouer/arrêt/conversation | testé avec fake | non commencé | workflow créé | tests frontend et orchestrateur |
-| Bundle Tauri | buildé | non commencé | workflow créé | `RealmBox.app` local arm64 sans signature de distribution |
-| OpenWoW | buildé | workflow créé | workflow créé | pin `2521e1f`; Mach-O arm64 55 Mio, SHA-256 consigné |
-| Données OpenWoW réelles | bloqué | bloqué | bloqué | données utilisateur absentes |
-| Serveur Playerbots | buildé | workflow créé | workflow créé | `authserver` et `worldserver` arm64 produits; exécution non prouvée |
-| mod-ollama-chat | compilé en bibliothèque statique | non commencé | non commencé | module inclus dans `worldserver`; requête Ollama non prouvée |
-| MariaDB locale | spike connecteur en échec | non commencé | non commencé | Connector/C 3.4.9 incompatible avec les API MySQL 8 attendues; runtime non sélectionné |
-| Ollama | bloqué | bloqué | bloqué | absent de la machine; runtime non audité |
-| CanIRun | bloqué | bloqué | bloqué | aucune API publique officielle identifiée |
-| Addon Companions | implémenté | implémenté | implémenté | squelette Lua; test en jeu non exécuté |
-| Parcours réel complet | bloqué | bloqué | bloqué | aucun personnage, groupe ou dialogue réel testé |
-| Signature/notarisation | bloqué | bloqué | bloqué | certificats absents |
+Décision actuelle : **GO pour poursuivre et faire essayer l'installation sur une copie utilisateur ; NO-GO pour affirmer que le parcours réel complet est validé ou distribuer une release.**
 
-Les statuts de build seront mis à jour uniquement après lecture des artefacts produits. Un workflow présent n'est pas une preuve qu'il passe.
+| Fonction | État | Preuve actuelle |
+|---|---|---|
+| Lanceur inspiré de l'ère Wrath | implémenté | UI React sans ressource Blizzard ni image générée ; QA navigateur large et étroite |
+| Premier lancement | implémenté, non exécuté de bout en bout | commandes Tauri réelles, tests Rust des frontières et tests UI ; aucune copie 3.3.5a disponible sur la machine de développement |
+| Client OpenWoW | artefact vérifié séparément | release officielle 0.1.2 macOS arm64, SHA-256 `832cb82fd853417ec64d8fd1a84cb8c6a91a57399fd4b87fb2e810a35b03ed18`, signature ad hoc valide |
+| Serveur AzerothCore Playerbots | source épinglée, build installateur non exécuté | fork `47960183...`, module `2f7d9f77...`; un ancien spike natif compilait, ce qui ne prouve pas le build Docker actuel |
+| Données serveur | extraction locale implémentée, non exécutée | volume Docker géré ; `Data` utilisateur monté en lecture seule ; aucun téléchargement de données extraites |
+| MySQL | orchestration implémentée, non exécutée dans ce parcours | image multiarchitecture verrouillée par digest ; port `127.0.0.1:3307` |
+| Compte joueur local | implémenté, non testé contre une base réelle | calcul SRP6 aligné sur la source épinglée et vecteur de régression ; création idempotente `REALMBOX / REALMBOX` |
+| Playerbots à la demande | configuration implémentée | 50 bots quand activé, zéro et autologin coupé sinon ; comportement en jeu non testé |
+| Second lancement automatique | implémenté et testé avec effets factices | état persisté → base → extraction idempotente → migrations → serveurs → client ; aucune preuve réelle complète |
+| Arrêt | implémenté | processus client appartenant au lanceur puis services Docker ; test de l'interface, pas de smoke réel |
+| Bundle Tauri actuel | buildé et lancé | `RealmBox.app` arm64, addon embarqué, signature ad hoc complète vérifiée, exécutable SHA-256 `b8341e3dcc7d9bae4b305590c22e4f7c2aecfb3195ae959684ece5cbfacf1236` ; pas de notarisation |
+| Windows / Mac Intel | non commencé pour ce parcours | aucune exécution |
+| Signature de distribution / notarisation | bloqué | certificats absents |
+
+## Ce qui manque pour déclarer le parcours fonctionnel
+
+- sélectionner une copie utilisateur 3.3.5a valide ;
+- laisser le build et les extracteurs terminer ;
+- relancer RealmBox et constater les ports 3724/8085, l'ouverture du client et la connexion avec le compte local ;
+- créer un personnage, entrer dans le monde et observer les Playerbots activés/désactivés ;
+- vérifier l'arrêt puis une nouvelle reprise après redémarrage de la machine.
+
+Les tests automatisés, le build d'une dépendance ou l'ouverture de la fenêtre ne remplacent pas cette preuve réelle.

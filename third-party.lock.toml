@@ -7,12 +7,14 @@ repository = "https://github.com/rkabachenko/OpenWow-snapshot"
 commit = "2521e1f72eeffd661913be63d1e2b374073c316c"
 branch = "main"
 source_version = "0.1.2"
+artifact_url_macos_arm64 = "https://github.com/rkabachenko/OpenWow-snapshot/releases/download/v0.1.2/OpenWoW-0.1.2-macos-arm64.zip"
+artifact_sha256_macos_arm64 = "832cb82fd853417ec64d8fd1a84cb8c6a91a57399fd4b87fb2e810a35b03ed18"
 license = "AGPL-3.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 architectures_claimed_upstream = ["arm64", "x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; binary redistribution needs complete notice review"
-test_status = "macos-arm64 client build passed; sha256 b5c1c777263c831f3b42fb683d0cbf783c6c3bcf45fde08ea97a1ca50e380cfe; real gameplay not tested"
+test_status = "official macos-arm64 0.1.2 asset independently downloaded, sha256 verified and ad-hoc code signature verified; real gameplay not tested"
 
 [[component]]
 name = "azerothcore-playerbots-fork"
@@ -58,10 +60,16 @@ patch_set = "none"
 redistribution_status = "source license identified; application/runtime redistribution not yet approved"
 test_status = "not installed on development machine"
 
+[[component]]
+name = "mysql-runtime"
+repository = "https://hub.docker.com/_/mysql"
+source_version = "8.4.11 via pinned multiarch manifest"
+image = "mysql@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
+license = "GPL-2.0-only"
+platforms = ["macos-arm64"]
+redistribution_status = "pulled by Docker during local installation; notices require review before binary distribution"
+test_status = "manifest inspected for linux/arm64; RealmBox compose path not yet run against a real installation"
+
 [[unresolved]]
 name = "canirun"
 reason = "No official public source repository or API contract was identified on 2026-09-02; no endpoint is configured."
-
-[[unresolved]]
-name = "mariadb-runtime"
-reason = "Portable runtime version, artifact URLs, checksums, and redistribution composition are not selected."

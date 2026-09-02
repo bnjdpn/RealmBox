@@ -10,9 +10,18 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "RealmBox", "width": 1180, "height": 780, "minWidth": 780, "minHeight": 620, "resizable": true }],
+    "windows": [{ "title": "RealmBox", "width": 1140, "height": 820, "minWidth": 780, "minHeight": 650, "resizable": true }],
     "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost" }
   },
-  "bundle": { "active": true, "targets": ["dmg", "app"], "category": "Game", "shortDescription": "Un monde solo local, simplement." }
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app"],
+    "category": "Game",
+    "shortDescription": "Un monde solo local, simplement.",
+    "resources": {
+      "../../../addons/RealmBoxCompanions/RealmBoxCompanions.lua": "addons/RealmBoxCompanions/RealmBoxCompanions.lua",
+      "../../../addons/RealmBoxCompanions/RealmBoxCompanions.toc": "addons/RealmBoxCompanions/RealmBoxCompanions.toc",
+      "../../../addons/RealmBoxCompanions/RealmBoxCompanions.xml": "addons/RealmBoxCompanions/RealmBoxCompanions.xml"
+    }
+  }
 }
-

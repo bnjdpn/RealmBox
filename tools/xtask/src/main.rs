@@ -20,7 +20,7 @@ fn run() -> Result<()> {
     match command.as_str() {
         "doctor" => doctor(),
         "bootstrap" => run_command("pnpm", &["install"]),
-        "dev" => run_command("pnpm", &["dev:fake"]),
+        "dev" => run_command("pnpm", &["dev:preview"]),
         "build-launcher" => {
             run_command("pnpm", &["build"])?;
             run_command("cargo", &["build", "-p", "realmbox-desktop"])

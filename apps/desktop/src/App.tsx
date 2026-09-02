@@ -1,73 +1,187 @@
-import { useState } from "react";
-import oathkeeperPortrait from "./assets/oathkeeper-portrait.webp";
-import realmValley from "./assets/realm-valley.webp";
-import { copy } from "./i18n";
-import { prepareWorld, startWorld, stopWorld, talkToCompanion } from "./runtime";
-import { fakeDashboard, type AppView, type Dashboard, type WorldPreset } from "./types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  bootstrapLauncher,
+  chooseGameData,
+  installRealm,
+  startRealm,
+  stopRealm,
+  subscribeLauncherProgress,
+} from "./runtime";
+import type { LauncherStatus } from "./types";
 
-const presetLabels: Record<WorldPreset, { title: string; description: string }> = {
-  calm: { title: "Monde calme", description: "Une présence discrète et une charge minimale." },
-  living: { title: "Monde vivant", description: "Des routes animées et des compagnons faciles à trouver." },
-  crowded: { title: "Monde très peuplé", description: "Davantage d’habitants pour les machines puissantes." },
+const initialStatus: LauncherStatus = {
+  phase: "checking",
+  message: "Vérification de l’installation…",
+  detail: null,
+  progress: 0,
+  installed: false,
+  botsEnabled: true,
+  gameDataPath: null,
+  accountName: null,
+  accountPassword: null,
+  components: [],
 };
 
-const roleLabels = { tank: "Tank", healer: "Soins", damage: "Dégâts" } as const;
+function isBusy(status: LauncherStatus) {
+  return ["checking", "installing", "starting", "stopping"].includes(status.phase);
+}
 
 export default function App() {
-  const [view, setView] = useState<AppView>("welcome");
-  const [preset, setPreset] = useState<WorldPreset>("living");
-  const [dashboard, setDashboard] = useState<Dashboard>(fakeDashboard);
-  const [progress, setProgress] = useState(0);
-  const [progressMessage, setProgressMessage] = useState("");
-  const [chat, setChat] = useState("");
-  const [reply, setReply] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [gameDataPath, setGameDataPath] = useState<string | null>(null);
+  const [botsEnabled, setBotsEnabled] = useState(true);
+  const [requestPending, setRequestPending] = useState(false);
+  const bootstrapRequest = useRef<Promise<LauncherStatus> | null>(null);
 
-  async function runPreparation() {
-    setView("preparing");
-    const result = await prepareWorld((next, message) => { setProgress(next); setProgressMessage(message); });
-    setDashboard({ ...result, preset });
-    setView("dashboard");
+  useEffect(() => {
+    let active = true;
+    let unlisten: () => void = () => undefined;
+
+    void subscribeLauncherProgress((progress) => {
+      if (!active) return;
+      setStatus((current) => ({ ...current, ...progress }));
+    }).then((stopListening) => { unlisten = stopListening; });
+
+    bootstrapRequest.current ??= bootstrapLauncher();
+    void bootstrapRequest.current
+      .then((next) => {
+        if (!active) return;
+        setStatus(next);
+        setGameDataPath(next.gameDataPath);
+        setBotsEnabled(next.botsEnabled);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setStatus({ ...initialStatus, phase: "error", message: "RealmBox n’a pas pu démarrer", detail: String(error) });
+      });
+
+    return () => { active = false; unlisten(); };
+  }, []);
+
+  const progressLabel = useMemo(() => {
+    if (status.phase === "running") return "MONDE EN COURS";
+    if (status.phase === "ready") return "INSTALLATION TERMINÉE";
+    if (status.phase === "error") return "INTERVENTION REQUISE";
+    if (status.phase === "needsGameData") return "PRÊT À INSTALLER";
+    return status.message.toUpperCase();
+  }, [status]);
+
+  async function selectData() {
+    const selected = await chooseGameData();
+    if (selected) setGameDataPath(selected);
   }
 
-  async function play() {
-    setView("starting");
-    const result = await startWorld((next, message) => { setProgress(next); setProgressMessage(message); });
-    setDashboard({ ...result, preset });
-    setView("running");
+  async function install() {
+    if (!gameDataPath) return;
+    setRequestPending(true);
+    setStatus((current) => ({ ...current, phase: "installing", message: "Préparation de l’installation", detail: null, progress: 1 }));
+    try {
+      setStatus(await installRealm(gameDataPath, botsEnabled));
+    } catch (error) {
+      setStatus((current) => ({ ...current, phase: "error", message: "L’installation s’est arrêtée", detail: String(error) }));
+    } finally {
+      setRequestPending(false);
+    }
+  }
+
+  async function start() {
+    setRequestPending(true);
+    try {
+      setStatus(await startRealm(botsEnabled));
+    } catch (error) {
+      setStatus((current) => ({ ...current, phase: "error", message: "Le monde n’a pas démarré", detail: String(error) }));
+    } finally {
+      setRequestPending(false);
+    }
   }
 
   async function stop() {
-    setDashboard(await stopWorld());
-    setView("dashboard");
-  }
-
-  async function sendMessage(event: React.FormEvent) {
-    event.preventDefault();
-    if (!chat.trim()) return;
-    setReply(await talkToCompanion("melya", chat));
-    setChat("");
+    setRequestPending(true);
+    try {
+      setStatus(await stopRealm());
+    } catch (error) {
+      setStatus((current) => ({ ...current, phase: "error", message: "Arrêt incomplet", detail: String(error) }));
+    } finally {
+      setRequestPending(false);
+    }
   }
 
   return (
-    <main className="shell">
-      <header className="topbar"><span className="sigil" aria-hidden="true">R</span><span>{copy.brand}</span><button className="icon-button" aria-label="Ouvrir les paramètres">•••</button></header>
+    <main className="launcher-shell">
+      <div className="launcher-frame">
+        <header className="launcher-titlebar">
+          <div className="realm-mark" aria-hidden="true"><span>R</span></div>
+          <div className="wordmark"><strong>REALMBOX</strong><small>UN MONDE LOCAL · 3.3.5a</small></div>
+          <span className="runtime-badge">EXÉCUTION LOCALE</span>
+        </header>
 
-      {view === "welcome" && <section className="hero screen-enter">
-        <div className="hero-copy"><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.welcomeTitle}</h1><p className="lede">{copy.welcomeBody}</p><button className="primary" onClick={() => setView("data")}>{copy.prepare}<span aria-hidden="true">→</span></button><p className="fine-print">{copy.legal}</p></div>
-        <figure className="world-illustration" aria-hidden="true"><img src={realmValley} alt=""/><span className="image-wash"/><figcaption>UNE FRONTIÈRE À SOI</figcaption></figure>
-      </section>}
+        <section className="launcher-stage">
+          <aside className="chronicle">
+            <p className="section-kicker">CHRONIQUE DU ROYAUME</p>
+            <h1>Votre monde,<br/>sur votre machine.</h1>
+            <p className="intro">RealmBox installe un client ouvert, un serveur local et les compagnons que vous choisissez. Les données du jeu restent les vôtres.</p>
+            <div className="build-note">
+              <span className="build-number">12340</span>
+              <div><strong>ÈRE WRATH · 3.3.5a</strong><p>Lanceur autonome pour un monde privé sur votre ordinateur.</p></div>
+            </div>
+          </aside>
 
-      {view === "data" && <section className="centered screen-enter"><p className="eyebrow">ÉTAPE 1 SUR 2</p><h2>Trouvons vos données</h2><p className="lede narrow">Elles servent uniquement à faire fonctionner votre monde local et ne quittent jamais cet ordinateur.</p><div className="data-drop"><span className="folder" aria-hidden="true">◇</span><strong>Aucun dossier trouvé automatiquement</strong><span>Choisissez le dossier <code>Data</code> ou son dossier parent.</span><button className="secondary" onClick={() => setView("experience")}>Choisir le dossier de démonstration</button></div><p className="demo-label">PARCOURS FAKE — AUCUN FICHIER RÉEL N’EST LU</p></section>}
+          <section className="launcher-panel" aria-live="polite">
+            <div className="panel-cap"><span>ÉTAT DE REALMBOX</span><span className={`phase-light ${status.phase}`}/></div>
 
-      {view === "experience" && <section className="centered screen-enter"><p className="eyebrow">ÉTAPE 2 SUR 2</p><h2>Choisissez votre ambiance</h2><p className="lede narrow">RealmBox ajustera automatiquement la population et l’activité locale.</p><div className="preset-list">{(Object.keys(presetLabels) as WorldPreset[]).map((id) => <button key={id} className={`preset ${preset === id ? "selected" : ""}`} onClick={() => setPreset(id)}><span className="preset-radio"/><span><strong>{presetLabels[id].title}{id === "living" && <em>Recommandé</em>}</strong><small>{presetLabels[id].description}</small></span></button>)}</div><button className="primary" onClick={runPreparation}>Préparer automatiquement<span aria-hidden="true">→</span></button></section>}
+            <div className="status-copy">
+              <p className="section-kicker">{progressLabel}</p>
+              <h2>{status.message}</h2>
+              {status.detail && <p className="status-detail">{status.detail}</p>}
+            </div>
 
-      {(view === "preparing" || view === "starting") && <section className="progress-screen screen-enter"><div className="pulse-mark" aria-hidden="true"><span>R</span></div><p className="eyebrow">{view === "preparing" ? "PRÉPARATION INITIALE" : "UN INSTANT"}</p><h2>{progressMessage}</h2><p>{view === "preparing" ? "RealmBox assemble votre monde local." : "Votre aventure reprend là où vous l’avez laissée."}</p><div className="progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }}/></div><strong className="progress-number">{progress}%</strong><span className="fake-pill">Simulation locale</span></section>}
+            {status.phase === "needsGameData" && <div className="setup-card">
+              <label>Données de jeu 3.3.5a</label>
+              <button className="path-picker" onClick={selectData} disabled={requestPending}>
+                <span>{gameDataPath ?? "Choisir le dossier qui contient Data"}</span><b>PARCOURIR</b>
+              </button>
+              <label className="bot-toggle">
+                <input type="checkbox" checked={botsEnabled} onChange={(event) => setBotsEnabled(event.target.checked)}/>
+                <span><strong>Peupler le monde avec des compagnons</strong><small>Active Playerbots au démarrage. Modifiable plus tard.</small></span>
+              </label>
+              <p className="legal-note">RealmBox ne télécharge aucune donnée propriétaire. Une copie compatible obtenue légalement est nécessaire.</p>
+            </div>}
 
-      {(view === "dashboard" || view === "running") && <section className="dashboard screen-enter">
-        <aside className="character-panel"><div className="avatar" aria-hidden="true"><img src={oathkeeperPortrait} alt=""/></div><p className="eyebrow">BON RETOUR</p><h2>{dashboard.playerName}</h2><p>{dashboard.className} · niveau {dashboard.level}</p><div className="world-status"><span className={dashboard.sessionRunning ? "status-live" : "status-ready"}/><div><strong>{dashboard.sessionRunning ? "Monde éveillé" : "Monde prêt"}</strong><small>{presetLabels[preset].title} · IA locale prête</small></div></div></aside>
-        <div className="play-panel"><p className="eyebrow">{dashboard.sessionRunning ? "SESSION EN COURS" : "PRÊT POUR L’AVENTURE"}</p><h1>{dashboard.sessionRunning ? "Vos compagnons vous attendent." : "Le monde vous attend."}</h1><p>{dashboard.evidence}</p>{dashboard.sessionRunning ? <button className="stop-button" onClick={stop}>Fermer la session proprement</button> : <button className="play-button" onClick={play}><span>JOUER</span><small>Un clic, et votre monde s’éveille</small></button>}</div>
-        <section className="companions"><div className="section-title"><div><p className="eyebrow">VOTRE GROUPE</p><h3>Compagnons habituels</h3></div><button className="text-button">Gérer</button></div><div className="companion-list">{dashboard.companions.map((companion) => <article key={companion.id}><div className={`portrait ${companion.role}`}>{companion.name.slice(0, 1)}</div><div><strong>{companion.name}</strong><small>{roleLabels[companion.role]} · niveau {companion.level}</small></div><span className="ready-dot" aria-label="Prêt"/></article>)}</div>{dashboard.sessionRunning && <form className="chat" onSubmit={sendMessage}><label htmlFor="companion-chat">Parler à Melya</label><div><input id="companion-chat" value={chat} onChange={(event) => setChat(event.target.value)} placeholder="On est prêts pour la suite ?"/><button type="submit" aria-label="Envoyer">→</button></div>{reply && <output>{reply}</output>}</form>}</section>
-      </section>}
+            {status.components.length > 0 && <div className="component-list">
+              {status.components.map((component) => <div className="component" key={component.id}>
+                <span className={`component-rune ${component.state}`} aria-hidden="true"/>
+                <div><strong>{component.label}</strong><small>{component.detail}</small></div>
+                <em>{component.state === "running" ? "ACTIF" : component.state === "ready" ? "PRÊT" : component.state === "error" ? "ERREUR" : "—"}</em>
+              </div>)}
+            </div>}
+
+            {status.installed && status.accountName && status.accountPassword && <div className="account-card">
+              <span>COMPTE LOCAL</span>
+              <strong>{status.accountName} / {status.accountPassword}</strong>
+              <small>À saisir dans le client. Ce compte n’est accessible que sur le serveur local.</small>
+            </div>}
+
+            {status.phase === "ready" && <label className="ready-bot-toggle">
+              <input type="checkbox" checked={botsEnabled} onChange={(event) => setBotsEnabled(event.target.checked)}/>
+              <span>Compagnons au prochain démarrage</span>
+            </label>}
+
+            {status.phase === "error" && <div className="error-actions">
+              <button onClick={() => void bootstrapLauncher().then(setStatus)}>REVÉRIFIER</button>
+              <small>Le diagnostic complet reste local et aucune étape n’est déclarée réussie sans preuve.</small>
+            </div>}
+          </section>
+        </section>
+
+        <footer className="launcher-footer">
+          <div className="patch-status"><div className="patch-track"><span style={{ width: `${status.progress}%` }}/></div><small>{progressLabel} · {status.progress}%</small></div>
+          {status.phase === "needsGameData" && <button className="launch-button" onClick={install} disabled={!gameDataPath || requestPending}>INSTALLER</button>}
+          {status.phase === "ready" && <button className="launch-button" onClick={start} disabled={requestPending}>JOUER</button>}
+          {status.phase === "running" && <button className="launch-button stop" onClick={stop} disabled={requestPending}>ARRÊTER</button>}
+          {isBusy(status) && <button className="launch-button" disabled>VEUILLEZ PATIENTER</button>}
+        </footer>
+      </div>
+      <p className="launcher-version">RealmBox 0.1.0 · OpenWoW 0.1.2 · serveur local uniquement</p>
     </main>
   );
 }

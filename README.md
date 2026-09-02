@@ -1,33 +1,41 @@
 # RealmBox
 
-RealmBox est une application desktop open source qui vise à transformer une pile locale complexe en une expérience solo simple : fournir une fois ses propres données compatibles, préparer le monde, puis cliquer sur **Jouer**.
+RealmBox est un lanceur macOS pour jouer sur un monde 3.3.5a entièrement local. Au premier lancement, il demande le dossier d'une copie compatible appartenant au joueur, puis prépare automatiquement le client ouvert, le serveur, la base locale et Playerbots. Aux lancements suivants, il démarre la pile dans l'ordre et ouvre directement le client.
 
-RealmBox fournit le lanceur, l'orchestration, les composants open source autorisés et l'addon RealmBox Companions. Il ne fournit ni client propriétaire, ni archives, cartes, textures, sons ou autres données de jeu. Le client visé est [OpenWoW](https://github.com/rkabachenko/OpenWow-snapshot), une réimplémentation open source expérimentale ciblant le protocole et les données 3.3.5a build 12340.
+L'interface reprend la grammaire des lanceurs MMO de l'ère Wrath — fenêtre encadrée, métal bleuté, file de mise à jour, grand bouton d'action — sans logo, illustration, texte ni ressource Blizzard.
 
-## État actuel
+## Premier lancement
 
-Le vertical slice 0.1 fonctionne avec un runtime fake : onboarding en français, choix d'ambiance, préparation progressive, dashboard, bouton Jouer, groupe de quatre compagnons, conversation simulée, arrêt et persistance SQLite côté Tauri. Le fake est visiblement étiqueté et utilise les mêmes interfaces Rust que les backends réels.
+1. Démarrer Docker Desktop.
+2. Ouvrir RealmBox et choisir le dossier qui contient `Data` dans une copie 3.3.5a build 12340 obtenue légalement.
+3. Activer ou désactiver les compagnons Playerbots.
+4. Cliquer sur **Installer**.
 
-Le parcours réel OpenWoW → serveur → Playerbots → Ollama n'est **pas encore validé**. Aucun contenu propriétaire n'est présent. Voir [STATUS.md](STATUS.md) pour les preuves exactes et [le rapport du jalon](docs/REPORT_2026-09-02.md) pour la matrice complète.
+RealmBox télécharge l'artefact officiel OpenWoW 0.1.2 et vérifie son SHA-256, récupère les commits immuables du serveur et de Playerbots, construit les images Docker, extrait `maps`, `vmaps`, `mmaps` et `dbc` depuis les données locales, initialise MySQL et crée le compte de joueur local `REALMBOX / REALMBOX`.
+
+RealmBox ne télécharge, ne copie dans le dépôt et ne distribue aucune donnée propriétaire. Le dossier `Data` reste à son emplacement d'origine et n'est monté qu'en lecture seule pendant l'extraction.
+
+## Lancements suivants
+
+L'ouverture de RealmBox déclenche automatiquement :
+
+```text
+MySQL local → vérification des données serveur → migrations → authserver/worldserver → OpenWoW
+```
+
+Playerbots est activé uniquement si le joueur l'a demandé. Les ports du serveur et de la base sont liés à `127.0.0.1`. Les journaux et l'installation gérée restent dans le répertoire applicatif `org.realmbox.desktop`.
 
 ## Développement macOS
 
-Prérequis : Rust 1.97.1, Node 25+, pnpm 10+, Xcode. Puis :
+La première cible réelle est macOS Apple Silicon. Elle requiert Docker Desktop démarré, Git, curl, OpenSSL, Node, pnpm et Rust.
 
 ```sh
 pnpm install
-pnpm dev:fake
+pnpm dev          # application Tauri, commandes réelles
+pnpm dev:preview  # aperçu navigateur, aucune simulation d'installation
 pnpm verify
-cargo xtask doctor
 ```
 
-`pnpm dev:fake` ouvre l'interface dans le navigateur sans services réels. `pnpm dev` démarre Tauri et persiste l'état dans le répertoire applicatif standard. Les commandes de build upstream refusent explicitement de prétendre à un succès tant que les runtimes ne sont pas prêts.
+Le parcours complet avec données de jeu n'est pas déclaré validé tant qu'une copie utilisateur n'a pas permis de terminer l'installation et d'entrer en jeu. Voir [STATUS.md](STATUS.md) pour la séparation entre tests, build et preuve réelle.
 
-## Plateformes visées
-
-- macOS arm64 : cible de développement principale, fake testé automatiquement.
-- Windows x86-64 : workflows préparés, exécution réelle requise sur runner Windows.
-- macOS x86-64 : cross-build préparé, stabilité interdite sans smoke test sur Mac Intel.
-- Linux : hors périmètre 0.1.
-
-RealmBox est licencié sous AGPL-3.0-only, choix conservateur motivé dans [ADR 0001](docs/decisions/0001-license.md). Ce choix et la redistribution de la pile doivent encore recevoir une revue juridique avant publication binaire.
+RealmBox est licencié sous AGPL-3.0-only. La redistribution de binaires et de leurs dépendances doit encore faire l'objet d'une revue juridique avant publication.

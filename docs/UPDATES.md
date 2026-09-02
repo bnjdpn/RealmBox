@@ -1,4 +1,3 @@
 # Mises à jour
 
-Le modèle prévu utilise des runtimes immuables installés côte à côte, téléchargement atomique, manifeste signé, sauvegarde préalable et rollback. Aucun `git pull` ne sera exécuté chez l'utilisateur. Launcher, OpenWoW, serveur, base, Ollama, addon et catalogue ont des cycles distincts.
-
+L'installation initiale utilise un staging atomique et des pins immuables. Le manifeste final n'est écrit qu'après réussite et une installation interrompue nettoie ses volumes incomplets. Le mécanisme de mise à jour d'une installation déjà finalisée, sa sauvegarde préalable et son rollback versionné restent à implémenter ; aucune mise à jour silencieuse n'est revendiquée.

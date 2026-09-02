@@ -5,12 +5,10 @@ Conserver une fiche séparée par plateforme et noter commit, architecture, bina
 1. Valider les données utilisateur sans les modifier ni les téléverser.
 2. Démarrer la base et prouver un ping authentifié local.
 3. Démarrer authserver/worldserver et observer leurs marqueurs de disponibilité.
-4. Vérifier le chargement Playerbots et mod-ollama-chat.
-5. Vérifier Ollama sur localhost, le modèle exact et une réponse bornée.
-6. Lancer OpenWoW, se connecter, choisir un personnage et entrer dans le monde.
-7. Former un groupe équilibré, suivre, combattre, accomplir une quête et dialoguer.
-8. Fermer le client et vérifier que seuls les processus appartenant à RealmBox sont arrêtés.
-9. Relancer et vérifier la reprise du personnage et l'absence de processus orphelin.
+4. Vérifier le chargement de Playerbots, d'abord activé puis désactivé.
+5. Lancer OpenWoW, se connecter avec le compte local, choisir un personnage et entrer dans le monde.
+6. Observer des bots, combattre et changer de zone.
+7. Fermer le client et vérifier que seuls les processus appartenant à RealmBox sont arrêtés.
+8. Relancer et vérifier la reprise du personnage et l'absence de processus orphelin.
 
 Rien dans cette liste n'a encore été exécuté avec le runtime réel.
-

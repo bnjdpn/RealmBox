@@ -1,6 +1,7 @@
 # Tests
 
-`pnpm verify` exécute typecheck, lint, Vitest, build Vite, formatage, Clippy et tests Rust. Les tests couvrent le parcours fake, les transitions invalides, SQLite, Unicode, cycle client, échec de lancement, arrêt refusé, intentions bornées et édition line-aware.
+`pnpm verify` exécute typecheck, lint, Vitest, build Vite, formatage, Clippy et tous les tests Rust.
 
-Les tests fake ne prouvent ni OpenWoW, ni AzerothCore, ni MariaDB, ni Ollama, ni le gameplay réel.
+Le lanceur actuel teste la sélection des données possédées, le déclenchement de l'installation, le rendu d'un second lancement déjà démarré, la validation minimale du dossier `Data`, les pins et ports de la composition Docker, le vecteur SRP6 du compte local et la frontière de commandes système.
 
+Ces tests utilisent des effets factices. Ils ne prouvent ni le build Docker complet, ni l'extraction depuis une copie réelle, ni la connexion OpenWoW, ni les bots en jeu. Ces éléments exigent un smoke test manuel documenté séparément.
