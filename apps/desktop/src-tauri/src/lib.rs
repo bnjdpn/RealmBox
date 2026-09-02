@@ -9,7 +9,8 @@ use std::{
 
 use ai::AiCapability;
 use launcher::{
-    LauncherPhase, LauncherProgress, LauncherService, LauncherStatus, SystemCommandRunner,
+    ClientChoice, LauncherPhase, LauncherProgress, LauncherService, LauncherStatus,
+    SystemCommandRunner,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -107,6 +108,7 @@ async fn install_realm(
     app: AppHandle,
     state: State<'_, AppState>,
     game_data_path: String,
+    client_choice: ClientChoice,
     bots_enabled: bool,
     ai_enabled: bool,
     ai_model: Option<String>,
@@ -119,6 +121,7 @@ async fn install_realm(
             .map_err(|_| "état du lanceur indisponible".to_string())?
             .install(
                 game_data_path.as_ref(),
+                client_choice,
                 bots_enabled,
                 ai_enabled,
                 ai_model,

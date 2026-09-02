@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AiCapability, LauncherProgress, LauncherStatus } from "./types";
+import type { AiCapability, ClientChoice, LauncherProgress, LauncherStatus } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -20,12 +20,15 @@ function browserStatus(): LauncherStatus {
     gameDataPath: null,
     accountName: null,
     accountPassword: null,
+    clientChoice: "managedOpenWow",
+    originalClientSupported: navigator.userAgent.includes("Windows"),
+    platformLabel: "Aperçu navigateur",
     components: [
       { id: "client", label: "Client de jeu", state: "missing", detail: "À préparer" },
       { id: "database", label: "Sauvegarde du royaume", state: "missing", detail: "À préparer" },
       { id: "server", label: "Monde privé", state: "missing", detail: "À préparer" },
       { id: "bots", label: "Compagnons", state: "missing", detail: "Optionnels" },
-      { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon ce Mac" },
+      { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon cette machine" },
     ],
   };
 }
@@ -59,11 +62,12 @@ export async function inspectAiCapability(): Promise<AiCapability> {
 
 export async function installRealm(
   gameDataPath: string,
+  clientChoice: ClientChoice,
   botsEnabled: boolean,
   aiEnabled: boolean,
   aiModel: string | null,
 ): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("install_realm", { gameDataPath, botsEnabled, aiEnabled, aiModel });
+  return invoke<LauncherStatus>("install_realm", { gameDataPath, clientChoice, botsEnabled, aiEnabled, aiModel });
 }
 
 export async function startRealm(botsEnabled: boolean, aiEnabled: boolean): Promise<LauncherStatus> {

@@ -2,33 +2,40 @@
 
 Mis à jour le 2 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO pour poursuivre et faire essayer l'installation sur une copie utilisateur ; NO-GO pour affirmer que le parcours réel complet est validé ou distribuer une release.**
+Décision actuelle : **GO pour fournir au lanceur un dossier `Data` 3.3.5a légitime et terminer le parcours sur ce Mac ; GO code pour préparer un essai Windows x64 ; NO-GO pour affirmer que le jeu complet ou une release distribuable sont déjà validés.**
 
 | Fonction | État | Preuve actuelle |
 |---|---|---|
-| Lanceur inspiré de l'ère Wrath | implémenté | composition calée sur le launcher 3.3.5a fourni ; illustration fantasy originale, aucune ressource Blizzard ; QA Playwright à 1200 px |
-| Premier lancement | implémenté, non exécuté de bout en bout | commandes Tauri réelles, tests Rust des frontières et tests UI ; aucune copie 3.3.5a disponible sur la machine de développement |
-| Client OpenWoW | artefact vérifié séparément | release officielle 0.1.2 macOS arm64, SHA-256 `832cb82fd853417ec64d8fd1a84cb8c6a91a57399fd4b87fb2e810a35b03ed18`, signature ad hoc valide |
-| Serveur AzerothCore Playerbots | source épinglée, build installateur non exécuté | fork `47960183...`, module `2f7d9f77...`; un ancien spike natif compilait, ce qui ne prouve pas le build Docker actuel |
+| Lanceur inspiré de l'ère Wrath | implémenté | composition calée sur le launcher 3.3.5a fourni ; illustration fantasy originale, aucune ressource Blizzard ; QA Playwright à 1200 px avec le sélecteur de client |
+| Premier lancement | exécuté par composants jusqu'à la frontière des données | OpenWoW réel, quatre images serveur, import SQL, Playerbots et authserver ont été qualifiés ; aucune copie 3.3.5a compatible n'est présente sur ce Mac, donc extracteurs, worldserver complet et connexion en jeu n'ont pas pu être exécutés |
+| Client OpenWoW géré | artefacts vérifiés, exécution macOS qualifiée jusqu'aux MPQ | release officielle 0.1.2 ; macOS arm64 SHA-256 `832cb82f…`, signature ad hoc valide et processus réel lancé avec `--game-data` ; arrêt propre et erreurs explicites sur les MPQ absents ; Windows x64 SHA-256 `12e3b92e…`, exécution Windows non faite |
+| Client original Windows | implémenté, non exécuté sur Windows | vérification de `Wow.exe`, sauvegarde durable du `realmlist.wtf`, configuration loopback, lancement dans le dossier joueur et supervision dédiée ; test de régression des fichiers sur macOS avec effets locaux |
+| Serveur AzerothCore Playerbots | images Docker arm64 construites et binaires exécutés | fork `47960183...`, module `2f7d9f77...` ; `authserver` et `worldserver --version` confirment le commit ; quatre images locales produites ; worldserver atteint ensuite la frontière attendue `Failed to find map files for starting areas` |
+| Images précompilées pour les joueurs | workflow présent, publication absente | CI manuelle x64/ARM64, commits épinglés, publication GHCR optionnelle et correctif vérifié localement ; aucun digest RealmBox n'existe encore, le prototype conserve donc honnêtement son build source |
 | Données serveur | extraction locale implémentée, non exécutée | volume Docker géré ; `Data` utilisateur monté en lecture seule ; aucun téléchargement de données extraites |
-| MySQL | orchestration implémentée, non exécutée dans ce parcours | image multiarchitecture verrouillée par digest ; port `127.0.0.1:3307` |
+| MySQL | import réel réussi dans un smoke isolé | image multiarchitecture verrouillée par digest ; aucun port hôte publié ; 22 tables auth, 111 characters, 315 world et 30 Playerbots ; les volumes de smoke ont été supprimés après preuve |
 | Compte joueur local | implémenté, non testé contre une base réelle | calcul SRP6 aligné sur la source épinglée et vecteur de régression ; création idempotente `REALMBOX / REALMBOX` |
-| Playerbots à la demande | configuration implémentée | 50 bots quand activé, zéro et autologin coupé sinon ; comportement en jeu non testé |
-| Conseil CanIRun | API réelle intégrée | requête limitée au CPU, aux cœurs et à la RAM ; allowlist et budget RealmBox testés ; sur le Mac de développement, `qwen3:8b` Q4 est classé confortable, note S, estimation 77 tok/s |
-| Dialogues IA locaux | installateur et cycle de vie implémentés, parcours complet non exécuté | `mod-ollama-chat` au commit `a9d14b0...` ; Ollama 0.33.2 vérifié par SHA-256/signature puis démarré réellement sur `127.0.0.1:11435`, endpoint `/api/version` lu et cloud confirmé coupé ; modèle non téléchargé et dialogue en jeu non testé |
+| Playerbots à la demande | build et base réels validés, comportement en jeu non testé | 50 bots quand activé, zéro et autologin coupé sinon ; configuration complète upstream conservée ; base créée avec 30 tables et 1 908 textes ; observation des bots impossible sans données de monde |
+| Conseil CanIRun | API réelle intégrée | inspection CPU/cœurs/RAM dédiée macOS et Windows ; requête limitée à ces informations, allowlist et budget RealmBox testés ; sur le Mac de développement, `qwen3:8b` Q4 est classé confortable, note S, estimation 77 tok/s |
+| Dialogues IA locaux | installateur et cycle de vie macOS/Windows implémentés, parcours complet non exécuté | `mod-ollama-chat` au commit `a9d14b0...` ; archives Ollama 0.33.2 macOS/Windows épinglées ; exécution réelle prouvée seulement sur macOS, modèle non téléchargé et dialogue en jeu non testé |
 | Second lancement automatique | implémenté et testé avec effets factices | état persisté → base → extraction idempotente → migrations → serveurs → client ; aucune preuve réelle complète |
 | Arrêt | implémenté | bouton explicite et supervision du PID OpenWoW ; client → services Docker → Ollama, avec tentative de tous les nettoyages même si l'un échoue ; transition automatique testée avec effets factices, pas de smoke complet réel |
-| Bundle Tauri actuel | buildé et lancé | `RealmBox.app` arm64, addon embarqué, signature ad hoc complète vérifiée ; la fenêtre native a reçu en direct la recommandation CanIRun `qwen3:8b` ; exécutable SHA-256 `9739c1525050405b159548e9217afede8947cdfed8f092e1bf0ecc6bbdc5bfee` ; pas de notarisation |
-| Windows / Mac Intel | non commencé pour ce parcours | aucune exécution |
+| Vérification locale courante | réussie | `pnpm verify` : typecheck, lint, 5 tests UI, build web, clippy strict et 33 tests Rust ; le correctif CI des images s'applique proprement au commit serveur épinglé |
+| Bundle Tauri macOS courant | buildé et lancé visiblement | `RealmBox.app` arm64 resigné ad hoc puis vérifié, exécutable SHA-256 `9730b50b979b6cb8c8bf1de78f188efdff1801ca27f0ff38d1f95ab6eb17469f` ; processus du bundle observé ; pas de notarisation |
+| Windows x64 | code implémenté, exécution absente | vérification croisée du launcher atteint le build de ressources Tauri puis bloque sur `llvm-rc` absent du Mac ; la CI Windows existe mais aucun résultat courant n'a été lu |
+| Mac Intel | non pris en charge par l'installateur géré | la release OpenWoW 0.1.2 ne publie pas d'artefact macOS x86-64 |
 | Signature de distribution / notarisation | bloqué | certificats absents |
 
 ## Ce qui manque pour déclarer le parcours fonctionnel
 
-- sélectionner une copie utilisateur 3.3.5a valide ;
-- laisser le build et les extracteurs terminer ;
+- fournir à RealmBox une copie utilisateur 3.3.5a valide, absente de ce Mac ;
+- laisser les extracteurs locaux terminer depuis cette copie ;
 - relancer RealmBox et constater les ports 3724/8085, l'ouverture du client et la connexion avec le compte local ;
 - créer un personnage, entrer dans le monde et observer les Playerbots activés/désactivés ;
 - avec l'option IA, laisser télécharger le modèle recommandé puis observer une réponse de `mod-ollama-chat` tout en contrôlant la mémoire et la latence ;
 - vérifier l'arrêt puis une nouvelle reprise après redémarrage de la machine.
+- répéter le parcours sur Windows 11 avec OpenWoW puis avec `Wow.exe`, et vérifier la sauvegarde ainsi que la récupération manuelle du `realmlist.wtf` ;
+- exécuter et relire la CI Windows/NSIS sur un commit publié.
+- publier les quatre images serveur multiarchitecture après audit des notices, relever leurs digests et faire consommer ces digests par le lanceur joueur afin de supprimer le build C++ du premier lancement.
 
 Les tests automatisés, le build d'une dépendance ou l'ouverture de la fenêtre ne remplacent pas cette preuve réelle.

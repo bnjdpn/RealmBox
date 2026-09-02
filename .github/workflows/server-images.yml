@@ -1,0 +1,110 @@
+name: Images serveur RealmBox
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publier les images par architecture dans GHCR
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SERVER_COMMIT: 47960183bb03b83e8943eb2f0f39c16df9710c9d
+  PLAYERBOTS_COMMIT: 2f7d9f774987d0157c6a0d0cc08c40bec3db3945
+  OLLAMA_CHAT_COMMIT: a9d14b0b8955be136e657ac168dd255f5281a535
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            suffix: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            suffix: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/azerothcore-wotlk
+          ref: ${{ env.SERVER_COMMIT }}
+          path: upstream/server
+      - uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: ${{ env.PLAYERBOTS_COMMIT }}
+          path: upstream/server/modules/mod-playerbots
+      - uses: actions/checkout@v4
+        with:
+          repository: DustinHendrickson/mod-ollama-chat
+          ref: ${{ env.OLLAMA_CHAT_COMMIT }}
+          path: upstream/server/modules/mod-ollama-chat
+      - name: Appliquer le correctif de build borné
+        run: node scripts/prepare-server-dockerfile.mjs upstream/server/apps/docker/Dockerfile
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: inputs.publish
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construire les quatre runtimes depuis les commits épinglés
+        shell: bash
+        working-directory: upstream/server
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          PLATFORM: ${{ matrix.platform }}
+          SUFFIX: ${{ matrix.suffix }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          output=--load
+          if [[ "$PUBLISH" == "true" ]]; then output=--push; fi
+          registry_root="ghcr.io/${REPOSITORY,,}"
+          for target in authserver worldserver db-import tools; do
+            docker buildx build \
+              --platform "$PLATFORM" \
+              --target "$target" \
+              --build-arg REALMBOX_BUILD_JOBS=4 \
+              --cache-from "type=gha,scope=server-$SUFFIX" \
+              --cache-to "type=gha,mode=max,scope=server-$SUFFIX" \
+              --tag "$registry_root/server-$target:$SERVER_COMMIT-$SUFFIX" \
+              "$output" \
+              --file apps/docker/Dockerfile .
+          done
+
+  manifest:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Créer les manifestes multiarchitecture immuables
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          registry_root="ghcr.io/${REPOSITORY,,}"
+          for target in authserver worldserver db-import tools; do
+            destination="$registry_root/server-$target:$SERVER_COMMIT"
+            docker buildx imagetools create \
+              --tag "$destination" \
+              "$registry_root/server-$target:$SERVER_COMMIT-linux-amd64" \
+              "$registry_root/server-$target:$SERVER_COMMIT-linux-arm64"
+            docker buildx imagetools inspect "$destination"
+          done

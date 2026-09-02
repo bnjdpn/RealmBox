@@ -16,12 +16,15 @@ const missing: LauncherStatus = {
   gameDataPath: null,
   accountName: null,
   accountPassword: null,
+  clientChoice: "managedOpenWow",
+  originalClientSupported: true,
+  platformLabel: "Windows x64",
   components: [
     { id: "client", label: "Client de jeu", state: "missing", detail: "À préparer" },
     { id: "database", label: "Sauvegarde du royaume", state: "missing", detail: "À préparer" },
     { id: "server", label: "Monde privé", state: "missing", detail: "À préparer" },
     { id: "bots", label: "Compagnons", state: "missing", detail: "Optionnels" },
-    { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon ce Mac" },
+    { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon cette machine" },
   ],
 };
 
@@ -94,8 +97,26 @@ describe("RealmBox launcher", () => {
     expect(install).toBeEnabled();
 
     await user.click(install);
-    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", true, true, "qwen3:8b");
+    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, true, "qwen3:8b");
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
+  it("persists the player-provided Windows client choice", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: /données de jeu requises/i });
+    await user.click(screen.getByRole("radio", { name: /mon client original/i }));
+    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+    await user.click(screen.getByRole("button", { name: /installer/i }));
+
+    expect(runtime.installRealm).toHaveBeenCalledWith(
+      "/Jeux/Wrath",
+      "originalWindows",
+      true,
+      true,
+      "qwen3:8b",
+    );
   });
 
   it("keeps local dialogue disabled when CanIRun finds no comfortable model", async () => {

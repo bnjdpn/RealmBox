@@ -9,12 +9,14 @@ branch = "main"
 source_version = "0.1.2"
 artifact_url_macos_arm64 = "https://github.com/rkabachenko/OpenWow-snapshot/releases/download/v0.1.2/OpenWoW-0.1.2-macos-arm64.zip"
 artifact_sha256_macos_arm64 = "832cb82fd853417ec64d8fd1a84cb8c6a91a57399fd4b87fb2e810a35b03ed18"
+artifact_url_windows_x86_64 = "https://github.com/rkabachenko/OpenWow-snapshot/releases/download/v0.1.2/OpenWoW-0.1.2-windows-x64.zip"
+artifact_sha256_windows_x86_64 = "12e3b92eb49794cf69e7c39426030809387534b6257a49fcfb6d1ac953de2f0e"
 license = "AGPL-3.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 architectures_claimed_upstream = ["arm64", "x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; binary redistribution needs complete notice review"
-test_status = "official macos-arm64 0.1.2 asset independently downloaded, sha256 verified and ad-hoc code signature verified; real gameplay not tested"
+test_status = "official macos-arm64 and windows-x86_64 0.1.2 assets independently downloaded and sha256 verified; macOS ad-hoc code signature verified and process launched with --game-data until the expected missing-MPQ boundary; Windows binary and real gameplay not run"
 
 [[component]]
 name = "azerothcore-playerbots-fork"
@@ -25,7 +27,7 @@ license = "GPL-2.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; runtime dependency notices unresolved"
-test_status = "macos-arm64 build passed with explicit MySQL Client 26.7 and GNU Readline; worldserver sha256 51c6137ddb027b663418c60c59b19149f68fb796fc35ffb9ee3b0f0c5682e7ae; runtime not started"
+test_status = "linux-arm64 Docker build passed on macOS for authserver, worldserver, db-import and tools; both server binaries report pinned revision 47960183; authserver listened on 127.0.0.1:3724; worldserver reached the expected missing-map boundary"
 
 [[component]]
 name = "mod-playerbots"
@@ -36,7 +38,7 @@ license = "GPL-2.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; runtime dependency notices unresolved"
-test_status = "module compiled into macos-arm64 worldserver; behavior not tested"
+test_status = "module compiled statically into linux-arm64 worldserver; playerbots database populated with 30 tables and 1908 text rows; in-game bot behavior not tested because compatible game data is absent"
 
 [[component]]
 name = "mod-ollama-chat"
@@ -55,6 +57,8 @@ repository = "https://github.com/ollama/ollama"
 source_version = "0.33.2"
 artifact_url_macos_universal = "https://github.com/ollama/ollama/releases/download/v0.33.2/ollama-darwin.tgz"
 artifact_sha256_macos_universal = "5751e296a2cd545939bdd51b700de0c20d319f0e723c9d7f48bebb5ab0b731d4"
+artifact_url_windows_x86_64 = "https://github.com/ollama/ollama/releases/download/v0.33.2/ollama-windows-amd64.zip"
+artifact_sha256_windows_x86_64 = "2439cbea65310b1aadf7d8fc41d7faf5d033f920d42e00a476c58bf9bff6950e"
 license = "MIT"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
@@ -77,6 +81,6 @@ repository = "https://hub.docker.com/_/mysql"
 source_version = "8.4.11 via pinned multiarch manifest"
 image = "mysql@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb"
 license = "GPL-2.0-only"
-platforms = ["macos-arm64"]
+platforms = ["macos-arm64", "windows-x86_64"]
 redistribution_status = "pulled by Docker during local installation; notices require review before binary distribution"
-test_status = "manifest inspected for linux/arm64; RealmBox compose path not yet run against a real installation"
+test_status = "pinned linux-arm64 manifest pulled; isolated RealmBox compose reached healthy state with no host database port and imported 22 auth, 111 characters, 315 world and 30 playerbots tables; smoke volumes removed afterward"

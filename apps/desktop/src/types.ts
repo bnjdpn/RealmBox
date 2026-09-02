@@ -9,6 +9,7 @@ export type LauncherPhase =
   | "error";
 
 export type ComponentState = "missing" | "installing" | "ready" | "running" | "stopped" | "error";
+export type ClientChoice = "managedOpenWow" | "originalWindows";
 
 export interface LauncherComponent {
   id: "client" | "database" | "server" | "bots" | "ai";
@@ -29,6 +30,9 @@ export interface LauncherStatus {
   gameDataPath: string | null;
   accountName: string | null;
   accountPassword: string | null;
+  clientChoice: ClientChoice;
+  originalClientSupported: boolean;
+  platformLabel: string;
   components: LauncherComponent[];
 }
 

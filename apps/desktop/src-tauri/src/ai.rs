@@ -86,6 +86,13 @@ struct GpuRequest<'a> {
     name: &'a str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalHardware {
+    device_name: String,
+    logical_cores: u32,
+    memory_bytes: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CompatibilityResponse {
@@ -118,21 +125,12 @@ pub fn inspect_ai_capability<R: CommandRunner>(runner: &R) -> AiCapability {
 }
 
 fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapability, String> {
-    let device_name = runner.run(
-        "sysctl",
-        &["-n".into(), "machdep.cpu.brand_string".into()],
-        None,
-    )?;
-    let cores = parse_u32(
-        &runner.run("sysctl", &["-n".into(), "hw.ncpu".into()], None)?,
-        "cœurs",
-    )?;
-    let memory_bytes = runner
-        .run("sysctl", &["-n".into(), "hw.memsize".into()], None)?
-        .parse::<u64>()
-        .map_err(|_| "mémoire système illisible".to_string())?;
+    let hardware = inspect_local_hardware(runner)?;
+    let device_name = hardware.device_name;
+    let cores = hardware.logical_cores;
+    let memory_bytes = hardware.memory_bytes;
     let ram_gb = (memory_bytes / 1024 / 1024 / 1024) as u32;
-    if !device_name.starts_with("Apple ") || ram_gb < 16 {
+    if ram_gb < 16 {
         return Ok(AiCapability {
             state: AiCapabilityState::Unavailable,
             device_name: Some(device_name),
@@ -142,7 +140,7 @@ fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapabi
             ollama_model: None,
             grade: None,
             estimated_tokens_per_second: None,
-            detail: "L’IA de dialogue reste désactivée : cette première version exige Apple Silicon et au moins 16 Go de mémoire.".into(),
+            detail: "L’IA de dialogue reste désactivée : RealmBox réserve cette option aux machines disposant d’au moins 16 Go de mémoire.".into(),
             source_url: "https://www.canirun.ai/",
         });
     }
@@ -236,6 +234,69 @@ fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapabi
     })
 }
 
+fn inspect_local_hardware<R: CommandRunner>(runner: &R) -> Result<LocalHardware, String> {
+    #[cfg(target_os = "macos")]
+    return Ok(LocalHardware {
+        device_name: runner.run(
+            "sysctl",
+            &["-n".into(), "machdep.cpu.brand_string".into()],
+            None,
+        )?,
+        logical_cores: parse_u32(
+            &runner.run("sysctl", &["-n".into(), "hw.ncpu".into()], None)?,
+            "cœurs",
+        )?,
+        memory_bytes: runner
+            .run("sysctl", &["-n".into(), "hw.memsize".into()], None)?
+            .parse::<u64>()
+            .map_err(|_| "mémoire système illisible".to_string())?,
+    });
+
+    #[cfg(windows)]
+    return Ok(LocalHardware {
+        device_name: runner.run(
+            "powershell.exe",
+            &[
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)"
+                    .into(),
+            ],
+            None,
+        )?,
+        logical_cores: parse_u32(
+            &runner.run(
+                "powershell.exe",
+                &[
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    "(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors".into(),
+                ],
+                None,
+            )?,
+            "cœurs",
+        )?,
+        memory_bytes: runner
+            .run(
+                "powershell.exe",
+                &[
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory".into(),
+                ],
+                None,
+            )?
+            .parse::<u64>()
+            .map_err(|_| "mémoire système illisible".to_string())?,
+    });
+
+    #[allow(unreachable_code)]
+    Err("inspection matérielle non prise en charge sur cette plateforme".into())
+}
+
 pub fn is_allowed_ollama_model(model: &str) -> bool {
     AI_CANDIDATES
         .iter()
@@ -304,10 +365,23 @@ mod tests {
             unreachable!()
         }
 
+        fn run_long_with_env(
+            &self,
+            _program: &Path,
+            _args: &[OsString],
+            _environment: &[(OsString, OsString)],
+            _current_dir: Option<&Path>,
+            _log_path: &Path,
+        ) -> Result<(), String> {
+            unreachable!()
+        }
+
         fn spawn(
             &self,
             _program: &Path,
             _args: &[OsString],
+            _environment: &[(OsString, OsString)],
+            _current_dir: Option<&Path>,
             _log_path: &Path,
         ) -> Result<u32, String> {
             unreachable!()

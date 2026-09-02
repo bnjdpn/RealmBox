@@ -9,7 +9,7 @@ import {
   subscribeLauncherProgress,
   subscribeLauncherStatus,
 } from "./runtime";
-import type { AiCapability, LauncherComponent, LauncherStatus } from "./types";
+import type { AiCapability, ClientChoice, LauncherComponent, LauncherStatus } from "./types";
 
 const initialStatus: LauncherStatus = {
   phase: "checking",
@@ -23,6 +23,9 @@ const initialStatus: LauncherStatus = {
   gameDataPath: null,
   accountName: null,
   accountPassword: null,
+  clientChoice: "managedOpenWow",
+  originalClientSupported: false,
+  platformLabel: "Détection en cours",
   components: [],
 };
 
@@ -49,8 +52,13 @@ function setupComponent(
   botsEnabled: boolean,
   aiEnabled: boolean,
   aiCapability: AiCapability,
+  clientChoice: ClientChoice,
 ): LauncherComponent {
   if (status.phase !== "needsGameData") return component;
+  if (component.id === "client") return {
+    ...component,
+    detail: clientChoice === "managedOpenWow" ? "OpenWoW sera téléchargé et vérifié" : "Le client du dossier choisi sera utilisé",
+  };
   if (component.id === "bots") return {
     ...component,
     state: botsEnabled ? "missing" : "stopped",
@@ -68,6 +76,7 @@ export default function App() {
   const [status, setStatus] = useState(initialStatus);
   const [gameDataPath, setGameDataPath] = useState<string | null>(null);
   const [botsEnabled, setBotsEnabled] = useState(true);
+  const [clientChoice, setClientChoice] = useState<ClientChoice>("managedOpenWow");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiCapability, setAiCapability] = useState<AiCapability>(checkingAi);
   const [requestPending, setRequestPending] = useState(false);
@@ -90,6 +99,7 @@ export default function App() {
       setStatus(next);
       setBotsEnabled(next.botsEnabled);
       setAiEnabled(next.aiEnabled);
+      setClientChoice(next.clientChoice);
     }).then((stopListening) => { unlistenStatus = stopListening; });
 
     bootstrapRequest.current ??= bootstrapLauncher();
@@ -101,6 +111,7 @@ export default function App() {
         setGameDataPath(next.gameDataPath);
         setBotsEnabled(next.botsEnabled);
         setAiEnabled(next.aiEnabled);
+        setClientChoice(next.clientChoice);
         if (next.aiModel) {
           setAiCapability({
             ...checkingAi,
@@ -146,7 +157,7 @@ export default function App() {
     setRequestPending(true);
     setStatus((current) => ({ ...current, phase: "installing", message: "Préparation de l’installation", detail: null, progress: 1 }));
     try {
-      setStatus(await installRealm(gameDataPath, botsEnabled, aiEnabled, aiCapability.ollamaModel));
+      setStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, aiEnabled, aiCapability.ollamaModel));
     } catch (error) {
       setStatus((current) => ({ ...current, phase: "error", message: "L’installation s’est arrêtée", detail: String(error) }));
     } finally {
@@ -191,7 +202,7 @@ export default function App() {
             <div className="hero-caption">
               <p className="section-kicker">CHRONIQUES DU NORD</p>
               <h1>Votre royaume.<br/>Votre aventure.</h1>
-              <p>Un monde 3.3.5a solitaire, peuplé de compagnons, entièrement sur votre Mac.</p>
+              <p>Un monde 3.3.5a solitaire, peuplé de compagnons, entièrement sur votre ordinateur.</p>
             </div>
           </aside>
 
@@ -205,6 +216,17 @@ export default function App() {
             </div>
 
             {status.phase === "needsGameData" && <div className="setup-card">
+              <fieldset className="client-choice">
+                <legend>Client de jeu</legend>
+                <label>
+                  <input type="radio" name="client" value="managedOpenWow" checked={clientChoice === "managedOpenWow"} onChange={() => setClientChoice("managedOpenWow")}/>
+                  <span><strong>OpenWoW géré par RealmBox</strong><small>Recommandé · téléchargé automatiquement et vérifié par SHA-256.</small></span>
+                </label>
+                <label className={!status.originalClientSupported ? "unavailable" : ""}>
+                  <input type="radio" name="client" value="originalWindows" checked={clientChoice === "originalWindows"} disabled={!status.originalClientSupported} onChange={() => setClientChoice("originalWindows")}/>
+                  <span><strong>Mon client original</strong><small>{status.originalClientSupported ? "Windows avancé · Wow.exe reste dans votre dossier ; la configuration de royaume est sauvegardée." : "Disponible uniquement dans la version Windows x64."}</small></span>
+                </label>
+              </fieldset>
               <label>Données de jeu 3.3.5a</label>
               <button className="path-picker" onClick={selectData} disabled={requestPending}>
                 <span>{gameDataPath ?? "Choisir le dossier qui contient Data"}</span><b>PARCOURIR</b>
@@ -240,7 +262,7 @@ export default function App() {
 
             {status.components.length > 0 && <div className="component-list">
               {status.components.map((rawComponent) => {
-                const component = setupComponent(rawComponent, status, botsEnabled, aiEnabled, aiCapability);
+                const component = setupComponent(rawComponent, status, botsEnabled, aiEnabled, aiCapability, clientChoice);
                 return <div className="component" key={component.id}>
                   <span className={`component-rune ${component.state}`} aria-hidden="true"/>
                   <div><strong>{component.label}</strong><small>{component.detail}</small></div>
@@ -285,7 +307,7 @@ export default function App() {
           {isBusy(status) && <button className="launch-button" disabled>VEUILLEZ PATIENTER</button>}
         </footer>
       </div>
-      <p className="launcher-version">RealmBox 0.1.0 · OpenWoW 0.1.2 · serveur local uniquement</p>
+      <p className="launcher-version">RealmBox 0.1.0 · {status.platformLabel} · serveur local uniquement</p>
     </main>
   );
 }

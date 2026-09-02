@@ -16,25 +16,83 @@ use sha2::{Digest, Sha256};
 
 use crate::ai::{self, AiCapability};
 
-const INSTALL_SCHEMA: u32 = 2;
-const RUNTIME_DIRECTORY: &str = "runtime-v2";
-const OPENWOW_URL: &str = "https://github.com/rkabachenko/OpenWow-snapshot/releases/download/v0.1.2/OpenWoW-0.1.2-macos-arm64.zip";
-const OPENWOW_SHA256: &str = "832cb82fd853417ec64d8fd1a84cb8c6a91a57399fd4b87fb2e810a35b03ed18";
+const INSTALL_SCHEMA: u32 = 3;
+const RUNTIME_DIRECTORY: &str = "runtime-v3";
 const SERVER_REPOSITORY: &str = "https://github.com/mod-playerbots/azerothcore-wotlk.git";
 const SERVER_COMMIT: &str = "47960183bb03b83e8943eb2f0f39c16df9710c9d";
 const PLAYERBOTS_REPOSITORY: &str = "https://github.com/mod-playerbots/mod-playerbots.git";
 const PLAYERBOTS_COMMIT: &str = "2f7d9f774987d0157c6a0d0cc08c40bec3db3945";
 const OLLAMA_CHAT_REPOSITORY: &str = "https://github.com/DustinHendrickson/mod-ollama-chat.git";
 const OLLAMA_CHAT_COMMIT: &str = "a9d14b0b8955be136e657ac168dd255f5281a535";
-const OLLAMA_URL: &str =
-    "https://github.com/ollama/ollama/releases/download/v0.33.2/ollama-darwin.tgz";
-const OLLAMA_SHA256: &str = "5751e296a2cd545939bdd51b700de0c20d319f0e723c9d7f48bebb5ab0b731d4";
 const OLLAMA_PORT: u16 = 11435;
 const MYSQL_IMAGE: &str =
     "mysql@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
+const DEFAULT_DOCKER_BUILD_JOBS: usize = 2;
 const PLAYER_ACCOUNT_NAME: &str = "REALMBOX";
 const PLAYER_ACCOUNT_PASSWORD: &str = "REALMBOX";
 const SRP6_MODULUS: &str = "894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClientChoice {
+    #[default]
+    ManagedOpenWow,
+    OriginalWindows,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PlatformAssets {
+    label: &'static str,
+    openwow_url: &'static str,
+    openwow_archive: &'static str,
+    openwow_sha256: &'static str,
+    openwow_executable: &'static str,
+    ollama_url: &'static str,
+    ollama_archive: &'static str,
+    ollama_sha256: &'static str,
+    ollama_executable: &'static str,
+}
+
+fn platform_assets() -> Result<PlatformAssets, String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return Ok(PlatformAssets {
+        label: "macOS Apple Silicon",
+        openwow_url: "https://github.com/rkabachenko/OpenWow-snapshot/releases/download/v0.1.2/OpenWoW-0.1.2-macos-arm64.zip",
+        openwow_archive: "OpenWoW-0.1.2-macos-arm64.zip",
+        openwow_sha256: "832cb82fd853417ec64d8fd1a84cb8c6a91a57399fd4b87fb2e810a35b03ed18",
+        openwow_executable: "OpenWoW.app/Contents/MacOS/openwow-client",
+        ollama_url: "https://github.com/ollama/ollama/releases/download/v0.33.2/ollama-darwin.tgz",
+        ollama_archive: "ollama-darwin-v0.33.2.tgz",
+        ollama_sha256: "5751e296a2cd545939bdd51b700de0c20d319f0e723c9d7f48bebb5ab0b731d4",
+        ollama_executable: "ollama",
+    });
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return Ok(PlatformAssets {
+        label: "Windows x64",
+        openwow_url: "https://github.com/rkabachenko/OpenWow-snapshot/releases/download/v0.1.2/OpenWoW-0.1.2-windows-x64.zip",
+        openwow_archive: "OpenWoW-0.1.2-windows-x64.zip",
+        openwow_sha256: "12e3b92eb49794cf69e7c39426030809387534b6257a49fcfb6d1ac953de2f0e",
+        openwow_executable: "openwow-client.exe",
+        ollama_url: "https://github.com/ollama/ollama/releases/download/v0.33.2/ollama-windows-amd64.zip",
+        ollama_archive: "ollama-windows-amd64-v0.33.2.zip",
+        ollama_sha256: "2439cbea65310b1aadf7d8fc41d7faf5d033f920d42e00a476c58bf9bff6950e",
+        ollama_executable: "ollama.exe",
+    });
+
+    #[allow(unreachable_code)]
+    Err("RealmBox prend actuellement en charge macOS Apple Silicon et Windows x64".into())
+}
+
+fn original_client_supported() -> bool {
+    cfg!(all(target_os = "windows", target_arch = "x86_64"))
+}
+
+fn platform_label() -> String {
+    platform_assets()
+        .map(|assets| assets.label.to_owned())
+        .unwrap_or_else(|_| format!("{} {}", std::env::consts::OS, std::env::consts::ARCH))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +139,9 @@ pub struct LauncherStatus {
     pub game_data_path: Option<String>,
     pub account_name: Option<&'static str>,
     pub account_password: Option<&'static str>,
+    pub client_choice: ClientChoice,
+    pub original_client_supported: bool,
+    pub platform_label: String,
     pub components: Vec<LauncherComponent>,
 }
 
@@ -99,13 +160,14 @@ struct InstallationRecord {
     schema_version: u32,
     game_data_root: PathBuf,
     runtime_root: PathBuf,
-    openwow_executable: PathBuf,
+    client_executable: PathBuf,
+    client_choice: ClientChoice,
     compose_file: PathBuf,
     bots_enabled: bool,
     ai_enabled: bool,
     ai_model: Option<String>,
     ollama_executable: Option<PathBuf>,
-    openwow_sha256: String,
+    client_sha256: Option<String>,
     ollama_sha256: Option<String>,
     server_commit: String,
     playerbots_commit: String,
@@ -126,7 +188,22 @@ pub trait CommandRunner: Send + Sync + 'static {
         current_dir: Option<&Path>,
         log_path: &Path,
     ) -> Result<(), String>;
-    fn spawn(&self, program: &Path, args: &[OsString], log_path: &Path) -> Result<u32, String>;
+    fn run_long_with_env(
+        &self,
+        program: &Path,
+        args: &[OsString],
+        environment: &[(OsString, OsString)],
+        current_dir: Option<&Path>,
+        log_path: &Path,
+    ) -> Result<(), String>;
+    fn spawn(
+        &self,
+        program: &Path,
+        args: &[OsString],
+        environment: &[(OsString, OsString)],
+        current_dir: Option<&Path>,
+        log_path: &Path,
+    ) -> Result<u32, String>;
     fn terminate(&self, process_id: u32) -> Result<(), String>;
     fn is_process_running(&self, process_id: u32) -> Result<bool, String>;
     fn wait_tcp(&self, port: u16, timeout: Duration) -> Result<(), String>;
@@ -193,7 +270,50 @@ impl CommandRunner for SystemCommandRunner {
         }
     }
 
-    fn spawn(&self, program: &Path, args: &[OsString], log_path: &Path) -> Result<u32, String> {
+    fn run_long_with_env(
+        &self,
+        program: &Path,
+        args: &[OsString],
+        environment: &[(OsString, OsString)],
+        current_dir: Option<&Path>,
+        log_path: &Path,
+    ) -> Result<(), String> {
+        if let Some(parent) = log_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let log = File::create(log_path).map_err(|error| error.to_string())?;
+        let errors = log.try_clone().map_err(|error| error.to_string())?;
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .envs(environment.iter().cloned())
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(errors));
+        if let Some(directory) = current_dir {
+            command.current_dir(directory);
+        }
+        let status = command
+            .status()
+            .map_err(|error| format!("impossible de lancer {}: {error}", program.display()))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} a échoué ({status}); voir {}",
+                program.display(),
+                log_path.display()
+            ))
+        }
+    }
+
+    fn spawn(
+        &self,
+        program: &Path,
+        args: &[OsString],
+        environment: &[(OsString, OsString)],
+        current_dir: Option<&Path>,
+        log_path: &Path,
+    ) -> Result<u32, String> {
         if let Some(parent) = log_path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
@@ -201,6 +321,8 @@ impl CommandRunner for SystemCommandRunner {
         let errors = log.try_clone().map_err(|error| error.to_string())?;
         let child = Command::new(program)
             .args(args)
+            .envs(environment.iter().cloned())
+            .current_dir(current_dir.unwrap_or_else(|| Path::new(".")))
             .stdout(Stdio::from(log))
             .stderr(Stdio::from(errors))
             .spawn()
@@ -209,27 +331,67 @@ impl CommandRunner for SystemCommandRunner {
     }
 
     fn terminate(&self, process_id: u32) -> Result<(), String> {
-        self.run(
-            "kill",
-            &[
-                OsString::from("-TERM"),
-                OsString::from(process_id.to_string()),
-            ],
-            None,
-        )
-        .map(|_| ())
+        #[cfg(unix)]
+        return self
+            .run(
+                "kill",
+                &[
+                    OsString::from("-TERM"),
+                    OsString::from(process_id.to_string()),
+                ],
+                None,
+            )
+            .map(|_| ());
+
+        #[cfg(windows)]
+        return self
+            .run(
+                "taskkill",
+                &[
+                    OsString::from("/PID"),
+                    OsString::from(process_id.to_string()),
+                    OsString::from("/T"),
+                ],
+                None,
+            )
+            .map(|_| ());
+
+        #[allow(unreachable_code)]
+        Err("arrêt de processus non pris en charge sur cette plateforme".into())
     }
 
     fn is_process_running(&self, process_id: u32) -> Result<bool, String> {
-        let status = Command::new("kill")
-            .args(["-0", &process_id.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|error| {
-                format!("impossible d’inspecter le processus {process_id}: {error}")
-            })?;
-        Ok(status.success())
+        #[cfg(unix)]
+        {
+            let status = Command::new("kill")
+                .args(["-0", &process_id.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| {
+                    format!("impossible d’inspecter le processus {process_id}: {error}")
+                })?;
+            Ok(status.success())
+        }
+
+        #[cfg(windows)]
+        {
+            let output = Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {process_id}"), "/FO", "CSV", "/NH"])
+                .output()
+                .map_err(|error| {
+                    format!("impossible d’inspecter le processus {process_id}: {error}")
+                })?;
+            if !output.status.success() {
+                return Err(format!(
+                    "tasklist a échoué pendant l’inspection du processus {process_id}"
+                ));
+            }
+            let expected = format!("\"{process_id}\"");
+            Ok(String::from_utf8_lossy(&output.stdout)
+                .split(',')
+                .any(|field| field.trim() == expected))
+        }
     }
 
     fn wait_tcp(&self, port: u16, timeout: Duration) -> Result<(), String> {
@@ -301,7 +463,7 @@ impl<R: CommandRunner> LauncherService<R> {
     pub fn status(&self) -> LauncherStatus {
         match self.load_record() {
             Ok(Some(record))
-                if record.openwow_executable.is_file()
+                if record.client_executable.is_file()
                     && record.compose_file.is_file()
                     && (!record.ai_enabled
                         || record
@@ -323,11 +485,15 @@ impl<R: CommandRunner> LauncherService<R> {
                 game_data_path: Some(record.game_data_root.display().to_string()),
                 account_name: None,
                 account_password: None,
+                client_choice: record.client_choice,
+                original_client_supported: original_client_supported(),
+                platform_label: platform_label(),
                 components: components(
                     ComponentState::Error,
                     record.bots_enabled,
                     record.ai_enabled,
                     record.ai_model.as_deref(),
+                    record.client_choice,
                 ),
             },
             Ok(None) => missing_status(),
@@ -343,7 +509,16 @@ impl<R: CommandRunner> LauncherService<R> {
                 game_data_path: None,
                 account_name: None,
                 account_password: None,
-                components: components(ComponentState::Error, true, false, None),
+                client_choice: ClientChoice::ManagedOpenWow,
+                original_client_supported: original_client_supported(),
+                platform_label: platform_label(),
+                components: components(
+                    ComponentState::Error,
+                    true,
+                    false,
+                    None,
+                    ClientChoice::ManagedOpenWow,
+                ),
             },
         }
     }
@@ -362,6 +537,7 @@ impl<R: CommandRunner> LauncherService<R> {
     pub fn install<F>(
         &mut self,
         selected_path: &Path,
+        client_choice: ClientChoice,
         bots_enabled: bool,
         ai_enabled: bool,
         ai_model: Option<String>,
@@ -370,8 +546,9 @@ impl<R: CommandRunner> LauncherService<R> {
     where
         F: FnMut(LauncherProgress),
     {
-        if cfg!(not(all(target_os = "macos", target_arch = "aarch64"))) {
-            return Err("ce premier installateur réel est limité à macOS Apple Silicon".into());
+        let platform = platform_assets()?;
+        if client_choice == ClientChoice::OriginalWindows && !original_client_supported() {
+            return Err("le client original fourni par le joueur est pris en charge uniquement sur Windows x64".into());
         }
         if ai_enabled && !bots_enabled {
             return Err("les dialogues IA nécessitent les compagnons Playerbots".into());
@@ -406,8 +583,17 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .map_err(|error| format!("Docker Desktop doit être installé et démarré: {error}"))?;
+        let docker_memory = self
+            .runner
+            .run(
+                "docker",
+                &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
+                None,
+            )
+            .unwrap_or_default();
+        let docker_build_jobs = docker_build_jobs(&docker_memory);
 
-        let staging = self.app_data.join(".installing-v2");
+        let staging = self.app_data.join(".installing-v3");
         if staging.exists() {
             fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
         }
@@ -419,52 +605,52 @@ impl<R: CommandRunner> LauncherService<R> {
                 &mut progress,
                 LauncherPhase::Installing,
                 8,
-                "Téléchargement du client OpenWoW",
-                Some("Version 0.1.2 officielle"),
+                match client_choice {
+                    ClientChoice::ManagedOpenWow => "Téléchargement du client OpenWoW",
+                    ClientChoice::OriginalWindows => "Vérification du client fourni",
+                },
+                match client_choice {
+                    ClientChoice::ManagedOpenWow => Some("Version 0.1.2 officielle"),
+                    ClientChoice::OriginalWindows => Some("Aucun client propriétaire téléchargé"),
+                },
             );
-            let client_archive = staging.join("OpenWoW-0.1.2-macos-arm64.zip");
-            self.runner.run_long(
-                "curl",
-                &[
-                    "-L".into(),
-                    "--fail".into(),
-                    "--show-error".into(),
-                    "--output".into(),
-                    client_archive.as_os_str().into(),
-                    OPENWOW_URL.into(),
-                ],
-                None,
-                &logs.join("openwow-download.log"),
-            )?;
-            verify_sha256(&client_archive, OPENWOW_SHA256)?;
-
-            let client_root = staging.join("client");
-            fs::create_dir_all(&client_root).map_err(|error| error.to_string())?;
-            self.runner.run(
-                "ditto",
-                &[
-                    "-x".into(),
-                    "-k".into(),
-                    client_archive.as_os_str().into(),
-                    client_root.as_os_str().into(),
-                ],
-                None,
-            )?;
-            let openwow_executable = client_root.join("OpenWoW.app/Contents/MacOS/openwow-client");
-            if !openwow_executable.is_file() {
-                return Err("le ZIP OpenWoW vérifié ne contient pas l’exécutable attendu".into());
-            }
-            self.runner.run(
-                "codesign",
-                &[
-                    "--verify".into(),
-                    "--deep".into(),
-                    "--strict".into(),
-                    client_root.join("OpenWoW.app").as_os_str().into(),
-                ],
-                None,
-            )?;
-            fs::remove_file(&client_archive).map_err(|error| error.to_string())?;
+            let (staged_client_executable, client_sha256) = match client_choice {
+                ClientChoice::ManagedOpenWow => {
+                    let client_archive = staging.join(platform.openwow_archive);
+                    self.runner.run_long(
+                        "curl",
+                        &[
+                            "-L".into(),
+                            "--fail".into(),
+                            "--show-error".into(),
+                            "--output".into(),
+                            client_archive.as_os_str().into(),
+                            platform.openwow_url.into(),
+                        ],
+                        None,
+                        &logs.join("openwow-download.log"),
+                    )?;
+                    verify_sha256(&client_archive, platform.openwow_sha256)?;
+                    let client_root = staging.join("client");
+                    extract_zip(&self.runner, &client_archive, &client_root)?;
+                    let executable = client_root.join(platform.openwow_executable);
+                    if !executable.is_file() {
+                        return Err(
+                            "le ZIP OpenWoW vérifié ne contient pas l’exécutable attendu".into(),
+                        );
+                    }
+                    verify_platform_client(&self.runner, &client_root)?;
+                    fs::remove_file(&client_archive).map_err(|error| error.to_string())?;
+                    (executable, Some(platform.openwow_sha256.to_owned()))
+                }
+                ClientChoice::OriginalWindows => {
+                    let executable = game_data_root.join("Wow.exe");
+                    if !executable.is_file() {
+                        return Err("le dossier choisi ne contient pas Wow.exe".into());
+                    }
+                    (executable, None)
+                }
+            };
 
             self.emit(
                 &mut progress,
@@ -505,18 +691,15 @@ impl<R: CommandRunner> LauncherService<R> {
                 )?;
             }
 
-            let uid = self.runner.run("id", &["-u".into()], None)?;
-            let gid = self.runner.run("id", &["-g".into()], None)?;
-            let database_password = self.runner.run(
-                "openssl",
-                &["rand".into(), "-hex".into(), "24".into()],
-                None,
-            )?;
+            write_realmbox_dockerfile(&server_root)?;
+
+            let (uid, gid) = platform_container_ids(&self.runner)?;
+            let database_password = secure_random_hex(24)?;
             write_secret_atomic(
                 &server_root.join(".env"),
                 format!("REALMBOX_DB_PASSWORD={database_password}\n").as_bytes(),
             )?;
-            let compose = compose_file(uid.trim(), gid.trim(), &game_data_root);
+            let compose = compose_file(uid.trim(), gid.trim(), &game_data_root, docker_build_jobs);
             let compose_path = server_root.join("compose.realmbox.yaml");
             write_atomic(&compose_path, compose.as_bytes())?;
             write_playerbots_config(&server_root, bots_enabled)?;
@@ -530,7 +713,7 @@ impl<R: CommandRunner> LauncherService<R> {
                     "Téléchargement du moteur de dialogue",
                     Some("Ollama 0.33.2 · exécution locale"),
                 );
-                let archive = staging.join("ollama-darwin-v0.33.2.tgz");
+                let archive = staging.join(platform.ollama_archive);
                 self.runner.run_long(
                     "curl",
                     &[
@@ -539,42 +722,22 @@ impl<R: CommandRunner> LauncherService<R> {
                         "--show-error".into(),
                         "--output".into(),
                         archive.as_os_str().into(),
-                        OLLAMA_URL.into(),
+                        platform.ollama_url.into(),
                     ],
                     None,
                     &logs.join("ollama-download.log"),
                 )?;
-                verify_sha256(&archive, OLLAMA_SHA256)?;
+                verify_sha256(&archive, platform.ollama_sha256)?;
                 let ai_root = staging.join("ai");
                 fs::create_dir_all(&ai_root).map_err(|error| error.to_string())?;
-                self.runner.run(
-                    "tar",
-                    &[
-                        "-xzf".into(),
-                        archive.as_os_str().into(),
-                        "-C".into(),
-                        ai_root.as_os_str().into(),
-                    ],
-                    None,
-                )?;
-                let executable = ai_root.join("ollama");
-                let runner_executable = ai_root.join("llama-server");
-                if !executable.is_file() || !runner_executable.is_file() {
+                extract_ollama(&self.runner, &archive, &ai_root)?;
+                let executable = ai_root.join(platform.ollama_executable);
+                if !executable.is_file() {
                     return Err(
-                        "l’archive Ollama vérifiée ne contient pas les exécutables attendus".into(),
+                        "l’archive Ollama vérifiée ne contient pas l’exécutable attendu".into(),
                     );
                 }
-                for signed_executable in [&executable, &runner_executable] {
-                    self.runner.run(
-                        "codesign",
-                        &[
-                            "--verify".into(),
-                            "--strict".into(),
-                            signed_executable.as_os_str().into(),
-                        ],
-                        None,
-                    )?;
-                }
+                verify_platform_ollama(&self.runner, &ai_root)?;
                 fs::remove_file(&archive).map_err(|error| error.to_string())?;
                 Some(executable)
             } else {
@@ -582,7 +745,14 @@ impl<R: CommandRunner> LauncherService<R> {
             };
 
             let managed_game = staging.join("game");
-            prepare_managed_game(&game_data_root, &managed_game, &self.addon_source)?;
+            prepare_game_for_client(
+                &self.runner,
+                &game_data_root,
+                &managed_game,
+                &self.addon_source,
+                client_choice,
+                &self.app_data.join("original-client-backup"),
+            )?;
 
             self.emit(
                 &mut progress,
@@ -616,11 +786,13 @@ impl<R: CommandRunner> LauncherService<R> {
             );
             self.runner.run_long(
                 "docker",
-                &compose_args(&compose_path, &["up", "-d", "database"]),
+                &compose_args(
+                    &compose_path,
+                    &["up", "-d", "--wait", "--wait-timeout", "180", "database"],
+                ),
                 Some(&server_root),
                 &logs.join("database-start.log"),
             )?;
-            self.runner.wait_tcp(3307, Duration::from_secs(180))?;
             self.runner.run_long(
                 "docker",
                 &compose_args(&compose_path, &["run", "--rm", "server-data-init"]),
@@ -684,16 +856,22 @@ impl<R: CommandRunner> LauncherService<R> {
             let record = InstallationRecord {
                 schema_version: INSTALL_SCHEMA,
                 game_data_root: game_data_root.clone(),
-                openwow_executable: runtime_root
-                    .join("client/OpenWoW.app/Contents/MacOS/openwow-client"),
+                client_executable: match client_choice {
+                    ClientChoice::ManagedOpenWow => runtime_root
+                        .join("client")
+                        .join(platform.openwow_executable),
+                    ClientChoice::OriginalWindows => staged_client_executable,
+                },
+                client_choice,
                 compose_file: runtime_root.join("server/compose.realmbox.yaml"),
                 runtime_root: runtime_root.clone(),
                 bots_enabled,
                 ai_enabled,
                 ai_model: ai_model.clone(),
-                ollama_executable: ai_enabled.then(|| runtime_root.join("ai/ollama")),
-                openwow_sha256: OPENWOW_SHA256.into(),
-                ollama_sha256: ai_enabled.then(|| OLLAMA_SHA256.into()),
+                ollama_executable: ai_enabled
+                    .then(|| runtime_root.join("ai").join(platform.ollama_executable)),
+                client_sha256,
+                ollama_sha256: ai_enabled.then(|| platform.ollama_sha256.into()),
                 server_commit: SERVER_COMMIT.into(),
                 playerbots_commit: PLAYERBOTS_COMMIT.into(),
                 ollama_chat_commit: ai_enabled.then(|| OLLAMA_CHAT_COMMIT.into()),
@@ -784,11 +962,13 @@ impl<R: CommandRunner> LauncherService<R> {
         );
         self.runner.run_long(
             "docker",
-            &compose_args(&record.compose_file, &["up", "-d", "database"]),
+            &compose_args(
+                &record.compose_file,
+                &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+            ),
             Some(server_root),
             &record.runtime_root.join("logs/start-database.log"),
         )?;
-        self.runner.wait_tcp(3307, Duration::from_secs(120))?;
 
         self.emit(
             &mut progress,
@@ -809,6 +989,12 @@ impl<R: CommandRunner> LauncherService<R> {
             &compose_args(&record.compose_file, &["run", "--rm", "db-import"]),
             Some(server_root),
             &record.runtime_root.join("logs/start-db-import.log"),
+        )?;
+        mark_local_realm_available(
+            &self.runner,
+            &record.compose_file,
+            server_root,
+            &record.runtime_root.join("logs/start-realm.log"),
         )?;
 
         if record.ai_enabled {
@@ -870,12 +1056,26 @@ impl<R: CommandRunner> LauncherService<R> {
             Some("Connexion locale 127.0.0.1"),
         );
         let managed_game = record.runtime_root.join("game");
+        let (client_arguments, client_working_directory, client_log) = match record.client_choice {
+            ClientChoice::ManagedOpenWow => (
+                vec!["--game-data".into(), managed_game.as_os_str().into()],
+                Some(managed_game.as_path()),
+                "openwow.log",
+            ),
+            ClientChoice::OriginalWindows => (
+                Vec::new(),
+                Some(record.game_data_root.as_path()),
+                "original-client.log",
+            ),
+        };
         let process_id = self
             .runner
             .spawn(
-                &record.openwow_executable,
-                &["--game-data".into(), managed_game.as_os_str().into()],
-                &record.runtime_root.join("logs/openwow.log"),
+                &record.client_executable,
+                &client_arguments,
+                &[],
+                client_working_directory,
+                &record.runtime_root.join("logs").join(client_log),
             )
             .inspect_err(|_| {
                 let _ = self.runner.run_long(
@@ -1030,6 +1230,9 @@ impl<R: CommandRunner> LauncherService<R> {
             game_data_path: Some(record.game_data_root.display().to_string()),
             account_name: Some(PLAYER_ACCOUNT_NAME),
             account_password: Some(PLAYER_ACCOUNT_PASSWORD),
+            client_choice: record.client_choice,
+            original_client_supported: original_client_supported(),
+            platform_label: platform_label(),
             components: components(
                 if running {
                     ComponentState::Running
@@ -1039,6 +1242,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 record.bots_enabled,
                 record.ai_enabled,
                 record.ai_model.as_deref(),
+                record.client_choice,
             ),
         }
     }
@@ -1057,7 +1261,16 @@ fn missing_status() -> LauncherStatus {
         game_data_path: None,
         account_name: None,
         account_password: None,
-        components: components(ComponentState::Missing, true, false, None),
+        client_choice: ClientChoice::ManagedOpenWow,
+        original_client_supported: original_client_supported(),
+        platform_label: platform_label(),
+        components: components(
+            ComponentState::Missing,
+            true,
+            false,
+            None,
+            ClientChoice::ManagedOpenWow,
+        ),
     }
 }
 
@@ -1066,13 +1279,17 @@ fn components(
     bots_enabled: bool,
     ai_enabled: bool,
     ai_model: Option<&str>,
+    client_choice: ClientChoice,
 ) -> Vec<LauncherComponent> {
     vec![
         LauncherComponent {
             id: "client",
             label: "Client de jeu",
             state,
-            detail: "Version locale vérifiée".into(),
+            detail: match client_choice {
+                ClientChoice::ManagedOpenWow => "OpenWoW géré et vérifié".into(),
+                ClientChoice::OriginalWindows => "Client fourni par le joueur".into(),
+            },
         },
         LauncherComponent {
             id: "database",
@@ -1110,7 +1327,7 @@ fn components(
             },
             detail: if ai_enabled {
                 format!(
-                    "{} · calculé sur ce Mac",
+                    "{} · calculé sur cette machine",
                     ai_model.unwrap_or("modèle local")
                 )
             } else {
@@ -1174,6 +1391,161 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
             path.display()
         ))
     }
+}
+
+fn secure_random_hex(byte_count: usize) -> Result<String, String> {
+    let mut bytes = vec![0_u8; byte_count];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| format!("génération aléatoire sécurisée impossible: {error}"))?;
+    Ok(encode_hex(&bytes))
+}
+
+fn platform_container_ids<R: CommandRunner>(runner: &R) -> Result<(String, String), String> {
+    let _ = runner;
+    // Docker Desktop runs a Linux VM. macOS group IDs such as 20 can already
+    // belong to a system group in Ubuntu, so they must not be copied into the
+    // image build. The upstream image is designed around its portable defaults.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    return Ok(("1000".into(), "1000".into()));
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return Ok((
+        runner.run("id", &["-u".into()], None)?,
+        runner.run("id", &["-g".into()], None)?,
+    ));
+
+    #[allow(unreachable_code)]
+    Err("plateforme de conteneur non prise en charge".into())
+}
+
+fn extract_zip<R: CommandRunner>(
+    runner: &R,
+    archive: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    return runner
+        .run(
+            "ditto",
+            &[
+                "-x".into(),
+                "-k".into(),
+                archive.as_os_str().into(),
+                destination.as_os_str().into(),
+            ],
+            None,
+        )
+        .map(|_| ());
+
+    #[cfg(windows)]
+    return runner
+        .run(
+            "powershell.exe",
+            &[
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "& { param($archive, $destination) Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force }".into(),
+                archive.as_os_str().into(),
+                destination.as_os_str().into(),
+            ],
+            None,
+        )
+        .map(|_| ());
+
+    #[allow(unreachable_code)]
+    Err("extraction ZIP non prise en charge sur cette plateforme".into())
+}
+
+fn extract_ollama<R: CommandRunner>(
+    runner: &R,
+    archive: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return runner
+        .run(
+            "tar",
+            &[
+                "-xzf".into(),
+                archive.as_os_str().into(),
+                "-C".into(),
+                destination.as_os_str().into(),
+            ],
+            None,
+        )
+        .map(|_| ());
+
+    #[cfg(windows)]
+    return extract_zip(runner, archive, destination);
+
+    #[allow(unreachable_code)]
+    Err("extraction Ollama non prise en charge sur cette plateforme".into())
+}
+
+fn verify_platform_client<R: CommandRunner>(runner: &R, client_root: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return runner
+        .run(
+            "codesign",
+            &[
+                "--verify".into(),
+                "--deep".into(),
+                "--strict".into(),
+                client_root.join("OpenWoW.app").as_os_str().into(),
+            ],
+            None,
+        )
+        .map(|_| ());
+
+    #[cfg(windows)]
+    return Ok(());
+
+    #[allow(unreachable_code)]
+    Err("vérification OpenWoW non prise en charge sur cette plateforme".into())
+}
+
+fn verify_platform_ollama<R: CommandRunner>(runner: &R, ai_root: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        for executable in [ai_root.join("ollama"), ai_root.join("llama-server")] {
+            if !executable.is_file() {
+                return Err(format!(
+                    "l’archive Ollama ne contient pas {}",
+                    executable.display()
+                ));
+            }
+            runner.run(
+                "codesign",
+                &[
+                    "--verify".into(),
+                    "--strict".into(),
+                    executable.as_os_str().into(),
+                ],
+                None,
+            )?;
+        }
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    return runner
+        .run(
+            "powershell.exe",
+            &[
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "& { param($binary) $signature = Get-AuthenticodeSignature -LiteralPath $binary; if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|, )O=Ollama Inc\\.(,|$)') { exit 1 } }".into(),
+                ai_root.join("ollama.exe").as_os_str().into(),
+            ],
+            None,
+        )
+        .map(|_| ());
+
+    #[allow(unreachable_code)]
+    Err("vérification Ollama non prise en charge sur cette plateforme".into())
 }
 
 fn clone_pinned<R: CommandRunner>(
@@ -1254,6 +1626,12 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     file.write_all(contents)
         .map_err(|error| error.to_string())?;
     file.sync_all().map_err(|error| error.to_string())?;
+
+    #[cfg(windows)]
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+
     fs::rename(temporary, path).map_err(|error| error.to_string())
 }
 
@@ -1268,21 +1646,88 @@ fn write_secret_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn prepare_managed_game(
+fn prepare_game_for_client<R: CommandRunner>(
+    runner: &R,
+    game_data_root: &Path,
+    managed_game: &Path,
+    addon_source: &Path,
+    client_choice: ClientChoice,
+    backup_root: &Path,
+) -> Result<(), String> {
+    match client_choice {
+        ClientChoice::ManagedOpenWow => {
+            prepare_managed_openwow_game(runner, game_data_root, managed_game, addon_source)
+        }
+        ClientChoice::OriginalWindows => {
+            prepare_original_client_files(game_data_root, addon_source, backup_root)
+        }
+    }
+}
+
+fn prepare_managed_openwow_game<R: CommandRunner>(
+    runner: &R,
     game_data_root: &Path,
     managed_game: &Path,
     addon_source: &Path,
 ) -> Result<(), String> {
     fs::create_dir_all(managed_game.join("WTF")).map_err(|error| error.to_string())?;
-    let addon_destination = managed_game.join("Interface/AddOns/RealmBoxCompanions");
-    fs::create_dir_all(&addon_destination).map_err(|error| error.to_string())?;
     #[cfg(unix)]
     std::os::unix::fs::symlink(game_data_root.join("Data"), managed_game.join("Data"))
         .map_err(|error| error.to_string())?;
+
+    #[cfg(windows)]
+    runner.run(
+        "cmd.exe",
+        &[
+            "/C".into(),
+            "mklink".into(),
+            "/J".into(),
+            managed_game.join("Data").as_os_str().into(),
+            game_data_root.join("Data").as_os_str().into(),
+        ],
+        None,
+    )?;
+
+    #[cfg(unix)]
+    let _ = runner;
+
     write_atomic(
         &managed_game.join("WTF/Config.wtf"),
         b"SET realmlist \"127.0.0.1\"\nSET portal \"127.0.0.1\"\n",
     )?;
+    install_companion_addon(addon_source, managed_game)
+}
+
+fn prepare_original_client_files(
+    game_data_root: &Path,
+    addon_source: &Path,
+    backup_root: &Path,
+) -> Result<(), String> {
+    if !game_data_root.join("Wow.exe").is_file() {
+        return Err("le dossier choisi ne contient pas Wow.exe".into());
+    }
+    let locale = ["frFR", "enUS", "deDE", "esES", "ruRU"]
+        .into_iter()
+        .find(|locale| game_data_root.join("Data").join(locale).is_dir())
+        .ok_or_else(|| "aucune locale compatible n’a été trouvée".to_string())?;
+    let realmlist = game_data_root
+        .join("Data")
+        .join(locale)
+        .join("realmlist.wtf");
+    if realmlist.is_file() {
+        fs::create_dir_all(backup_root).map_err(|error| error.to_string())?;
+        let backup = backup_root.join(format!("realmlist-{locale}.wtf"));
+        if !backup.exists() {
+            fs::copy(&realmlist, backup).map_err(|error| error.to_string())?;
+        }
+    }
+    write_atomic(&realmlist, b"set realmlist 127.0.0.1\n")?;
+    install_companion_addon(addon_source, game_data_root)
+}
+
+fn install_companion_addon(addon_source: &Path, game_root: &Path) -> Result<(), String> {
+    let addon_destination = game_root.join("Interface/AddOns/RealmBoxCompanions");
+    fs::create_dir_all(&addon_destination).map_err(|error| error.to_string())?;
     for filename in [
         "RealmBoxCompanions.lua",
         "RealmBoxCompanions.toc",
@@ -1303,12 +1748,16 @@ fn prepare_managed_game(
 fn write_playerbots_config(server_root: &Path, enabled: bool) -> Result<(), String> {
     let value = if enabled { 1 } else { 0 };
     let count = if enabled { 50 } else { 0 };
-    let config = format!(
-        "AiPlayerbot.Enabled = {value}\nAiPlayerbot.RandomBotAutologin = {value}\nAiPlayerbot.MinRandomBots = {count}\nAiPlayerbot.MaxRandomBots = {count}\n"
-    );
-    write_atomic(
-        &server_root.join("env/dist/etc/playerbots.conf"),
-        config.as_bytes(),
+    write_module_config(
+        server_root,
+        "mod-playerbots",
+        "playerbots.conf",
+        &[
+            ("AiPlayerbot.Enabled", value.to_string()),
+            ("AiPlayerbot.RandomBotAutologin", value.to_string()),
+            ("AiPlayerbot.MinRandomBots", count.to_string()),
+            ("AiPlayerbot.MaxRandomBots", count.to_string()),
+        ],
     )
 }
 
@@ -1317,6 +1766,15 @@ fn write_ollama_chat_config(
     enabled: bool,
     model: Option<&str>,
 ) -> Result<(), String> {
+    let source_exists = server_root
+        .join("modules/mod-ollama-chat/conf/mod_ollama_chat.conf.dist")
+        .is_file();
+    let destination_exists = server_root
+        .join("env/dist/etc/modules/mod_ollama_chat.conf")
+        .is_file();
+    if !enabled && !source_exists && !destination_exists {
+        return Ok(());
+    }
     if enabled && model.is_none() {
         return Err("modèle local absent de la configuration".into());
     }
@@ -1325,51 +1783,109 @@ fn write_ollama_chat_config(
     {
         return Err("modèle Ollama refusé par la liste RealmBox".into());
     }
-    let enabled = u8::from(enabled);
+    let enabled = u8::from(enabled).to_string();
     let model = model.unwrap_or("llama3.2:1b");
-    let config = format!(
-        "[worldserver]\n\
-OllamaChat.Enable = {enabled}\n\
-OllamaChat.Url = http://host.docker.internal:{OLLAMA_PORT}/api/generate\n\
-OllamaChat.Model = {model}\n\
-OllamaChat.NumPredict = 72\n\
-OllamaChat.ReasoningTokenReserve = 256\n\
-OllamaChat.NumCtx = 2048\n\
-OllamaChat.MaxConcurrentQueries = 1\n\
-OllamaChat.DebugEnabled = 0\n\
-OllamaChat.DebugShowFullPrompt = 0\n\
-OllamaChat.BotReplyChance.Say = 0\n\
-OllamaChat.BotReplyChance.Channel = 0\n\
-OllamaChat.BotReplyChance.Party = 0\n\
-OllamaChat.BotReplyChance.Guild = 0\n\
-OllamaChat.EnableRandomChatter = {enabled}\n\
-OllamaChat.RandomChatterBotCommentChance = 2\n\
-OllamaChat.RandomChatterMaxBotsPerPlayer = 1\n\
-OllamaChat.EnableEventChatter = {enabled}\n\
-OllamaChat.EventChatterBotCommentChance = 10\n\
-OllamaChat.EventChatterBotSelfCommentChance = 2\n\
-OllamaChat.EventChatterMaxBotsPerPlayer = 1\n\
-OllamaChat.EnableSentimentTracking = 0\n"
-    );
-    write_atomic(
-        &server_root.join("env/dist/etc/mod_ollama_chat.conf"),
-        config.as_bytes(),
+    write_module_config(
+        server_root,
+        "mod-ollama-chat",
+        "mod_ollama_chat.conf",
+        &[
+            ("OllamaChat.Enable", enabled.clone()),
+            (
+                "OllamaChat.Url",
+                format!("http://host.docker.internal:{OLLAMA_PORT}/api/generate"),
+            ),
+            ("OllamaChat.Model", model.to_owned()),
+            ("OllamaChat.NumPredict", "72".into()),
+            ("OllamaChat.ReasoningTokenReserve", "256".into()),
+            ("OllamaChat.NumCtx", "2048".into()),
+            ("OllamaChat.MaxConcurrentQueries", "1".into()),
+            ("OllamaChat.DebugEnabled", "0".into()),
+            ("OllamaChat.DebugShowFullPrompt", "0".into()),
+            ("OllamaChat.BotReplyChance.Say", "0".into()),
+            ("OllamaChat.BotReplyChance.Channel", "0".into()),
+            ("OllamaChat.BotReplyChance.Party", "0".into()),
+            ("OllamaChat.BotReplyChance.Guild", "0".into()),
+            ("OllamaChat.EnableRandomChatter", enabled.clone()),
+            ("OllamaChat.RandomChatterBotCommentChance", "2".into()),
+            ("OllamaChat.RandomChatterMaxBotsPerPlayer", "1".into()),
+            ("OllamaChat.EnableEventChatter", enabled),
+            ("OllamaChat.EventChatterBotCommentChance", "10".into()),
+            ("OllamaChat.EventChatterBotSelfCommentChance", "2".into()),
+            ("OllamaChat.EventChatterMaxBotsPerPlayer", "1".into()),
+            ("OllamaChat.EnableSentimentTracking", "0".into()),
+        ],
     )
 }
 
-fn ollama_environment_args(executable: &Path, models: &Path, local_only: bool) -> Vec<OsString> {
-    let mut args = vec![
-        format!("OLLAMA_HOST=127.0.0.1:{OLLAMA_PORT}").into(),
-        format!("OLLAMA_MODELS={}", models.display()).into(),
-        "OLLAMA_MAX_LOADED_MODELS=1".into(),
-        "OLLAMA_NUM_PARALLEL=1".into(),
-        "OLLAMA_MAX_QUEUE=8".into(),
+fn write_module_config(
+    server_root: &Path,
+    module_directory: &str,
+    filename: &str,
+    values: &[(&str, String)],
+) -> Result<(), String> {
+    let destination = server_root.join("env/dist/etc/modules").join(filename);
+    let source = if destination.is_file() {
+        destination.clone()
+    } else {
+        server_root
+            .join("modules")
+            .join(module_directory)
+            .join("conf")
+            .join(format!("{filename}.dist"))
+    };
+    let mut config = fs::read_to_string(&source).map_err(|error| {
+        format!(
+            "configuration du module {module_directory} absente ({}): {error}",
+            source.display()
+        )
+    })?;
+    for (key, value) in values {
+        replace_config_value(&mut config, key, value)?;
+    }
+    write_atomic(&destination, config.as_bytes())
+}
+
+fn replace_config_value(config: &mut String, key: &str, value: &str) -> Result<(), String> {
+    let prefix = format!("{key} =");
+    let had_trailing_newline = config.ends_with('\n');
+    let mut replacements = 0;
+    let mut lines = Vec::new();
+    for line in config.lines() {
+        if line.starts_with(&prefix) {
+            lines.push(format!("{key} = {value}"));
+            replacements += 1;
+        } else {
+            lines.push(line.to_owned());
+        }
+    }
+    if replacements != 1 {
+        return Err(format!(
+            "la configuration épinglée doit contenir exactement une clé {key}"
+        ));
+    }
+    *config = lines.join("\n");
+    if had_trailing_newline {
+        config.push('\n');
+    }
+    Ok(())
+}
+
+fn ollama_environment(models: &Path, local_only: bool) -> Vec<(OsString, OsString)> {
+    let mut environment = vec![
+        (
+            "OLLAMA_HOST".into(),
+            format!("127.0.0.1:{OLLAMA_PORT}").into(),
+        ),
+        ("OLLAMA_MODELS".into(), models.as_os_str().into()),
+        ("OLLAMA_MAX_LOADED_MODELS".into(), "1".into()),
+        ("OLLAMA_NUM_PARALLEL".into(), "1".into()),
+        ("OLLAMA_MAX_QUEUE".into(), "8".into()),
     ];
     if local_only {
-        args.push("OLLAMA_NO_CLOUD=true".into());
+        environment.push(("OLLAMA_NO_CLOUD".into(), "true".into()));
     }
-    args.push(executable.as_os_str().into());
-    args
+    environment
 }
 
 fn start_ollama<R: CommandRunner>(
@@ -1379,9 +1895,14 @@ fn start_ollama<R: CommandRunner>(
     log_path: &Path,
     local_only: bool,
 ) -> Result<u32, String> {
-    let mut args = ollama_environment_args(executable, models, local_only);
-    args.push("serve".into());
-    let process_id = runner.spawn(Path::new("/usr/bin/env"), &args, log_path)?;
+    let environment = ollama_environment(models, local_only);
+    let process_id = runner.spawn(
+        executable,
+        &["serve".into()],
+        &environment,
+        executable.parent(),
+        log_path,
+    )?;
     if let Err(error) = runner.wait_tcp(OLLAMA_PORT, Duration::from_secs(45)) {
         let _ = runner.terminate(process_id);
         return Err(error);
@@ -1407,9 +1928,14 @@ fn pull_ollama_model<R: CommandRunner>(
         &logs.join("ollama-serve.log"),
         false,
     )?;
-    let mut args = ollama_environment_args(executable, models, false);
-    args.extend(["pull".into(), model.into()]);
-    let result = runner.run_long("env", &args, None, &logs.join("ollama-model-download.log"));
+    let environment = ollama_environment(models, false);
+    let result = runner.run_long_with_env(
+        executable,
+        &["pull".into(), model.into()],
+        &environment,
+        executable.parent(),
+        &logs.join("ollama-model-download.log"),
+    );
     let stop_result = runner.terminate(process_id);
     result.and(stop_result)
 }
@@ -1418,7 +1944,7 @@ fn compose_args(compose_file: &Path, trailing: &[&str]) -> Vec<OsString> {
     let mut args = vec![
         "compose".into(),
         "-p".into(),
-        "realmbox-v2".into(),
+        "realmbox-v3".into(),
         "-f".into(),
         compose_file.as_os_str().into(),
     ];
@@ -1432,15 +1958,11 @@ fn configure_local_account<R: CommandRunner>(
     server_root: &Path,
     log_path: &Path,
 ) -> Result<(), String> {
-    let salt_hex = runner.run(
-        "openssl",
-        &["rand".into(), "-hex".into(), "32".into()],
-        None,
-    )?;
+    let salt_hex = secure_random_hex(32)?;
     let salt = decode_hex_32(salt_hex.trim())?;
     let verifier = srp6_verifier(PLAYER_ACCOUNT_NAME, PLAYER_ACCOUNT_PASSWORD, &salt)?;
     let sql = format!(
-        "INSERT IGNORE INTO account(username,salt,verifier,expansion,reg_mail,email,joindate) VALUES('{PLAYER_ACCOUNT_NAME}',UNHEX('{}'),UNHEX('{}'),2,'','',NOW()); INSERT IGNORE INTO realmcharacters(realmid,acctid,numchars) SELECT realmlist.id,account.id,0 FROM realmlist,account LEFT JOIN realmcharacters ON acctid=account.id WHERE account.username='{PLAYER_ACCOUNT_NAME}' AND acctid IS NULL; UPDATE realmlist SET name='RealmBox',address='127.0.0.1',localAddress='127.0.0.1',port=8085,gamebuild=12340 WHERE id=1;",
+        "INSERT IGNORE INTO account(username,salt,verifier,expansion,reg_mail,email,joindate) VALUES('{PLAYER_ACCOUNT_NAME}',UNHEX('{}'),UNHEX('{}'),2,'','',NOW()); INSERT IGNORE INTO realmcharacters(realmid,acctid,numchars) SELECT realmlist.id,account.id,0 FROM realmlist,account LEFT JOIN realmcharacters ON acctid=account.id WHERE account.username='{PLAYER_ACCOUNT_NAME}' AND acctid IS NULL; UPDATE realmlist SET name='RealmBox',address='127.0.0.1',localAddress='127.0.0.1',port=8085,flag=0,gamebuild=12340 WHERE id=1;",
         encode_hex(&salt),
         encode_hex(&verifier),
     );
@@ -1452,6 +1974,24 @@ fn configure_local_account<R: CommandRunner>(
         "sh".into(),
         "-c".into(),
         r#"mysql --user=root --password="$MYSQL_ROOT_PASSWORD" --database=acore_auth --execute="$REALMBOX_ACCOUNT_SQL""#.into(),
+    ]);
+    runner.run_long("docker", &args, Some(server_root), log_path)
+}
+
+fn mark_local_realm_available<R: CommandRunner>(
+    runner: &R,
+    compose_file: &Path,
+    server_root: &Path,
+    log_path: &Path,
+) -> Result<(), String> {
+    let sql_environment = "REALMBOX_REALM_SQL=UPDATE realmlist SET name='RealmBox',address='127.0.0.1',localAddress='127.0.0.1',port=8085,flag=0,gamebuild=12340 WHERE id=1;";
+    let mut args = compose_args(compose_file, &["exec", "-T", "-e"]);
+    args.push(sql_environment.into());
+    args.extend([
+        "database".into(),
+        "sh".into(),
+        "-c".into(),
+        r#"mysql --user=root --password="$MYSQL_ROOT_PASSWORD" --database=acore_auth --execute="$REALMBOX_REALM_SQL""#.into(),
     ]);
     runner.run_long("docker", &args, Some(server_root), log_path)
 }
@@ -1496,7 +2036,58 @@ fn srp6_verifier(username: &str, password: &str, salt: &[u8; 32]) -> Result<[u8;
     Ok(fixed)
 }
 
-fn compose_file(uid: &str, gid: &str, game_data_root: &Path) -> String {
+fn docker_build_jobs(memory_output: &str) -> usize {
+    let memory_bytes = memory_output.trim().parse::<u64>().unwrap_or_default();
+    const GIB: u64 = 1024 * 1024 * 1024;
+    match memory_bytes {
+        0 => DEFAULT_DOCKER_BUILD_JOBS,
+        bytes if bytes < 6 * GIB => 2,
+        bytes if bytes < 10 * GIB => 3,
+        bytes if bytes < 16 * GIB => 4,
+        _ => 6,
+    }
+}
+
+fn write_realmbox_dockerfile(server_root: &Path) -> Result<(), String> {
+    let source_path = server_root.join("apps/docker/Dockerfile");
+    let destination_path = server_root.join("apps/docker/Dockerfile.realmbox");
+    let source = fs::read_to_string(&source_path).map_err(|error| {
+        format!(
+            "lecture du Dockerfile serveur impossible ({}): {error}",
+            source_path.display()
+        )
+    })?;
+    let arg_anchor = "ARG CTOOLS_BUILD=\"all\"";
+    let build_anchor = "cmake --build . --config \"$CTYPE\" -j $(($(nproc) + 1))";
+    let worldserver_anchor = "VOLUME /azerothcore/env/dist/etc\n\nCMD [\"worldserver\"]";
+    if !source.contains(arg_anchor)
+        || !source.contains(build_anchor)
+        || !source.contains(worldserver_anchor)
+    {
+        return Err("le Dockerfile serveur épinglé ne correspond pas au profil RealmBox".into());
+    }
+    let patched = source
+        .replacen(
+            arg_anchor,
+            &format!("{arg_anchor}\nARG REALMBOX_BUILD_JOBS={DEFAULT_DOCKER_BUILD_JOBS}"),
+            1,
+        )
+        .replacen(
+            build_anchor,
+            "cmake --build . --config \"$CTYPE\" --parallel \"$REALMBOX_BUILD_JOBS\"",
+            1,
+        )
+        .replacen(
+            worldserver_anchor,
+            &format!(
+                "COPY --chown=$DOCKER_USER:$DOCKER_USER \\\n+     modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data\n\n{worldserver_anchor}"
+            ),
+            1,
+        );
+    write_atomic(&destination_path, patched.as_bytes())
+}
+
+fn compose_file(uid: &str, gid: &str, game_data_root: &Path, docker_build_jobs: usize) -> String {
     let game_data_mount = serde_json::to_string(&format!(
         "{}:/client-data:ro",
         game_data_root.join("Data").display()
@@ -1506,6 +2097,7 @@ fn compose_file(uid: &str, gid: &str, game_data_root: &Path) -> String {
         .replace("__UID__", uid)
         .replace("__GID__", gid)
         .replace("__MYSQL_IMAGE__", MYSQL_IMAGE)
+        .replace("__BUILD_JOBS__", &docker_build_jobs.to_string())
         .replace("__SOURCE_ID__", &source_id(game_data_root))
         .replace("__GAME_DATA_MOUNT__", &game_data_mount)
 }
@@ -1520,8 +2112,6 @@ const COMPOSE_TEMPLATE: &str = r#"services:
     image: __MYSQL_IMAGE__
     environment:
       MYSQL_ROOT_PASSWORD: ${REALMBOX_DB_PASSWORD}
-    ports:
-      - "127.0.0.1:3307:3306"
     volumes:
       - realmbox-database:/var/lib/mysql
     healthcheck:
@@ -1533,9 +2123,9 @@ const COMPOSE_TEMPLATE: &str = r#"services:
   server-data-init:
     build:
       context: .
-      dockerfile: apps/docker/Dockerfile
+      dockerfile: apps/docker/Dockerfile.realmbox
       target: tools
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore }
+      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
     working_dir: /work
     environment:
       REALMBOX_SOURCE_ID: __SOURCE_ID__
@@ -1561,9 +2151,9 @@ const COMPOSE_TEMPLATE: &str = r#"services:
   db-import:
     build:
       context: .
-      dockerfile: apps/docker/Dockerfile
+      dockerfile: apps/docker/Dockerfile.realmbox
       target: db-import
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore }
+      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
       AC_WORLD_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_world"
@@ -1578,9 +2168,9 @@ const COMPOSE_TEMPLATE: &str = r#"services:
   authserver:
     build:
       context: .
-      dockerfile: apps/docker/Dockerfile
+      dockerfile: apps/docker/Dockerfile.realmbox
       target: authserver
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore }
+      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
     ports:
@@ -1594,9 +2184,9 @@ const COMPOSE_TEMPLATE: &str = r#"services:
   worldserver:
     build:
       context: .
-      dockerfile: apps/docker/Dockerfile
+      dockerfile: apps/docker/Dockerfile.realmbox
       target: worldserver
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore }
+      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
       AC_WORLD_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_world"
@@ -1668,19 +2258,60 @@ mod tests {
             ));
             Ok(())
         }
-        fn spawn(
+        fn run_long_with_env(
             &self,
             program: &Path,
             args: &[OsString],
+            environment: &[(OsString, OsString)],
+            _current_dir: Option<&Path>,
             _log_path: &Path,
-        ) -> Result<u32, String> {
+        ) -> Result<(), String> {
             self.commands.lock().expect("commands").push(format!(
-                "{} {}",
+                "{} {} [{}]",
                 program.display(),
                 args.iter()
                     .map(|arg| arg.to_string_lossy())
                     .collect::<Vec<_>>()
+                    .join(" "),
+                environment
+                    .iter()
+                    .map(|(key, value)| format!(
+                        "{}={}",
+                        key.to_string_lossy(),
+                        value.to_string_lossy()
+                    ))
+                    .collect::<Vec<_>>()
                     .join(" ")
+            ));
+            Ok(())
+        }
+        fn spawn(
+            &self,
+            program: &Path,
+            args: &[OsString],
+            environment: &[(OsString, OsString)],
+            current_dir: Option<&Path>,
+            _log_path: &Path,
+        ) -> Result<u32, String> {
+            self.commands.lock().expect("commands").push(format!(
+                "{} {} [{}] cwd={}",
+                program.display(),
+                args.iter()
+                    .map(|arg| arg.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                environment
+                    .iter()
+                    .map(|(key, value)| format!(
+                        "{}={}",
+                        key.to_string_lossy(),
+                        value.to_string_lossy()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                current_dir
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<none>".into())
             ));
             Ok(42)
         }
@@ -1716,38 +2347,167 @@ mod tests {
     }
 
     #[test]
+    fn original_client_configuration_is_backed_up_before_local_realm_change() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let game = temporary.path().join("Wrath");
+        let locale = game.join("Data/frFR");
+        let addon = temporary.path().join("addon");
+        fs::create_dir_all(&locale).expect("locale");
+        fs::create_dir_all(&addon).expect("addon");
+        fs::write(game.join("Wow.exe"), "user binary").expect("client");
+        fs::write(
+            locale.join("realmlist.wtf"),
+            "set realmlist example.invalid\n",
+        )
+        .expect("realmlist");
+        for filename in [
+            "RealmBoxCompanions.lua",
+            "RealmBoxCompanions.toc",
+            "RealmBoxCompanions.xml",
+        ] {
+            fs::write(addon.join(filename), filename).expect("addon fixture");
+        }
+        let backup = temporary.path().join("backup");
+
+        prepare_original_client_files(&game, &addon, &backup).expect("prepare original client");
+
+        assert_eq!(
+            fs::read_to_string(backup.join("realmlist-frFR.wtf")).expect("backup"),
+            "set realmlist example.invalid\n"
+        );
+        assert_eq!(
+            fs::read_to_string(locale.join("realmlist.wtf")).expect("local realm"),
+            "set realmlist 127.0.0.1\n"
+        );
+        assert!(
+            game.join("Interface/AddOns/RealmBoxCompanions/RealmBoxCompanions.lua")
+                .is_file()
+        );
+    }
+
+    #[test]
     fn compose_pins_database_and_server_data_and_binds_ports_locally() {
-        let compose = compose_file("501", "20", Path::new("/Jeux privés/Wrath"));
+        let compose = compose_file("501", "20", Path::new("/Jeux privés/Wrath"), 3);
         assert!(compose.contains(MYSQL_IMAGE));
+        assert!(compose.contains("Dockerfile.realmbox"));
+        assert!(compose.contains("REALMBOX_BUILD_JOBS: 3"));
         assert!(compose.contains(r#"/Jeux privés/Wrath/Data:/client-data:ro"#));
         assert!(compose.contains("map_extractor"));
         assert!(compose.contains("mmaps_generator"));
         assert!(compose.contains("127.0.0.1:3724:3724"));
         assert!(compose.contains("127.0.0.1:8085:8085"));
+        assert!(!compose.contains("3307:3306"));
         assert!(compose.contains("host.docker.internal:host-gateway"));
         assert!(!compose.contains("image: mysql:8.4"));
     }
 
     #[test]
+    fn docker_build_parallelism_tracks_the_memory_given_to_docker() {
+        assert_eq!(docker_build_jobs(""), DEFAULT_DOCKER_BUILD_JOBS);
+        assert_eq!(docker_build_jobs("4294967296"), 2);
+        assert_eq!(docker_build_jobs("8318976000"), 3);
+        assert_eq!(docker_build_jobs("12884901888"), 4);
+        assert_eq!(docker_build_jobs("34359738368"), 6);
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn docker_desktop_uses_the_portable_upstream_user() {
+        let runner = RecordingRunner::default();
+        assert_eq!(
+            platform_container_ids(&runner).expect("container ids"),
+            ("1000".into(), "1000".into())
+        );
+        assert!(runner.commands.lock().expect("commands").is_empty());
+    }
+
+    #[test]
+    fn server_dockerfile_patch_is_bounded_and_deterministic() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let docker_dir = temporary.path().join("apps/docker");
+        fs::create_dir_all(&docker_dir).expect("docker dir");
+        fs::write(
+            docker_dir.join("Dockerfile"),
+            "ARG CTOOLS_BUILD=\"all\"\nRUN cmake --build . --config \"$CTYPE\" -j $(($(nproc) + 1))\nVOLUME /azerothcore/env/dist/etc\n\nCMD [\"worldserver\"]\n",
+        )
+        .expect("dockerfile");
+
+        write_realmbox_dockerfile(temporary.path()).expect("patch");
+
+        let patched =
+            fs::read_to_string(docker_dir.join("Dockerfile.realmbox")).expect("patched dockerfile");
+        assert!(patched.contains("ARG REALMBOX_BUILD_JOBS=2"));
+        assert!(patched.contains("--parallel \"$REALMBOX_BUILD_JOBS\""));
+        assert!(
+            patched
+                .contains("modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data")
+        );
+        assert!(!patched.contains("$(nproc)"));
+    }
+
+    #[test]
+    fn playerbots_configuration_uses_the_module_directory() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let source = temporary.path().join("modules/mod-playerbots/conf");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::write(
+            source.join("playerbots.conf.dist"),
+            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.UnmanagedDefault = 42\n",
+        )
+        .expect("source config");
+        write_playerbots_config(temporary.path(), true).expect("playerbots config");
+        let config = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/playerbots.conf"),
+        )
+        .expect("config");
+        assert!(config.contains("AiPlayerbot.Enabled = 1"));
+        assert!(config.contains("AiPlayerbot.MaxRandomBots = 50"));
+        assert!(config.contains("AiPlayerbot.UnmanagedDefault = 42"));
+        assert!(
+            !temporary
+                .path()
+                .join("env/dist/etc/playerbots.conf")
+                .exists()
+        );
+    }
+
+    #[test]
     fn ollama_chat_is_local_bounded_and_allowlisted() {
         let temporary = tempfile::tempdir().expect("tempdir");
+        let source = temporary.path().join("modules/mod-ollama-chat/conf");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::write(
+            source.join("mod_ollama_chat.conf.dist"),
+            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.NumCtx = 1\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
+        )
+        .expect("source config");
         write_ollama_chat_config(temporary.path(), true, Some("qwen3:8b")).expect("valid model");
-        let config = fs::read_to_string(temporary.path().join("env/dist/etc/mod_ollama_chat.conf"))
-            .expect("config");
+        let config = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/mod_ollama_chat.conf"),
+        )
+        .expect("config");
         assert!(config.contains("http://host.docker.internal:11435/api/generate"));
         assert!(config.contains("OllamaChat.MaxConcurrentQueries = 1"));
         assert!(config.contains("OllamaChat.BotReplyChance.Say = 0"));
-        let runtime_args = ollama_environment_args(
-            Path::new("/managed/ai/ollama"),
-            Path::new("/managed/ai/models"),
-            true,
-        );
-        assert!(runtime_args.contains(&OsString::from("OLLAMA_NO_CLOUD=true")));
-        assert!(runtime_args.contains(&OsString::from("OLLAMA_MAX_QUEUE=8")));
+        assert!(config.contains("OllamaChat.UnmanagedDefault = keep"));
+        let environment = ollama_environment(Path::new("/managed/ai/models"), true);
+        assert!(environment.contains(&(OsString::from("OLLAMA_NO_CLOUD"), OsString::from("true"))));
+        assert!(environment.contains(&(OsString::from("OLLAMA_MAX_QUEUE"), OsString::from("8"))));
         assert!(
             write_ollama_chat_config(temporary.path(), true, Some("remote.example/model:latest"))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn ollama_configuration_is_optional_when_the_module_was_not_installed() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        write_ollama_chat_config(temporary.path(), false, None).expect("disabled module");
+        assert!(!temporary.path().join("env/dist/etc/modules").exists());
     }
 
     #[test]
@@ -1771,9 +2531,25 @@ mod tests {
         )
         .expect("account command");
         let commands = runner.commands.lock().expect("commands");
-        assert!(commands[1].contains("docker compose -p realmbox"));
-        assert!(commands[1].contains("INSERT IGNORE INTO account"));
-        assert!(commands[1].contains("UPDATE realmlist SET name='RealmBox'"));
+        assert!(commands[0].contains("docker compose -p realmbox"));
+        assert!(commands[0].contains("INSERT IGNORE INTO account"));
+        assert!(commands[0].contains("UPDATE realmlist SET name='RealmBox'"));
+        assert!(commands[0].contains("flag=0"));
+    }
+
+    #[test]
+    fn local_realm_is_made_available_before_each_start() {
+        let runner = RecordingRunner::default();
+        mark_local_realm_available(
+            &runner,
+            Path::new("/managed/server/compose.realmbox.yaml"),
+            Path::new("/managed/server"),
+            Path::new("/managed/logs/realm.log"),
+        )
+        .expect("realm command");
+        let commands = runner.commands.lock().expect("commands");
+        assert!(commands[0].contains("UPDATE realmlist SET name='RealmBox'"));
+        assert!(commands[0].contains("flag=0"));
     }
 
     #[cfg(unix)]
@@ -1791,16 +2567,20 @@ mod tests {
     #[test]
     fn compose_command_order_keeps_runtime_details_typed() {
         let path = Path::new("/managed/server/compose.realmbox.yaml");
-        let args = compose_args(path, &["up", "-d", "database"]);
+        let args = compose_args(
+            path,
+            &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+        );
         assert_eq!(args[0], "compose");
         assert_eq!(args[1], "-p");
-        assert_eq!(args[2], "realmbox-v2");
+        assert_eq!(args[2], "realmbox-v3");
         assert_eq!(args.last(), Some(&OsString::from("database")));
+        assert!(args.contains(&OsString::from("--wait")));
         let runner = RecordingRunner::default();
         runner.run("docker", &args, None).expect("recorded");
         assert!(
             runner.commands.lock().expect("commands")[0]
-                .starts_with("docker compose -p realmbox-v2")
+                .starts_with("docker compose -p realmbox-v3")
         );
     }
 
@@ -1809,11 +2589,11 @@ mod tests {
         let temporary = tempfile::tempdir().expect("tempdir");
         let runtime_root = temporary.path().join("runtime-v2");
         let compose_file = runtime_root.join("server/compose.realmbox.yaml");
-        let openwow_executable = runtime_root.join("client/openwow-client");
+        let client_executable = runtime_root.join("client/openwow-client");
         fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
-        fs::create_dir_all(openwow_executable.parent().expect("client")).expect("client");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
         fs::write(&compose_file, "services: {}").expect("compose");
-        fs::write(&openwow_executable, "binary").expect("client");
+        fs::write(&client_executable, "binary").expect("client");
         let mut service = LauncherService::new(
             temporary.path().to_path_buf(),
             temporary.path().join("addon"),
@@ -1825,14 +2605,15 @@ mod tests {
                 schema_version: INSTALL_SCHEMA,
                 game_data_root: temporary.path().join("game-source"),
                 runtime_root,
-                openwow_executable,
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
                 compose_file,
                 bots_enabled: true,
                 ai_enabled: true,
                 ai_model: Some("qwen3:8b".into()),
                 ollama_executable: Some(temporary.path().join("ai/ollama")),
-                openwow_sha256: OPENWOW_SHA256.into(),
-                ollama_sha256: Some(OLLAMA_SHA256.into()),
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: Some("test-ollama-sha256".into()),
                 server_commit: SERVER_COMMIT.into(),
                 playerbots_commit: PLAYERBOTS_COMMIT.into(),
                 ollama_chat_commit: Some(OLLAMA_CHAT_COMMIT.into()),
@@ -1854,5 +2635,62 @@ mod tests {
         );
         assert!(commands.iter().any(|command| command == "terminate 84"));
         assert!(!commands.iter().any(|command| command == "terminate 42"));
+    }
+
+    #[test]
+    fn managed_openwow_starts_from_its_writable_game_root() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        let managed_game = runtime_root.join("game");
+        fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
+        fs::create_dir_all(&managed_game).expect("managed game");
+        let playerbots_config = runtime_root.join("server/env/dist/etc/modules/playerbots.conf");
+        fs::create_dir_all(playerbots_config.parent().expect("module config"))
+            .expect("module config");
+        fs::write(&compose_file, "services: {}").expect("compose");
+        fs::write(&client_executable, "binary").expect("client");
+        fs::write(
+            playerbots_config,
+            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\n",
+        )
+        .expect("playerbots config");
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable: client_executable.clone(),
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file,
+                bots_enabled: true,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+            })
+            .expect("record");
+
+        let status = service.start(None, None, |_| {}).expect("start");
+        assert_eq!(status.phase, LauncherPhase::Running);
+        assert_eq!(service.client_process_id(), Some(42));
+        let commands = service.runner.commands.lock().expect("commands");
+        assert!(commands.iter().any(|command| {
+            command.starts_with(&client_executable.display().to_string())
+                && command.contains(&format!("--game-data {}", managed_game.display()))
+                && command.contains(&format!("cwd={}", managed_game.display()))
+        }));
     }
 }
