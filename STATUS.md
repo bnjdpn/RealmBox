@@ -1,8 +1,8 @@
 # État factuel
 
-Mis à jour le 2 septembre 2026 sur macOS 26.6.2 arm64.
+Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots. GO automatisé pour RealmBox 0.2.0 et son site FR/EN. NO-GO pour déclarer le réglage Playerbots à chaud prouvé dans un vrai worldserver, pour une release publique prête pour Windows, pour les dialogues LLM en jeu et pour l’affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
+Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots. GO automatisé pour RealmBox 0.2.0, son site FR/EN et ses images serveur multiarchitecture. NO-GO pour déclarer le réglage Playerbots à chaud prouvé dans un vrai worldserver, pour une release publique prête pour Windows, pour les dialogues LLM en jeu et pour l’affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
 
 ## Jalon 0.2.0
 
@@ -15,6 +15,7 @@ Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore
 | Population à chaud | test Rust + preuve Docker isolée | migration Compose idempotente, limite mémoire, commandes `playerbot rndbot reload` et `playerbot rndbot update` réellement consommées par un conteneur éphémère sans redémarrage |
 | Population à chaud en jeu | non prouvé | le runtime réel actif utilise encore l’ancien Compose ; aucun redémarrage de la partie en cours n’a été imposé |
 | Site GitHub Pages | contrôle visuel + déploiement | page complète FR/EN contrôlée en desktop et mobile, workflow vert, publication HTTPS relue sur `bnjdpn.github.io/RealmBox/` |
+| Images serveur | build CI + lecture anonyme | quatre manifestes GHCR immuables authserver, worldserver, db-import et tools, chacun linux-amd64 + linux-arm64 ; pull sans compte réussi dans le run 33687674728 |
 | Bundle macOS 0.2.0 | build + inspection locale | DMG généré, somme interne valide, application arm64 et signature ad hoc vérifiée avec `codesign --deep --strict` ; non notarié |
 | Vérification locale | automatisée | `pnpm verify` : typecheck, lint, 10 tests UI, build Vite, clippy strict et 42 tests Rust du workspace |
 
@@ -55,7 +56,7 @@ Le bundle courant est installé dans `/Users/benjamin/Applications/RealmBox.app`
 - Les 50 bots autonomes sont répartis dans Azeroth. Seuls les quatre bots d’équipe sont garantis près du joueur.
 - Le contrôle à chaud est implémenté dans 0.2.0 et prouvé avec fakes plus un conteneur Docker isolé. Il reste à le rejouer sur le vrai worldserver après le prochain démarrage géré, sans interrompre la session actuellement ouverte.
 - Ollama et `mod-ollama-chat` sont intégrés et épinglés, mais aucun modèle n’a encore été téléchargé et aucune conversation en jeu n’est prouvée.
-- Sans images serveur RealmBox publiées, le bundle de développement compile encore AzerothCore et Playerbots lors de la première installation. Le parcours joueur cible doit uniquement télécharger des images épinglées.
+- Les images serveur RealmBox sont publiées et épinglées par digest. Le prochain parcours réel doit confirmer qu’une installation neuve les télécharge sans recompiler AzerothCore et Playerbots.
 - Windows x64 compile en CI mais n’a pas de parcours réel Windows 11. `Wow.exe` doit devenir le choix recommandé quand une copie compatible est présente ; OpenWoW doit rester optionnel.
 - Linux et Mac Intel ne sont pas pris en charge par le produit actuel.
 - La signature de distribution et la notarisation macOS restent bloquées faute de certificats.

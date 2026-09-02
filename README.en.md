@@ -31,7 +31,7 @@ Current artifacts are unsigned previews. Always verify the `SHA256SUMS.txt` file
 
 RealmBox validates real MPQ signatures and the required WotLK and locale archives before installation. With the recommended option, it downloads the official OpenWoW 0.1.2 release for the platform and verifies its SHA-256 digest. It never downloads proprietary game data.
 
-Player releases are designed to pull four multi-architecture, digest-pinned server images instead of compiling AzerothCore on the player's machine. Until those images and their complete notices pass the release gate, local development bundles deliberately retain the source-build fallback and are not presented as production releases.
+Player releases pull four multi-architecture, digest-pinned server images instead of compiling AzerothCore on the player's machine. Their linux-amd64 and linux-arm64 manifests were built from immutable commits and successfully pulled without registry authentication in GitHub Actions. Binary publication remains a preview until the complete transitive notice audit and real Windows path are finished.
 
 ## Runtime
 

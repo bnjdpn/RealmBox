@@ -1,5 +1,5 @@
 schema_version = 1
-verified_at = "2026-09-02"
+verified_at = "2026-09-03"
 
 [[component]]
 name = "openwow"
@@ -26,8 +26,12 @@ branch = "Playerbot"
 license = "GPL-2.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
+image_authserver = "ghcr.io/bnjdpn/realmbox/server-authserver:47960183bb03b83e8943eb2f0f39c16df9710c9d@sha256:09b6018bdec928ee0298a3462191aca4d635dcef5bfb67d66af187ee6cf7c2f7"
+image_worldserver = "ghcr.io/bnjdpn/realmbox/server-worldserver:47960183bb03b83e8943eb2f0f39c16df9710c9d@sha256:83ecbc6c29215acc6e71f88236b510714b8b66db19b7a309ec894c904ad407b6"
+image_db_import = "ghcr.io/bnjdpn/realmbox/server-db-import:47960183bb03b83e8943eb2f0f39c16df9710c9d@sha256:3e9199e73a229eb416383a909598f815c0fa5c5bf5cdc8cb397e49c5177bef55"
+image_tools = "ghcr.io/bnjdpn/realmbox/server-tools:47960183bb03b83e8943eb2f0f39c16df9710c9d@sha256:74416cf5de57c42d349f8ba5a4a07545094198e30e2598ce6ea1889b71dc8667"
 redistribution_status = "source-reviewed; runtime dependency notices unresolved"
-test_status = "linux-arm64 Docker build passed on macOS for authserver, worldserver, db-import and tools; both server binaries report pinned revision 47960183; authserver listened on 127.0.0.1:3724; worldserver reached the expected missing-map boundary"
+test_status = "linux-amd64 and linux-arm64 images built from pinned revision 47960183 in GitHub Actions run 33687674728; immutable multiarchitecture manifests created for authserver, worldserver, db-import and tools and pulled successfully without registry authentication; prior local linux-arm64 runtime proof confirmed authserver on 127.0.0.1:3724 and worldserver at the expected missing-map boundary"
 
 [[component]]
 name = "mod-playerbots"
