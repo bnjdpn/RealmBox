@@ -1,0 +1,67 @@
+schema_version = 1
+verified_at = "2026-09-02"
+
+[[component]]
+name = "openwow"
+repository = "https://github.com/rkabachenko/OpenWow-snapshot"
+commit = "2521e1f72eeffd661913be63d1e2b374073c316c"
+branch = "main"
+source_version = "0.1.2"
+license = "AGPL-3.0-only"
+platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
+architectures_claimed_upstream = ["arm64", "x86_64"]
+patch_set = "none"
+redistribution_status = "source-reviewed; binary redistribution needs complete notice review"
+test_status = "macos-arm64 configure passed; client build in progress; real gameplay not tested"
+
+[[component]]
+name = "azerothcore-playerbots-fork"
+repository = "https://github.com/mod-playerbots/azerothcore-wotlk"
+commit = "47960183bb03b83e8943eb2f0f39c16df9710c9d"
+branch = "Playerbot"
+license = "GPL-2.0-only"
+platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
+patch_set = "none"
+redistribution_status = "source-reviewed; runtime dependency notices unresolved"
+test_status = "macos-arm64 configure passed with MySQL Client 26.7; full build in progress"
+
+[[component]]
+name = "mod-playerbots"
+repository = "https://github.com/mod-playerbots/mod-playerbots"
+commit = "2f7d9f774987d0157c6a0d0cc08c40bec3db3945"
+branch = "master"
+license = "GPL-2.0-only"
+platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
+patch_set = "none"
+redistribution_status = "source-reviewed; runtime dependency notices unresolved"
+test_status = "module detected and compiling in macos-arm64 compatibility build"
+
+[[component]]
+name = "mod-ollama-chat"
+repository = "https://github.com/DustinHendrickson/mod-ollama-chat"
+commit = "a9d14b0b8955be136e657ac168dd255f5281a535"
+branch = "main"
+license = "AGPL-3.0-only"
+platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
+patch_set = "none"
+redistribution_status = "source-reviewed; bundled dependency notices need audit"
+test_status = "module detected and compiling in macos-arm64 compatibility build; README still names predecessor forks"
+
+[[component]]
+name = "ollama"
+repository = "https://github.com/ollama/ollama"
+commit = "e5e437711540eb4becb393c2847fed6cae6e5cd5"
+branch = "main"
+license = "MIT"
+platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
+patch_set = "none"
+redistribution_status = "source license identified; application/runtime redistribution not yet approved"
+test_status = "not installed on development machine"
+
+[[unresolved]]
+name = "canirun"
+reason = "No official public source repository or API contract was identified on 2026-09-02; no endpoint is configured."
+
+[[unresolved]]
+name = "mariadb-runtime"
+reason = "Portable runtime version, artifact URLs, checksums, and redistribution composition are not selected."

@@ -1,0 +1,23 @@
+schema_version = 1
+source_component = "mod-playerbots"
+source_commit = "2f7d9f774987d0157c6a0d0cc08c40bec3db3945"
+benchmark_status = "unbenchmarked-initial-values"
+
+[calm]
+label_fr = "Monde calme"
+"AiPlayerbot.RandomBotAutologin" = 1
+"AiPlayerbot.MinRandomBots" = 20
+"AiPlayerbot.MaxRandomBots" = 30
+
+[living]
+label_fr = "Monde vivant"
+"AiPlayerbot.RandomBotAutologin" = 1
+"AiPlayerbot.MinRandomBots" = 80
+"AiPlayerbot.MaxRandomBots" = 100
+
+[crowded]
+label_fr = "Monde très peuplé"
+"AiPlayerbot.RandomBotAutologin" = 1
+"AiPlayerbot.MinRandomBots" = 200
+"AiPlayerbot.MaxRandomBots" = 250
+
