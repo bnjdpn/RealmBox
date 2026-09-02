@@ -1,0 +1,35 @@
+name: Validation commune
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: 1.97.1, components: rustfmt,clippy }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-audit,cargo-deny,cargo-cyclonedx }
+      - run: cargo audit
+      - run: cargo deny check advisories licenses sources
+      - run: cargo cyclonedx --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: realmbox-sbom
+          path: "**/*.cdx.xml"
+

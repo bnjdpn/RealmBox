@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: RealmBox Companions
+## Notes: Contrôles bornés pour les compagnons RealmBox
+## Author: RealmBox contributors
+## Version: 0.1.0-dev
+## SavedVariables: RealmBoxCompanionsDB
+RealmBoxCompanions.xml
+

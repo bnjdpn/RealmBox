@@ -1,0 +1,19 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <Script file="RealmBoxCompanions.lua"/>
+  <Frame name="RealmBoxCompanionsFrame" parent="UIParent" hidden="false" movable="true" enableMouse="true">
+    <Size x="260" y="210"/>
+    <Anchors><Anchor point="CENTER" relativePoint="CENTER" x="330" y="0"/></Anchors>
+    <Backdrop bgFile="Interface/Tooltips/UI-Tooltip-Background" edgeFile="Interface/Tooltips/UI-Tooltip-Border" tile="true" tileSize="16" edgeSize="12"><BackgroundInsets left="3" right="3" top="3" bottom="3"/></Backdrop>
+    <Scripts><OnLoad>RealmBoxCompanions_OnLoad(self)</OnLoad><OnDragStart>self:StartMoving()</OnDragStart><OnDragStop>self:StopMovingOrSizing()</OnDragStop></Scripts>
+    <Layers><Layer level="ARTWORK"><FontString name="$parentTitle" inherits="GameFontNormalLarge" text="COMPAGNONS"><Anchors><Anchor point="TOP" y="-18"/></Anchors></FontString><FontString name="$parentStatus" inherits="GameFontHighlightSmall" text="Passerelle locale en attente"><Anchors><Anchor point="TOP" y="-43"/></Anchors></FontString></Layer></Layers>
+    <Frames>
+      <Button name="$parentFollow" inherits="UIPanelButtonTemplate" text="Me suivre"><Size x="105" y="24"/><Anchors><Anchor point="TOPLEFT" x="20" y="-70"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("follow")</OnClick></Scripts></Button>
+      <Button name="$parentAttack" inherits="UIPanelButtonTemplate" text="Attaquer"><Size x="105" y="24"/><Anchors><Anchor point="LEFT" relativeTo="$parentFollow" relativePoint="RIGHT" x="10"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("attack")</OnClick></Scripts></Button>
+      <Button name="$parentStay" inherits="UIPanelButtonTemplate" text="Attendre ici"><Size x="105" y="24"/><Anchors><Anchor point="TOPLEFT" x="20" y="-104"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("stay")</OnClick></Scripts></Button>
+      <Button name="$parentRegroup" inherits="UIPanelButtonTemplate" text="Se regrouper"><Size x="105" y="24"/><Anchors><Anchor point="LEFT" relativeTo="$parentStay" relativePoint="RIGHT" x="10"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("regroup")</OnClick></Scripts></Button>
+      <Button name="$parentCooldownsOn" inherits="UIPanelButtonTemplate" text="Capacités fortes"><Size x="220" y="24"/><Anchors><Anchor point="TOP" y="-138"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("cooldowns_on")</OnClick></Scripts></Button>
+      <Button name="$parentLeave" inherits="UIPanelButtonTemplate" text="Quitter le groupe"><Size x="220" y="24"/><Anchors><Anchor point="TOP" y="-170"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("leave")</OnClick></Scripts></Button>
+    </Frames>
+  </Frame>
+</Ui>
+

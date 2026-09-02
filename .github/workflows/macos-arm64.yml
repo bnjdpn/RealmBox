@@ -1,0 +1,28 @@
+name: macOS arm64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  launcher:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: test "$(uname -m)" = "arm64"
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: 1.97.1 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm --dir apps/desktop tauri build --bundles app,dmg
+      - run: file apps/desktop/src-tauri/target/release/bundle/macos/RealmBox.app/Contents/MacOS/realmbox-desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealmBox-macOS-arm64-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/
+

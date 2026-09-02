@@ -1,0 +1,26 @@
+name: Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  launcher:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { toolchain: 1.97.1, targets: x86_64-pc-windows-msvc }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm --dir apps/desktop tauri build --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealmBox-Windows-x64-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/
+

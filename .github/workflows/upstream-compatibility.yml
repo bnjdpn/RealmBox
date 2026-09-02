@@ -1,0 +1,92 @@
+name: Compatibilité upstream épinglée
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+jobs:
+  openwow:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            preset: ci-macos-arm64
+            artifact: openwow-macos-arm64
+          - os: macos-15-intel
+            preset: ci-macos-x86_64
+            artifact: openwow-macos-x86_64
+          - os: windows-2025
+            preset: ci-windows-x64
+            artifact: openwow-windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rkabachenko/OpenWow-snapshot
+          ref: 2521e1f72eeffd661913be63d1e2b374073c316c
+          path: upstream/openwow
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja nasm autoconf automake libtool pkg-config
+      - name: Bootstrap pinned vcpkg
+        shell: bash
+        working-directory: upstream/openwow
+        run: |
+          git clone https://github.com/microsoft/vcpkg .vcpkg
+          git -C .vcpkg checkout 74a896d035ae4a333e7404d510aede88acea4e41
+          if [[ "$RUNNER_OS" == "Windows" ]]; then ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics; else ./.vcpkg/bootstrap-vcpkg.sh -disableMetrics; fi
+      - name: Configure
+        shell: bash
+        working-directory: upstream/openwow
+        run: cmake --preset "${{ matrix.preset }}"
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/upstream/openwow/.vcpkg
+      - name: Build
+        shell: bash
+        working-directory: upstream/openwow
+        run: cmake --build --preset "${{ matrix.preset }}" --target openwow-client --parallel 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: upstream/openwow/build/${{ matrix.preset }}/apps/client/
+
+  server:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: mod-playerbots/azerothcore-wotlk, ref: 47960183bb03b83e8943eb2f0f39c16df9710c9d, path: upstream/server }
+      - uses: actions/checkout@v4
+        with: { repository: mod-playerbots/mod-playerbots, ref: 2f7d9f774987d0157c6a0d0cc08c40bec3db3945, path: upstream/server/modules/mod-playerbots }
+      - uses: actions/checkout@v4
+        with: { repository: DustinHendrickson/mod-ollama-chat, ref: a9d14b0b8955be136e657ac168dd255f5281a535, path: upstream/server/modules/mod-ollama-chat }
+      - name: Install macOS server dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake boost openssl@3 readline mysql-client fmt
+      - name: Configure server on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: >-
+          cmake -S upstream/server -B upstream/server/build
+          -DTOOLS_BUILD=all -DSCRIPTS=static -DMODULES=static -DWITH_WARNINGS=1
+          -DMYSQL_INCLUDE_DIR="$(brew --prefix mysql-client)/include/mysql"
+          -DMYSQL_LIBRARY="$(brew --prefix mysql-client)/lib/libmysqlclient.dylib"
+      - name: Configure server on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cmake -S upstream/server -B upstream/server/build -DTOOLS_BUILD=all -DSCRIPTS=static -DMODULES=static -DWITH_WARNINGS=1
+      - name: Build server
+        shell: bash
+        run: cmake --build upstream/server/build --parallel 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-build-${{ matrix.os }}-logs
+          path: upstream/server/build/CMakeFiles/*.log
