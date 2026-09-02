@@ -2651,11 +2651,17 @@ mod tests {
 
     #[test]
     fn compose_pins_database_and_server_data_and_binds_ports_locally() {
-        let compose = compose_file("501", "20", Path::new("/Jeux privés/Wrath"), 3, None);
+        let game_root = Path::new("/Jeux privés/Wrath");
+        let compose = compose_file("501", "20", game_root, 3, None);
+        let expected_mount = serde_json::to_string(&format!(
+            "{}:/client-data:ro",
+            game_root.join("Data").display()
+        ))
+        .expect("mount fixture");
         assert!(compose.contains(MYSQL_IMAGE));
         assert!(compose.contains("Dockerfile.realmbox"));
         assert!(compose.contains("REALMBOX_BUILD_JOBS: 3"));
-        assert!(compose.contains(r#"/Jeux privés/Wrath/Data:/client-data:ro"#));
+        assert!(compose.contains(&expected_mount));
         assert!(compose.contains("map_extractor"));
         assert!(compose.contains("mmaps_generator"));
         assert!(compose.contains("127.0.0.1:3724:3724"));

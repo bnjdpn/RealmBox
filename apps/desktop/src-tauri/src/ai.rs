@@ -335,6 +335,22 @@ mod tests {
                     _ => Err("sysctl inattendu".into()),
                 };
             }
+            if program == "powershell.exe" {
+                let command = args
+                    .last()
+                    .and_then(|arg| arg.to_str())
+                    .ok_or_else(|| "commande PowerShell absente".to_string())?;
+                if command.contains("Win32_Processor") {
+                    return Ok("Apple M4 Max".into());
+                }
+                if command.contains("NumberOfLogicalProcessors") {
+                    return Ok("14".into());
+                }
+                if command.contains("TotalPhysicalMemory") {
+                    return Ok((36_u64 * 1024 * 1024 * 1024).to_string());
+                }
+                return Err("commande PowerShell inattendue".into());
+            }
             if program == "curl" {
                 let body = args
                     .last()
