@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b171d" />
+    <meta name="description" content="RealmBox prépare un monde 3.3.5a local avec OpenWoW, AzerothCore et Playerbots sur macOS Apple Silicon et Windows x64." />
+    <title>RealmBox — monde 3.3.5a local</title>
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script defer src="assets/site.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="RealmBox"><span>R</span><strong>RealmBox</strong><small>3.3.5a</small></a>
+      <nav aria-label="Navigation principale">
+        <a href="#features"><span data-fr>Fonctions</span><span data-en>Features</span></a>
+        <a href="#tutorial"><span data-fr>Tutoriel</span><span data-en>Tutorial</span></a>
+        <a href="#help"><span data-fr>Aide</span><span data-en>Help</span></a>
+      </nav>
+      <div class="language" aria-label="Langue / Language">
+        <button type="button" data-set-language="fr">FR</button>
+        <button type="button" data-set-language="en">EN</button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="kicker"><span class="dot"></span><span data-fr>MONDE LOCAL · DONNÉES PRIVÉES</span><span data-en>LOCAL WORLD · PRIVATE DATA</span></p>
+          <h1 data-fr>Votre monde 3.3.5a,<br />sur votre ordinateur.</h1>
+          <h1 data-en>Your 3.3.5a world,<br />on your computer.</h1>
+          <p class="lead" data-fr>RealmBox prépare le client, le serveur local et des compagnons autonomes. Votre copie de jeu reste chez vous.</p>
+          <p class="lead" data-en>RealmBox sets up the game client, local server and autonomous companions. Your game copy stays on your computer.</p>
+          <div class="hero-actions">
+            <a class="primary" href="https://github.com/bnjdpn/RealmBox/releases"><span data-fr>Télécharger la préversion</span><span data-en>Download the preview</span></a>
+            <a class="secondary" href="#tutorial"><span data-fr>Voir le tutoriel</span><span data-en>Read the tutorial</span></a>
+          </div>
+          <p class="release-note" data-fr>Préversion non signée · macOS Apple Silicon qualifié · build Windows x64 disponible, parcours réel Windows 11 non encore validé.</p>
+          <p class="release-note" data-en>Unsigned preview · macOS Apple Silicon qualified · Windows x64 build available, full Windows 11 path not yet validated.</p>
+        </div>
+        <div class="launcher-preview" aria-label="Aperçu de RealmBox">
+          <div class="preview-top"><strong>RealmBox</strong><span>LOCAL</span></div>
+          <div class="preview-body">
+            <div class="preview-nav"><b>◆</b><b>♟</b><b>⋯</b></div>
+            <div class="preview-content">
+              <small data-fr>VOTRE MONDE</small><small data-en>YOUR WORLD</small>
+              <h2 data-fr>Prêt à jouer</h2><h2 data-en>Ready to play</h2>
+              <div class="preview-row"><i></i><span>OpenWoW</span><em data-fr>PRÊT</em><em data-en>READY</em></div>
+              <div class="preview-row"><i></i><span>AzerothCore</span><em data-fr>PRÊT</em><em data-en>READY</em></div>
+              <div class="preview-row"><i></i><span>Playerbots · 50</span><em data-fr>PRÊT</em><em data-en>READY</em></div>
+              <button type="button" tabindex="-1"><span data-fr>JOUER</span><span data-en>PLAY</span></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="trust-strip" aria-label="Principes RealmBox">
+        <div><strong>127.0.0.1</strong><span data-fr>Réseau local uniquement</span><span data-en>Local network only</span></div>
+        <div><strong>FR · EN</strong><span data-fr>Interface bilingue</span><span data-en>Bilingual interface</span></div>
+        <div><strong>AGPL-3.0</strong><span data-fr>Code source ouvert</span><span data-en>Open source</span></div>
+        <div><strong>0</strong><span data-fr>Donnée de jeu distribuée</span><span data-en>Game data distributed</span></div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="section-heading">
+          <p class="kicker"><span data-fr>SIMPLE PAR CONCEPTION</span><span data-en>SIMPLE BY DESIGN</span></p>
+          <h2 data-fr>Un bouton pour ouvrir votre monde.</h2>
+          <h2 data-en>One button to open your world.</h2>
+          <p data-fr>Les détails serveur restent dans Diagnostic. Le parcours principal montre uniquement l’état, l’action suivante et la récupération utile.</p>
+          <p data-en>Server details stay in Diagnostics. The main flow only shows the current state, the next action and useful recovery steps.</p>
+        </div>
+        <div class="feature-grid">
+          <article><span>01</span><h3 data-fr>Installation guidée</h3><h3 data-en>Guided setup</h3><p data-fr>Choisissez votre dossier <code>Data</code>. RealmBox vérifie la build 12340 avant de préparer les composants.</p><p data-en>Choose your <code>Data</code> folder. RealmBox checks build 12340 before preparing components.</p></article>
+          <article><span>02</span><h3 data-fr>Compagnons réglables</h3><h3 data-en>Adjustable companions</h3><p data-fr>Choisissez 5 à 150 aventuriers. La population est limitée selon la mémoire Docker et modifiable pendant la partie.</p><p data-en>Choose 5 to 150 adventurers. Population is capped based on Docker memory and can be changed while playing.</p></article>
+          <article><span>03</span><h3 data-fr>Arrêt coordonné</h3><h3 data-en>Coordinated shutdown</h3><p data-fr>Quand le client se ferme, RealmBox arrête le monde, la base locale et les dialogues optionnels.</p><p data-en>When the game client closes, RealmBox stops the world, local database and optional dialogue engine.</p></article>
+          <article><span>04</span><h3 data-fr>Diagnostic lisible</h3><h3 data-en>Readable diagnostics</h3><p data-fr>Le composant concerné, le chemin des logs et les erreurs filtrées sont regroupés dans une vue séparée.</p><p data-en>The affected component, logs path and filtered errors are grouped in a separate view.</p></article>
+        </div>
+      </section>
+
+      <section id="tutorial" class="section tutorial">
+        <div class="section-heading">
+          <p class="kicker"><span data-fr>TUTORIEL</span><span data-en>TUTORIAL</span></p>
+          <h2 data-fr>De zéro au monde local.</h2><h2 data-en>From zero to a local world.</h2>
+          <p data-fr>Prévoyez du temps pour le premier lancement : les données serveur sont extraites depuis votre copie locale.</p>
+          <p data-en>Allow time for the first launch: server data is extracted from your local copy.</p>
+        </div>
+        <ol class="steps">
+          <li><div class="step-number">1</div><div><h3 data-fr>Préparer la machine</h3><h3 data-en>Prepare your computer</h3><p data-fr>Installez et démarrez Docker Desktop. Utilisez macOS Apple Silicon ou Windows 11 x64. Gardez assez d’espace libre pour le client, les images et les données extraites.</p><p data-en>Install and start Docker Desktop. Use Apple Silicon macOS or Windows 11 x64. Keep enough free space for the client, images and extracted data.</p></div></li>
+          <li><div class="step-number">2</div><div><h3 data-fr>Préparer votre copie 3.3.5a</h3><h3 data-en>Prepare your 3.3.5a copy</h3><p data-fr>Vous devez posséder une copie compatible build 12340 avec un dossier <code>Data</code> complet. RealmBox ne fournit ni client propriétaire, ni MPQ, ni données serveur extraites.</p><p data-en>You must own a compatible build 12340 copy with a complete <code>Data</code> folder. RealmBox provides no proprietary client, MPQ or extracted server data.</p></div></li>
+          <li><div class="step-number">3</div><div><h3 data-fr>Télécharger RealmBox</h3><h3 data-en>Download RealmBox</h3><p data-fr>Récupérez le DMG macOS arm64 ou l’installateur EXE Windows x64 depuis GitHub Releases. La préversion n’est pas signée : comparez son SHA-256 avec <code>SHA256SUMS.txt</code>.</p><p data-en>Get the macOS arm64 DMG or Windows x64 EXE installer from GitHub Releases. The preview is unsigned: compare its SHA-256 with <code>SHA256SUMS.txt</code>.</p><div class="commands"><code>shasum -a 256 RealmBox_*.dmg</code><code>certutil -hashfile RealmBox_*.exe SHA256</code></div></div></li>
+          <li><div class="step-number">4</div><div><h3 data-fr>Choisir le client et Data</h3><h3 data-en>Choose the client and Data</h3><p data-fr>Sur Mac, gardez OpenWoW géré. Sur Windows, vous pouvez choisir votre <code>Wow.exe</code> original ou OpenWoW expérimental. Sélectionnez ensuite le dossier qui contient <code>Data</code>.</p><p data-en>On Mac, keep managed OpenWoW. On Windows, you may choose your original <code>Wow.exe</code> or experimental OpenWoW. Then select the folder containing <code>Data</code>.</p></div></li>
+          <li><div class="step-number">5</div><div><h3 data-fr>Choisir la population</h3><h3 data-en>Choose the population</h3><p data-fr>Commencez par <strong>Équilibré · 50</strong> sur une machine confortable. RealmBox réduira automatiquement cette valeur si la mémoire accordée à Docker est insuffisante.</p><p data-en>Start with <strong>Balanced · 50</strong> on a comfortable computer. RealmBox automatically lowers this value when Docker memory is insufficient.</p></div></li>
+          <li><div class="step-number">6</div><div><h3 data-fr>Installer puis jouer</h3><h3 data-en>Install, then play</h3><p data-fr>Cliquez sur Installer, laissez chaque composant terminer, puis cliquez sur Jouer. Connectez-vous avec <code>REALMBOX / REALMBOX</code>. L’addon en jeu permet de former une équipe de quatre compagnons.</p><p data-en>Click Install, let every component finish, then click Play. Sign in with <code>REALMBOX / REALMBOX</code>. The in-game addon lets you form a party of four companions.</p></div></li>
+        </ol>
+      </section>
+
+      <section id="help" class="section help">
+        <div class="section-heading"><p class="kicker"><span data-fr>AIDE</span><span data-en>HELP</span></p><h2 data-fr>Les réponses utiles, sans jargon.</h2><h2 data-en>Useful answers, without jargon.</h2></div>
+        <div class="faq">
+          <details><summary><span data-fr>Docker Desktop n’est pas prêt</span><span data-en>Docker Desktop is not ready</span></summary><p data-fr>Ouvrez Docker Desktop et attendez l’état “Engine running”, puis utilisez Réessayer dans RealmBox.</p><p data-en>Open Docker Desktop and wait for “Engine running”, then use Try again in RealmBox.</p></details>
+          <details><summary><span data-fr>RealmBox refuse mon dossier</span><span data-en>RealmBox rejects my folder</span></summary><p data-fr>Choisissez le dossier parent qui contient <code>Data</code>, ou <code>Data</code> directement. La copie doit contenir les archives WotLK et une locale complète.</p><p data-en>Choose the parent folder containing <code>Data</code>, or <code>Data</code> itself. The copy must include the WotLK archives and a complete locale.</p></details>
+          <details><summary><span data-fr>macOS ou Windows bloque l’ouverture</span><span data-en>macOS or Windows blocks the app</span></summary><p data-fr>La préversion n’est pas signée. Vérifiez d’abord le SHA-256 publié. Sur macOS, utilisez clic droit → Ouvrir. Sur Windows, consultez les détails SmartScreen uniquement si le hash correspond.</p><p data-en>The preview is unsigned. Verify the published SHA-256 first. On macOS, use right-click → Open. On Windows, review SmartScreen details only when the hash matches.</p></details>
+          <details><summary><span data-fr>Où sont les journaux ?</span><span data-en>Where are the logs?</span></summary><p data-fr>Ouvrez Diagnostic dans RealmBox. La vue affiche le chemin local exact et permet de copier un diagnostic filtré.</p><p data-en>Open Diagnostics in RealmBox. The view shows the exact local path and lets you copy a filtered diagnostic.</p></details>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div><p class="kicker">REALMBOX 0.2.0</p><h2 data-fr>Essayez la préversion, en connaissance de cause.</h2><h2 data-en>Try the preview with clear expectations.</h2><p data-fr>Le parcours macOS Apple Silicon est prouvé localement. Windows compile en CI mais attend encore une validation complète sur Windows 11.</p><p data-en>The Apple Silicon macOS path has local real-world proof. Windows builds in CI but still awaits full Windows 11 validation.</p></div>
+        <a class="primary" href="https://github.com/bnjdpn/RealmBox/releases"><span data-fr>Voir les releases</span><span data-en>View releases</span></a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="brand"><span>R</span><strong>RealmBox</strong></div>
+      <p data-fr>Logiciel libre AGPL-3.0-only. Aucune affiliation avec Blizzard Entertainment.</p>
+      <p data-en>AGPL-3.0-only free software. Not affiliated with Blizzard Entertainment.</p>
+      <div><a href="https://github.com/bnjdpn/RealmBox">GitHub</a><a href="https://github.com/bnjdpn/RealmBox/blob/main/STATUS.md">Status</a><a href="https://github.com/bnjdpn/RealmBox/security">Security</a></div>
+    </footer>
+  </body>
+</html>

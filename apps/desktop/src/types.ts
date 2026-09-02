@@ -62,3 +62,10 @@ export interface LauncherProgress {
   detail: string | null;
   progress: number;
 }
+
+export interface RealmDiagnostics {
+  summary: string;
+  component: "client" | "database" | "server" | "bots" | "ai" | "launcher";
+  logsPath: string;
+  recentEntries: string[];
+}

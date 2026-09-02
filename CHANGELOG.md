@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — 2026-09-02
+
+- Nouvelle interface joueur sans texte décoratif, avec vues Monde, Compagnons et Diagnostic.
+- Interface complète en français et en anglais, choix de langue conservé localement.
+- Modification de la population Playerbots à chaud via les commandes console upstream, sans redémarrer le client.
+- Erreurs joueur courtes avec cause et récupération ; détails techniques et logs filtrés réservés au diagnostic copiable.
+- Site GitHub Pages bilingue avec tutoriel macOS/Windows, limites de preuve et vérification SHA-256.
+- Workflow de prerelease macOS arm64 et Windows x64 avec fichier `SHA256SUMS.txt`.
+
 ## 0.1.0-dev
 
 - Remplacement du faux parcours desktop et des images générées par un lanceur code-native inspiré de la structure des lanceurs MMO de l'ère Wrath.

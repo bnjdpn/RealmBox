@@ -52,6 +52,12 @@ jobs:
         with: { toolchain: 1.97.1 }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir apps/desktop tauri build --bundles dmg
+      - name: Vérifier le bundle macOS ad hoc
+        shell: bash
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 target/release/bundle/macos/RealmBox.app
+          file target/release/bundle/macos/RealmBox.app/Contents/MacOS/realmbox-desktop | grep -q 'arm64'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: RealmBox-macOS-arm64-unsigned
@@ -84,6 +90,15 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
+      - name: Générer les sommes SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          find dist -type f \( -name '*.dmg' -o -name '*.exe' \) -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed -E 's#  dist/[^/]+/#  #' > SHA256SUMS.txt
+          test "$(wc -l < SHA256SUMS.txt)" -eq 2
       - name: Créer la prerelease brouillon
         shell: bash
         env:
@@ -92,6 +107,19 @@ jobs:
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft --prerelease --generate-notes --title "RealmBox $tag"
+            cat > release-notes.md <<EOF
+          ## RealmBox $tag — préversion / preview
+
+          Interface FR/EN, population Playerbots modifiable à chaud et diagnostic local séparé.
+
+          - macOS Apple Silicon : parcours local réellement qualifié.
+          - Windows x64 : installateur construit en CI, parcours complet Windows 11 non encore qualifié.
+          - Artefacts non signés et non notariés : vérifiez `SHA256SUMS.txt` avant ouverture.
+          - Aucune donnée de jeu propriétaire n’est incluse. Une copie compatible build 12340 appartenant au joueur est requise.
+
+          FR : https://bnjdpn.github.io/RealmBox/?lang=fr
+          EN: https://bnjdpn.github.io/RealmBox/?lang=en
+          EOF
+            gh release create "$tag" --draft --prerelease --notes-file release-notes.md --title "RealmBox $tag"
           fi
-          gh release upload "$tag" dist/RealmBox-macOS-arm64-unsigned/*.dmg dist/RealmBox-Windows-x64-unsigned/*.exe --clobber
+          gh release upload "$tag" dist/RealmBox-macOS-arm64-unsigned/*.dmg dist/RealmBox-Windows-x64-unsigned/*.exe SHA256SUMS.txt --clobber

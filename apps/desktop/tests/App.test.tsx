@@ -58,6 +58,8 @@ const runtime = vi.hoisted(() => ({
   subscribeLauncherStatus: vi.fn(),
   inspectAiCapability: vi.fn(),
   inspectGameData: vi.fn(),
+  updatePlayerbotPopulation: vi.fn(),
+  getRealmDiagnostics: vi.fn(),
 }));
 
 vi.mock("../src/runtime", () => runtime);
@@ -65,6 +67,7 @@ vi.mock("../src/runtime", () => runtime);
 describe("RealmBox launcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.setItem("realmbox-language", "fr");
     runtime.bootstrapLauncher.mockResolvedValue(missing);
     runtime.chooseGameData.mockResolvedValue("/Jeux/Wrath");
     runtime.inspectGameData.mockResolvedValue({
@@ -75,6 +78,13 @@ describe("RealmBox launcher", () => {
     runtime.installRealm.mockResolvedValue(ready);
     runtime.startRealm.mockResolvedValue(running);
     runtime.stopRealm.mockResolvedValue(ready);
+    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...running, botCount: 100 });
+    runtime.getRealmDiagnostics.mockResolvedValue({
+      summary: "Aucune erreur récente détectée dans les journaux gérés.",
+      component: "launcher",
+      logsPath: "/RealmBox/logs",
+      recentEntries: [],
+    });
     runtime.subscribeLauncherProgress.mockResolvedValue(() => undefined);
     runtime.subscribeLauncherStatus.mockResolvedValue(() => undefined);
     runtime.inspectAiCapability.mockResolvedValue({
@@ -95,14 +105,14 @@ describe("RealmBox launcher", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /données de jeu requises/i })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: /préparer mon monde/i })).toBeVisible();
     const install = screen.getByRole("button", { name: /installer/i });
     expect(install).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+    await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
     expect(runtime.inspectGameData).toHaveBeenCalledWith("/Jeux/Wrath");
     expect(screen.getByText("/Jeux/Wrath")).toBeVisible();
-    expect(screen.getByText(/données WotLK frFR reconnues/i)).toBeVisible();
+    expect(screen.getByText(/Data frFR · build 12340/i)).toBeVisible();
     expect(install).toBeEnabled();
 
     await user.click(install);
@@ -115,8 +125,8 @@ describe("RealmBox launcher", () => {
     runtime.inspectGameData.mockRejectedValue("archive WotLK requise absente : Data/lichking.MPQ");
     render(<App />);
 
-    await screen.findByRole("heading", { name: /données de jeu requises/i });
-    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+    await screen.findByRole("heading", { name: /préparer mon monde/i });
+    await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
 
     expect(await screen.findByText(/lichking\.MPQ/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /installer/i })).toBeDisabled();
@@ -128,8 +138,8 @@ describe("RealmBox launcher", () => {
     runtime.chooseGameData.mockRejectedValue("dialog.open not allowed");
     render(<App />);
 
-    await screen.findByRole("heading", { name: /données de jeu requises/i });
-    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+    await screen.findByRole("heading", { name: /préparer mon monde/i });
+    await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
 
     expect(await screen.findByText(/dialog\.open not allowed/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /installer/i })).toBeDisabled();
@@ -140,9 +150,9 @@ describe("RealmBox launcher", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByRole("heading", { name: /données de jeu requises/i });
+    await screen.findByRole("heading", { name: /préparer mon monde/i });
     await user.click(screen.getByRole("radio", { name: /mon client original/i }));
-    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+    await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
     await user.click(screen.getByRole("button", { name: /installer/i }));
 
     expect(runtime.installRealm).toHaveBeenCalledWith(
@@ -170,15 +180,15 @@ describe("RealmBox launcher", () => {
     });
     render(<App />);
 
-    expect(await screen.findByText(/aucun modèle confortable/i)).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: /dialogues IA/i })).toBeDisabled();
+    expect(await screen.findByText(/aucun petit modèle confortable/i)).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: /dialogues locaux/i })).toBeDisabled();
   });
 
   it("renders the already-started result returned on a later launch", async () => {
     runtime.bootstrapLauncher.mockResolvedValue(running);
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /le monde est lancé/i })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: /votre monde est ouvert/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /arrêter/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /installer/i })).not.toBeInTheDocument();
   });
@@ -195,5 +205,44 @@ describe("RealmBox launcher", () => {
 
     act(() => publishStatus?.(ready));
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
+  it("switches the complete player flow to English", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: /préparer mon monde/i });
+
+    await user.click(screen.getByRole("button", { name: "EN" }));
+
+    expect(screen.getByRole("heading", { name: /set up my world/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /install/i })).toBeVisible();
+    expect(screen.getByText(/does not download proprietary game data/i)).toBeVisible();
+  });
+
+  it("applies a running bot population without stopping the client", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(running);
+    render(<App />);
+    await screen.findByRole("button", { name: /arrêter/i });
+
+    await user.click(screen.getByRole("button", { name: /compagnons/i }));
+    await user.selectOptions(screen.getByRole("combobox"), "100");
+    await user.click(screen.getByRole("button", { name: /appliquer maintenant/i }));
+
+    expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(true, 100);
+    expect(runtime.stopRealm).not.toHaveBeenCalled();
+    expect(await screen.findByText(/sans redémarrer le client/i)).toBeVisible();
+  });
+
+  it("keeps technical details in the separate diagnostics view", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({ ...missing, phase: "error", detail: "docker info failed: secret detail" });
+    render(<App />);
+    expect(await screen.findByText(/Docker Desktop n’est pas prêt/i)).toBeVisible();
+    expect(screen.queryByText(/secret detail/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /diagnostic/i }));
+    await user.click(await screen.findByText(/^cause$/i));
+    expect(screen.getByText(/secret detail/i)).toBeVisible();
   });
 });

@@ -8,8 +8,8 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 - [x] Entrer en jeu avec OpenWoW, créer un personnage et prendre la quête de départ.
 - [x] Adapter automatiquement la population Playerbots à la mémoire allouée à Docker.
 - [x] Former depuis l’addon une équipe visible de quatre compagnons au niveau du joueur.
-- [ ] Gérer la population Playerbots à chaud depuis RealmBox, sans redémarrer le client.
-- [ ] Afficher une erreur courte, sa cause concrète et l’action de récupération ; réserver les détails techniques au diagnostic.
+- [x] Gérer la population Playerbots à chaud depuis RealmBox, sans redémarrer le client.
+- [x] Afficher une erreur courte, sa cause concrète et l’action de récupération ; réserver les détails techniques au diagnostic.
 - [ ] Afficher une progression d’installation par composant avec débit, volume restant et durée estimée quand ces valeurs sont mesurables.
 - [ ] Publier les images serveur multiarchitecture épinglées pour supprimer la compilation C++ du parcours joueur.
 - [ ] Tester le parcours complet sur Windows 11 avec `Wow.exe` et OpenWoW.
@@ -17,10 +17,11 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 ## P1 — Interface du launcher
 
 - [ ] Refaire l’interface sur la composition du launcher Vanilla/Wrath : cadre, navigation, panneau d’actualité, progression et bouton principal.
-- [ ] Supprimer les slogans et les phrases décoratives. Chaque texte doit indiquer un état, une action, une capacité ou une erreur.
-- [ ] Utiliser des ressources originales ou redistribuables ; ne pas intégrer d’illustration, logo, police ou texture Blizzard au dépôt.
+- [x] Supprimer les slogans et les phrases décoratives. Chaque texte doit indiquer un état, une action, une capacité ou une erreur.
+- [x] Utiliser des ressources originales ou redistribuables ; ne pas intégrer d’illustration, logo, police ou texture Blizzard au dépôt.
 - [ ] Ajouter une vue Compagnons : population demandée, population réellement active, équipe, mémoire utilisée et actions sûres.
-- [ ] Ajouter une vue Diagnostic séparée : journaux filtrés, composant fautif, copie du diagnostic et chemin des logs.
+- [x] Ajouter une vue Diagnostic séparée : journaux filtrés, composant fautif, copie du diagnostic et chemin des logs.
+- [x] Publier un site GitHub Pages FR/EN avec tutoriel, téléchargements, limites de plateforme et aide de premier niveau.
 
 ## P2 — Profils matériels
 

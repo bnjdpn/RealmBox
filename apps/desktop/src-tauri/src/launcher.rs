@@ -178,6 +178,15 @@ pub struct GameDataInspection {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealmDiagnostics {
+    pub summary: String,
+    pub component: &'static str,
+    pub logs_path: String,
+    pub recent_entries: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallationOptions {
     pub client_choice: ClientChoice,
@@ -1035,6 +1044,7 @@ impl<R: CommandRunner> LauncherService<R> {
             .compose_file
             .parent()
             .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        ensure_worldserver_console(&record.compose_file)?;
         write_ollama_chat_config(server_root, record.ai_enabled, record.ai_model.as_deref())?;
         self.runner
             .run(
@@ -1265,6 +1275,105 @@ impl<R: CommandRunner> LauncherService<R> {
             "Monde arrêté proprement",
             false,
         ))
+    }
+
+    pub fn update_playerbot_population(
+        &mut self,
+        bots_enabled: bool,
+        requested_count: usize,
+    ) -> Result<LauncherStatus, String> {
+        let mut record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas installé".to_string())?;
+        let process_id = self.client_process_id.ok_or_else(|| {
+            "le monde doit être lancé pour modifier la population à chaud".to_string()
+        })?;
+        if !self.runner.is_process_running(process_id)? {
+            return Err("le client n’est plus en cours d’exécution".into());
+        }
+        let server_root = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        let container_id = self.runner.run(
+            "docker",
+            &compose_args(&record.compose_file, &["ps", "-q", "worldserver"]),
+            Some(server_root),
+        )?;
+        let container_id = container_id.trim();
+        if container_id.is_empty() {
+            return Err("le serveur local n’est pas prêt".into());
+        }
+        let console_state = self.runner.run(
+            "docker",
+            &[
+                "inspect".into(),
+                "--format".into(),
+                "{{.Config.OpenStdin}} {{.Config.Tty}}".into(),
+                container_id.into(),
+            ],
+            None,
+        )?;
+        if console_state.trim() != "true false" {
+            return Err(
+                "redémarrez le monde une fois pour activer le contrôle des compagnons".into(),
+            );
+        }
+        let docker_memory = self
+            .runner
+            .run(
+                "docker",
+                &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
+                None,
+            )
+            .unwrap_or_default();
+        let effective_count =
+            effective_playerbot_count(&docker_memory, bots_enabled, requested_count);
+        write_playerbots_config(server_root, bots_enabled, effective_count)?;
+        self.runner.run_long(
+            "docker",
+            &compose_args(
+                &record.compose_file,
+                &[
+                    "exec",
+                    "-T",
+                    "worldserver",
+                    "sh",
+                    "-lc",
+                    "printf 'playerbot rndbot reload\\nplayerbot rndbot update\\n' > /proc/1/fd/0",
+                ],
+            ),
+            Some(server_root),
+            &record.runtime_root.join("logs/playerbots-live-update.log"),
+        )?;
+        record.bots_enabled = bots_enabled;
+        record.bot_count = effective_count;
+        if !bots_enabled {
+            record.ai_enabled = false;
+        }
+        self.save_record(&record)?;
+        Ok(self.installed_status(
+            &record,
+            LauncherPhase::Running,
+            "Population mise à jour",
+            true,
+        ))
+    }
+
+    pub fn diagnostics(&self) -> Result<RealmDiagnostics, String> {
+        let record = self.load_record()?;
+        let logs = record
+            .as_ref()
+            .map(|record| record.runtime_root.join("logs"))
+            .unwrap_or_else(|| self.app_data.join("logs"));
+        let recent_entries = filtered_log_entries(&logs, 40)?;
+        let (component, summary) = diagnose_entries(&recent_entries, record.is_some());
+        Ok(RealmDiagnostics {
+            summary,
+            component,
+            logs_path: logs.display().to_string(),
+            recent_entries,
+        })
     }
 
     fn emit<F>(
@@ -2033,6 +2142,27 @@ fn write_playerbots_config(
     )
 }
 
+fn ensure_worldserver_console(compose_path: &Path) -> Result<(), String> {
+    let source = fs::read_to_string(compose_path).map_err(|error| error.to_string())?;
+    let mut updated = source.replace("    tty: true\n", "");
+    let worldserver = updated
+        .find("  worldserver:\n")
+        .ok_or_else(|| "service worldserver absent du runtime géré".to_string())?;
+    let environment = updated[worldserver..]
+        .find("    environment:\n")
+        .map(|offset| worldserver + offset)
+        .ok_or_else(|| "configuration worldserver non reconnue".to_string())?;
+    let service_header = &updated[worldserver..environment];
+    if !service_header.contains("    stdin_open: true\n") {
+        updated.insert_str(environment, "    stdin_open: true\n");
+    }
+    if updated == source {
+        Ok(())
+    } else {
+        write_atomic(compose_path, updated.as_bytes())
+    }
+}
+
 fn default_bot_count() -> usize {
     50
 }
@@ -2064,6 +2194,97 @@ fn effective_playerbot_count(memory_output: &str, enabled: bool, requested: usiz
         return 0;
     }
     normalize_bot_count(requested).min(playerbot_capacity(memory_output))
+}
+
+fn filtered_log_entries(logs: &Path, limit: usize) -> Result<Vec<String>, String> {
+    if !logs.is_dir() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut files = fs::read_dir(logs)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "log")
+        })
+        .collect::<Vec<_>>();
+    files.sort_by_key(|entry| {
+        std::cmp::Reverse(
+            entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok(),
+        )
+    });
+    let mut entries = Vec::new();
+    for entry in files.into_iter().take(8) {
+        let filename = entry.file_name().to_string_lossy().to_string();
+        let content = fs::read_to_string(entry.path()).unwrap_or_default();
+        for line in content
+            .lines()
+            .rev()
+            .filter(|line| is_diagnostic_line(line))
+            .take(10)
+        {
+            entries.push(format!("{filename} · {}", redact_diagnostic_line(line)));
+            if entries.len() == limit {
+                return Ok(entries);
+            }
+        }
+    }
+    Ok(entries)
+}
+
+fn is_diagnostic_line(line: &str) -> bool {
+    let lowercase = line.to_ascii_lowercase();
+    [
+        "error", "failed", "failure", "fatal", "panic", "warning", "warn", "erreur", "échec",
+    ]
+    .iter()
+    .any(|needle| lowercase.contains(needle))
+}
+
+fn redact_diagnostic_line(line: &str) -> String {
+    let trimmed = line.trim();
+    if trimmed.to_ascii_lowercase().contains("password")
+        || trimmed.to_ascii_lowercase().contains("authorization")
+        || trimmed.to_ascii_lowercase().contains("token=")
+    {
+        "[ligne sensible masquée]".into()
+    } else {
+        trimmed.chars().take(500).collect()
+    }
+}
+
+fn diagnose_entries(entries: &[String], installed: bool) -> (&'static str, String) {
+    if !installed {
+        return (
+            "launcher",
+            "RealmBox attend une installation locale.".into(),
+        );
+    }
+    let combined = entries.join("\n").to_ascii_lowercase();
+    let component = if combined.contains("openwow") || combined.contains("client") {
+        "client"
+    } else if combined.contains("mysql") || combined.contains("database") {
+        "database"
+    } else if combined.contains("playerbot") || combined.contains("rndbot") {
+        "bots"
+    } else if combined.contains("ollama") || combined.contains("model") {
+        "ai"
+    } else if combined.contains("worldserver") || combined.contains("authserver") {
+        "server"
+    } else {
+        "launcher"
+    };
+    let summary = if entries.is_empty() {
+        "Aucune erreur récente détectée dans les journaux gérés.".into()
+    } else {
+        format!("{} événement(s) récent(s) à vérifier.", entries.len())
+    };
+    (component, summary)
 }
 
 fn write_ollama_chat_config(
@@ -2587,6 +2808,7 @@ __AUTH_SERVER_SOURCE__
 
   worldserver:
 __WORLD_SERVER_SOURCE__
+    stdin_open: true
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
       AC_WORLD_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_world"
@@ -2660,6 +2882,15 @@ mod tests {
             }
             if program == "openssl" && args.iter().any(|arg| arg == "rand") {
                 return Ok("00".repeat(32));
+            }
+            if program == "docker" && args.iter().any(|arg| arg == "ps") {
+                return Ok("realmbox-worldserver-container".into());
+            }
+            if program == "docker" && args.iter().any(|arg| arg == "inspect") {
+                return Ok("true false".into());
+            }
+            if program == "docker" && args.iter().any(|arg| arg == "{{.MemTotal}}") {
+                return Ok("34359738368".into());
             }
             Ok(String::new())
         }
@@ -2743,8 +2974,8 @@ mod tests {
                 .push(format!("terminate {process_id}"));
             Ok(())
         }
-        fn is_process_running(&self, _process_id: u32) -> Result<bool, String> {
-            Ok(false)
+        fn is_process_running(&self, process_id: u32) -> Result<bool, String> {
+            Ok(process_id == 42)
         }
         fn wait_tcp(&self, _port: u16, _timeout: Duration) -> Result<(), String> {
             Ok(())
@@ -2911,7 +3142,25 @@ mod tests {
         assert!(compose.contains("127.0.0.1:8085:8085"));
         assert!(!compose.contains("3307:3306"));
         assert!(compose.contains("host.docker.internal:host-gateway"));
+        assert!(compose.contains("    stdin_open: true\n"));
+        assert!(!compose.contains("    tty: true\n"));
         assert!(!compose.contains("image: mysql:8.4"));
+    }
+
+    #[test]
+    fn legacy_compose_is_migrated_to_an_attachable_worldserver_console() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let compose_path = temporary.path().join("compose.realmbox.yaml");
+        let legacy = compose_file("501", "20", Path::new("/Games/Wrath"), 2, None)
+            .replace("    stdin_open: true\n", "");
+        fs::write(&compose_path, legacy).expect("legacy compose");
+
+        ensure_worldserver_console(&compose_path).expect("migration");
+        ensure_worldserver_console(&compose_path).expect("idempotent migration");
+
+        let updated = fs::read_to_string(compose_path).expect("updated compose");
+        assert_eq!(updated.matches("    stdin_open: true\n").count(), 1);
+        assert_eq!(updated.matches("    tty: true\n").count(), 0);
     }
 
     #[test]
@@ -3187,7 +3436,11 @@ mod tests {
         let client_executable = runtime_root.join("client/openwow-client");
         fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
         fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
-        fs::write(&compose_file, "services: {}").expect("compose");
+        fs::write(
+            &compose_file,
+            "services:\n  worldserver:\n    environment:\n      TEST: value\n",
+        )
+        .expect("compose");
         fs::write(&client_executable, "binary").expect("client");
         let mut service = LauncherService::new(
             temporary.path().to_path_buf(),
@@ -3273,7 +3526,11 @@ mod tests {
         let playerbots_config = runtime_root.join("server/env/dist/etc/modules/playerbots.conf");
         fs::create_dir_all(playerbots_config.parent().expect("module config"))
             .expect("module config");
-        fs::write(&compose_file, "services: {}").expect("compose");
+        fs::write(
+            &compose_file,
+            "services:\n  worldserver:\n    environment:\n      TEST: value\n",
+        )
+        .expect("compose");
         fs::write(&client_executable, "binary").expect("client");
         fs::write(
             playerbots_config,
@@ -3316,5 +3573,93 @@ mod tests {
                 && command.contains(&format!("--game-data {}", managed_game.display()))
                 && command.contains(&format!("cwd={}", managed_game.display()))
         }));
+    }
+
+    #[test]
+    fn running_playerbot_population_is_reloaded_without_restarting_the_client() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        let module_config = runtime_root.join("server/env/dist/etc/modules/playerbots.conf.dist");
+        fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
+        fs::create_dir_all(module_config.parent().expect("module config")).expect("module config");
+        fs::write(&compose_file, "services: {}").expect("compose");
+        fs::write(&client_executable, "binary").expect("client");
+        fs::write(
+            &module_config,
+            "AiPlayerbot.Enabled = 1\nAiPlayerbot.RandomBotAutologin = 1\nAiPlayerbot.MinRandomBots = 5\nAiPlayerbot.MaxRandomBots = 5\nAiPlayerbot.RandomBotGuildCount = 20\n",
+        )
+        .expect("playerbots config");
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file,
+                bots_enabled: true,
+                bot_count: 5,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+            })
+            .expect("record");
+        service.client_process_id = Some(42);
+
+        let status = service
+            .update_playerbot_population(true, 100)
+            .expect("hot update");
+        assert_eq!(status.phase, LauncherPhase::Running);
+        assert_eq!(status.bot_count, 100);
+        let config =
+            fs::read_to_string(runtime_root.join("server/env/dist/etc/modules/playerbots.conf"))
+                .expect("updated config");
+        assert!(config.contains("AiPlayerbot.MaxRandomBots = 100"));
+        let commands = service.runner.commands.lock().expect("commands");
+        assert!(commands.iter().any(|command| {
+            command.contains("exec -T worldserver sh -lc")
+                && command.contains("playerbot rndbot reload")
+                && command.contains("playerbot rndbot update")
+        }));
+        assert!(!commands.iter().any(|command| command == "terminate 42"));
+    }
+
+    #[test]
+    fn diagnostics_filter_and_redact_runtime_logs() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let logs = temporary.path().join("logs");
+        fs::create_dir_all(&logs).expect("logs");
+        fs::write(
+            logs.join("worldserver.log"),
+            "INFO ready\nERROR playerbots failed\nWARNING password=secret\n",
+        )
+        .expect("log");
+        let entries = filtered_log_entries(&logs, 10).expect("entries");
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.contains("playerbots failed"))
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.contains("ligne sensible masquée"))
+        );
+        assert_eq!(diagnose_entries(&entries, true).0, "bots");
     }
 }

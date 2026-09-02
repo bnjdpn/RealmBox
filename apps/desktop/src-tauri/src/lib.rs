@@ -11,7 +11,7 @@ use std::{
 use ai::AiCapability;
 use launcher::{
     ClientChoice, GameDataInspection, InstallationOptions, LauncherPhase, LauncherProgress,
-    LauncherService, LauncherStatus, SystemCommandRunner,
+    LauncherService, LauncherStatus, RealmDiagnostics, SystemCommandRunner,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -208,6 +208,36 @@ async fn stop_realm(app: AppHandle, state: State<'_, AppState>) -> Result<Launch
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn update_playerbot_population(
+    state: State<'_, AppState>,
+    bots_enabled: bool,
+    bot_count: usize,
+) -> Result<LauncherStatus, String> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .update_playerbot_population(bots_enabled, bot_count)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn get_realm_diagnostics(state: State<'_, AppState>) -> Result<RealmDiagnostics, String> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .diagnostics()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -232,6 +262,8 @@ pub fn run() {
             install_realm,
             start_realm,
             stop_realm,
+            update_playerbot_population,
+            get_realm_diagnostics,
             inspect_ai_capability,
             inspect_game_data
         ])

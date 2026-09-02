@@ -2489,7 +2489,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "realmbox-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "realmbox-domain",
  "serde",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tempfile",
  "thiserror 2.0.20",
@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "num-bigint",
@@ -2523,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-orchestrator"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "realmbox-client",
  "realmbox-domain",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "realmbox-domain",
  "rusqlite",
@@ -2562,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "realmbox-test-support"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "realmbox-client",
  "realmbox-runtime",
@@ -4791,7 +4791,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
 ]

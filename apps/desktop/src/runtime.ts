@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AiCapability, ClientChoice, GameDataInspection, LauncherProgress, LauncherStatus } from "./types";
+import type { AiCapability, ClientChoice, GameDataInspection, LauncherProgress, LauncherStatus, RealmDiagnostics } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -85,6 +85,25 @@ export async function startRealm(botsEnabled: boolean, botCount: number, aiEnabl
 
 export async function stopRealm(): Promise<LauncherStatus> {
   return invoke<LauncherStatus>("stop_realm");
+}
+
+export async function updatePlayerbotPopulation(botsEnabled: boolean, botCount: number): Promise<LauncherStatus> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { ...browserStatus(), phase: "running", installed: true, botsEnabled, botCount };
+  }
+  return invoke<LauncherStatus>("update_playerbot_population", { botsEnabled, botCount });
+}
+
+export async function getRealmDiagnostics(): Promise<RealmDiagnostics> {
+  if (!window.__TAURI_INTERNALS__) {
+    return {
+      summary: "Aucun diagnostic réel dans l’aperçu navigateur.",
+      component: "launcher",
+      logsPath: "Indisponible dans l’aperçu navigateur",
+      recentEntries: [],
+    };
+  }
+  return invoke<RealmDiagnostics>("get_realm_diagnostics");
 }
 
 export async function subscribeLauncherProgress(

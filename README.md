@@ -5,11 +5,20 @@
 [![Validation commune](https://github.com/bnjdpn/RealmBox/actions/workflows/validation.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/validation.yml)
 [![macOS arm64](https://github.com/bnjdpn/RealmBox/actions/workflows/macos-arm64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/macos-arm64.yml)
 [![Windows x64](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml)
+[![Site RealmBox](https://github.com/bnjdpn/RealmBox/actions/workflows/pages.yml/badge.svg)](https://bnjdpn.github.io/RealmBox/?lang=fr)
 [![Licence AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg)](LICENSE)
 
 RealmBox est un lanceur Windows x64 et macOS Apple Silicon pour jouer sur un monde 3.3.5a entièrement local. Au premier lancement, il demande le dossier d'une copie compatible appartenant au joueur, puis prépare le client, le serveur, la base locale et Playerbots. Si la machine est assez confortable, il peut aussi installer Ollama et `mod-ollama-chat` pour calculer localement les dialogues des bots. Aux lancements suivants, il démarre la pile dans l'ordre et ouvre le client.
 
-L'interface reprend la composition des lanceurs MMO de l'ère Wrath — grande scène originale, nouvelles à droite, métal bleuté, barre de mise à jour et grand bouton d'action — sans logo, illustration, texte ni ressource Blizzard.
+L’interface 0.2.0 est disponible en français et en anglais. Elle sépare **Mon monde**, **Compagnons** et **Diagnostic**, montre une cause courte avec l’action de récupération utile et garde les détails serveur hors du parcours joueur.
+
+## Télécharger et suivre le tutoriel
+
+- [Site RealmBox et tutoriel FR](https://bnjdpn.github.io/RealmBox/?lang=fr)
+- [Préversions macOS arm64 et Windows x64](https://github.com/bnjdpn/RealmBox/releases)
+- [État factuel et limites de preuve](STATUS.md)
+
+Les artefacts actuels sont des préversions non signées. Vérifiez toujours le fichier `SHA256SUMS.txt` joint à la release. Le parcours macOS Apple Silicon a été qualifié localement ; l’installateur Windows x64 est construit en CI mais le parcours complet Windows 11 reste à tester.
 
 ## Premier lancement
 
@@ -38,6 +47,8 @@ Playerbots est activé uniquement si le joueur l'a demandé. Ollama écoute sur 
 
 Dans le jeu, l’addon RealmBox permet de former une équipe équilibrée de quatre bots au niveau du joueur, puis de leur demander de suivre, attaquer, attendre ou se regrouper. Les autres bots continuent de parcourir le monde de façon autonome.
 
+Pendant la partie, la vue **Compagnons** peut modifier la population demandée sans fermer le client. RealmBox recalcule d’abord la limite mémoire, recharge `playerbots.conf` avec la commande Playerbots officielle puis déclenche une mise à jour complète. La connexion ou déconnexion effective des bots peut prendre quelques instants.
+
 ## Client selon la plateforme
 
 - **Windows x64** : une copie 3.3.5a avec `Wow.exe` peut être lancée directement ; OpenWoW reste disponible comme option expérimentale.
@@ -55,6 +66,7 @@ pnpm install
 pnpm dev          # application Tauri, commandes réelles
 pnpm dev:preview  # aperçu navigateur, aucune simulation d'installation
 pnpm verify
+python3 -m http.server 1421 --directory site  # aperçu du site Pages
 ```
 
 Le parcours complet avec données de jeu n'est pas déclaré validé tant qu'une copie utilisateur n'a pas permis de terminer l'installation et d'entrer en jeu. Voir [STATUS.md](STATUS.md) pour la séparation entre tests, build et preuve réelle.

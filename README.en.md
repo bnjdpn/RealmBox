@@ -5,11 +5,20 @@
 [![Common validation](https://github.com/bnjdpn/RealmBox/actions/workflows/validation.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/validation.yml)
 [![macOS arm64](https://github.com/bnjdpn/RealmBox/actions/workflows/macos-arm64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/macos-arm64.yml)
 [![Windows x64](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml)
+[![RealmBox website](https://github.com/bnjdpn/RealmBox/actions/workflows/pages.yml/badge.svg)](https://bnjdpn.github.io/RealmBox/?lang=en)
 [![AGPL-3.0 license](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 RealmBox is a Windows x64 and Apple Silicon macOS launcher for a fully local 3.3.5a world. On first launch, it asks for a compatible game-data folder owned by the player, then prepares the client, local database, AzerothCore server, and Playerbots. On capable machines it can also run Ollama and `mod-ollama-chat` for locally generated companion dialogue.
 
-The interface is an original Wrath-era MMO launcher composition. RealmBox contains no Blizzard logo, artwork, copy, game binary, or game data.
+The 0.2.0 interface is available in French and English. It separates **My world**, **Companions**, and **Diagnostics**, shows a short cause with a useful recovery action, and keeps server details out of the player flow.
+
+## Download and tutorial
+
+- [RealmBox website and English tutorial](https://bnjdpn.github.io/RealmBox/?lang=en)
+- [macOS arm64 and Windows x64 previews](https://github.com/bnjdpn/RealmBox/releases)
+- [Factual status and evidence limits](STATUS.md)
+
+Current artifacts are unsigned previews. Always verify the `SHA256SUMS.txt` file attached to the release. The Apple Silicon macOS path has been qualified locally; the Windows x64 installer is built in CI, but the complete Windows 11 path still needs testing.
 
 ## First launch
 
@@ -36,6 +45,8 @@ Game ports bind only to `127.0.0.1`; MySQL is not published to the host. RealmBo
 
 The in-game RealmBox addon can create a balanced party of four level-matched bots next to the player, then issue bounded follow, attack, stay, regroup, and leave commands. The remaining bots continue roaming the world autonomously.
 
+While playing, the **Companions** view can change the requested population without closing the client. RealmBox first recalculates the memory cap, reloads `playerbots.conf` through the official Playerbots command, then triggers a full update. Actual bot connections and disconnections may take a moment.
+
 ## Client by platform
 
 - **Windows x64**: a compatible copy containing `Wow.exe` can run directly; OpenWoW remains an experimental alternative.
@@ -53,6 +64,7 @@ pnpm install
 pnpm dev          # Tauri application with real commands
 pnpm dev:preview  # browser-only UI preview
 pnpm verify
+python3 -m http.server 1421 --directory site  # Pages website preview
 ```
 
 See [STATUS.md](STATUS.md) for the evidence split between automated tests, builds, manual checks, and the full real path. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
