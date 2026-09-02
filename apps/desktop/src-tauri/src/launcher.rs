@@ -2253,9 +2253,11 @@ fn write_realmbox_dockerfile(server_root: &Path) -> Result<(), String> {
     let arg_anchor = "ARG CTOOLS_BUILD=\"all\"";
     let build_anchor = "cmake --build . --config \"$CTYPE\" -j $(($(nproc) + 1))";
     let worldserver_anchor = "VOLUME /azerothcore/env/dist/etc\n\nCMD [\"worldserver\"]";
+    let mmaps_anchor = "COPY --chown=$DOCKER_USER:$DOCKER_USER --from=build \\\n  /azerothcore/env/dist/bin/mmaps_generator /azerothcore/env/dist/bin/mmaps_generator";
     if !source.contains(arg_anchor)
         || !source.contains(build_anchor)
         || !source.contains(worldserver_anchor)
+        || !source.contains(mmaps_anchor)
     {
         return Err("le Dockerfile serveur épinglé ne correspond pas au profil RealmBox".into());
     }
@@ -2274,6 +2276,13 @@ fn write_realmbox_dockerfile(server_root: &Path) -> Result<(), String> {
             worldserver_anchor,
             &format!(
                 "COPY --chown=$DOCKER_USER:$DOCKER_USER \\\n     modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data\n\n{worldserver_anchor}"
+            ),
+            1,
+        )
+        .replacen(
+            mmaps_anchor,
+            &format!(
+                "{mmaps_anchor}\n\nCOPY --chown=$DOCKER_USER:$DOCKER_USER \\\n  src/tools/mmaps_generator/mmaps-config.yaml /azerothcore/env/dist/bin/mmaps-config.yaml"
             ),
             1,
         );
@@ -2376,7 +2385,7 @@ __TOOLS_SOURCE__
           /azerothcore/env/dist/bin/vmap4_extractor;
           mkdir -p /work/vmaps;
           /azerothcore/env/dist/bin/vmap4_assembler /work/Buildings /work/vmaps;
-          /azerothcore/env/dist/bin/mmaps_generator;
+          /azerothcore/env/dist/bin/mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent;
           rm -f /work/Data;
           echo "REALMBOX_SOURCE_ID=$${REALMBOX_SOURCE_ID}" > /work/extraction-version;
         fi
@@ -2666,6 +2675,9 @@ mod tests {
         assert!(compose.contains(&expected_mount));
         assert!(compose.contains("map_extractor"));
         assert!(compose.contains("mmaps_generator"));
+        assert!(compose.contains(
+            "mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent"
+        ));
         assert!(compose.contains("server-data-init:\n"));
         assert!(compose.contains("    user: \"0:0\""));
         assert!(compose.contains("127.0.0.1:3724:3724"));
@@ -2748,7 +2760,7 @@ mod tests {
         fs::create_dir_all(&docker_dir).expect("docker dir");
         fs::write(
             docker_dir.join("Dockerfile"),
-            "ARG CTOOLS_BUILD=\"all\"\nRUN cmake --build . --config \"$CTYPE\" -j $(($(nproc) + 1))\nVOLUME /azerothcore/env/dist/etc\n\nCMD [\"worldserver\"]\n",
+            "ARG CTOOLS_BUILD=\"all\"\nRUN cmake --build . --config \"$CTYPE\" -j $(($(nproc) + 1))\nVOLUME /azerothcore/env/dist/etc\n\nCMD [\"worldserver\"]\nCOPY --chown=$DOCKER_USER:$DOCKER_USER --from=build \\\n  /azerothcore/env/dist/bin/mmaps_generator /azerothcore/env/dist/bin/mmaps_generator\n",
         )
         .expect("dockerfile");
 
@@ -2762,6 +2774,9 @@ mod tests {
             patched
                 .contains("modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data")
         );
+        assert!(patched.contains(
+            "src/tools/mmaps_generator/mmaps-config.yaml /azerothcore/env/dist/bin/mmaps-config.yaml"
+        ));
         assert!(!patched.contains("\n+     modules/mod-playerbots/data"));
         assert!(!patched.contains("$(nproc)"));
     }
