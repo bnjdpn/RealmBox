@@ -10,10 +10,10 @@ Mis à jour le 2 septembre 2026 sur macOS 26.6.2 arm64.
 | Faux onboarding complet | testé avec fake | non commencé | workflow créé | tests frontend |
 | Faux Jouer/arrêt/conversation | testé avec fake | non commencé | workflow créé | tests frontend et orchestrateur |
 | Bundle Tauri | buildé | non commencé | workflow créé | `RealmBox.app` local arm64 sans signature de distribution |
-| OpenWoW | build en cours | workflow créé | workflow créé | pin `2521e1f`; configuration native séparée |
+| OpenWoW | buildé | workflow créé | workflow créé | pin `2521e1f`; Mach-O arm64 55 Mio, SHA-256 consigné |
 | Données OpenWoW réelles | bloqué | bloqué | bloqué | données utilisateur absentes |
-| Serveur Playerbots | build en cours | workflow créé | workflow créé | core configuré avec MySQL Client 26.7; modules compilés en cours |
-| mod-ollama-chat | compile dans le spike | non commencé | non commencé | module détecté et sources compilées; exécution non prouvée |
+| Serveur Playerbots | buildé | workflow créé | workflow créé | `authserver` et `worldserver` arm64 produits; exécution non prouvée |
+| mod-ollama-chat | compilé en bibliothèque statique | non commencé | non commencé | module inclus dans `worldserver`; requête Ollama non prouvée |
 | MariaDB locale | spike connecteur en échec | non commencé | non commencé | Connector/C 3.4.9 incompatible avec les API MySQL 8 attendues; runtime non sélectionné |
 | Ollama | bloqué | bloqué | bloqué | absent de la machine; runtime non audité |
 | CanIRun | bloqué | bloqué | bloqué | aucune API publique officielle identifiée |

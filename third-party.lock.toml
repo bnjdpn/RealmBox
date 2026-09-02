@@ -12,7 +12,7 @@ platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 architectures_claimed_upstream = ["arm64", "x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; binary redistribution needs complete notice review"
-test_status = "macos-arm64 configure passed; client build in progress; real gameplay not tested"
+test_status = "macos-arm64 client build passed; sha256 b5c1c777263c831f3b42fb683d0cbf783c6c3bcf45fde08ea97a1ca50e380cfe; real gameplay not tested"
 
 [[component]]
 name = "azerothcore-playerbots-fork"
@@ -23,7 +23,7 @@ license = "GPL-2.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; runtime dependency notices unresolved"
-test_status = "macos-arm64 configure passed with MySQL Client 26.7; full build in progress"
+test_status = "macos-arm64 build passed with explicit MySQL Client 26.7 and GNU Readline; worldserver sha256 51c6137ddb027b663418c60c59b19149f68fb796fc35ffb9ee3b0f0c5682e7ae; runtime not started"
 
 [[component]]
 name = "mod-playerbots"
@@ -34,7 +34,7 @@ license = "GPL-2.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; runtime dependency notices unresolved"
-test_status = "module detected and compiling in macos-arm64 compatibility build"
+test_status = "module compiled into macos-arm64 worldserver; behavior not tested"
 
 [[component]]
 name = "mod-ollama-chat"
@@ -45,7 +45,7 @@ license = "AGPL-3.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
 redistribution_status = "source-reviewed; bundled dependency notices need audit"
-test_status = "module detected and compiling in macos-arm64 compatibility build; README still names predecessor forks"
+test_status = "module compiled into macos-arm64 worldserver; Ollama request not tested; README still names predecessor forks"
 
 [[component]]
 name = "ollama"

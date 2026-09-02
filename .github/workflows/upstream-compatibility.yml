@@ -78,6 +78,8 @@ jobs:
           -DTOOLS_BUILD=all -DSCRIPTS=static -DMODULES=static -DWITH_WARNINGS=1
           -DMYSQL_INCLUDE_DIR="$(brew --prefix mysql-client)/include/mysql"
           -DMYSQL_LIBRARY="$(brew --prefix mysql-client)/lib/libmysqlclient.dylib"
+          -DREADLINE_INCLUDE_DIR="$(brew --prefix readline)/include"
+          -DREADLINE_LIBRARY="$(brew --prefix readline)/lib/libreadline.dylib"
       - name: Configure server on Windows
         if: runner.os == 'Windows'
         shell: bash

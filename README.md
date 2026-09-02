@@ -8,7 +8,7 @@ RealmBox fournit le lanceur, l'orchestration, les composants open source autoris
 
 Le vertical slice 0.1 fonctionne avec un runtime fake : onboarding en français, choix d'ambiance, préparation progressive, dashboard, bouton Jouer, groupe de quatre compagnons, conversation simulée, arrêt et persistance SQLite côté Tauri. Le fake est visiblement étiqueté et utilise les mêmes interfaces Rust que les backends réels.
 
-Le parcours réel OpenWoW → serveur → Playerbots → Ollama n'est **pas encore validé**. Aucun contenu propriétaire n'est présent. Voir [STATUS.md](STATUS.md) pour les preuves exactes.
+Le parcours réel OpenWoW → serveur → Playerbots → Ollama n'est **pas encore validé**. Aucun contenu propriétaire n'est présent. Voir [STATUS.md](STATUS.md) pour les preuves exactes et [le rapport du jalon](docs/REPORT_2026-09-02.md) pour la matrice complète.
 
 ## Développement macOS
 
@@ -31,4 +31,3 @@ cargo xtask doctor
 - Linux : hors périmètre 0.1.
 
 RealmBox est licencié sous AGPL-3.0-only, choix conservateur motivé dans [ADR 0001](docs/decisions/0001-license.md). Ce choix et la redistribution de la pile doivent encore recevoir une revue juridique avant publication binaire.
-
