@@ -18,7 +18,7 @@ num-bigint = "0.4"
 serde.workspace = true
 serde_json.workspace = true
 sha1 = "0.10"
-sha2 = "0.10"
+sha2 = "0.11"
 tauri = { version = "2.8", features = [] }
 tauri-plugin-dialog = "2.4.0"
 
