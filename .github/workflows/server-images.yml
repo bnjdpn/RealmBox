@@ -32,26 +32,26 @@ jobs:
             suffix: linux-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: mod-playerbots/azerothcore-wotlk
           ref: ${{ env.SERVER_COMMIT }}
           path: upstream/server
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: mod-playerbots/mod-playerbots
           ref: ${{ env.PLAYERBOTS_COMMIT }}
           path: upstream/server/modules/mod-playerbots
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: DustinHendrickson/mod-ollama-chat
           ref: ${{ env.OLLAMA_CHAT_COMMIT }}
           path: upstream/server/modules/mod-ollama-chat
       - name: Appliquer le correctif de build borné
         run: node scripts/prepare-server-dockerfile.mjs upstream/server/apps/docker/Dockerfile
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: inputs.publish
         with:
           registry: ghcr.io
@@ -86,20 +86,27 @@ jobs:
     if: inputs.publish
     needs: build
     runs-on: ubuntu-24.04
+    outputs:
+      authserver: ${{ steps.lock.outputs.REALMBOX_AUTH_SERVER_IMAGE }}
+      worldserver: ${{ steps.lock.outputs.REALMBOX_WORLD_SERVER_IMAGE }}
+      db_import: ${{ steps.lock.outputs.REALMBOX_DB_IMPORT_IMAGE }}
+      tools: ${{ steps.lock.outputs.REALMBOX_TOOLS_IMAGE }}
     steps:
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Créer les manifestes multiarchitecture immuables
+        id: lock
         shell: bash
         env:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           registry_root="ghcr.io/${REPOSITORY,,}"
+          : > server-images.env
           for target in authserver worldserver db-import tools; do
             destination="$registry_root/server-$target:$SERVER_COMMIT"
             docker buildx imagetools create \
@@ -107,4 +114,76 @@ jobs:
               "$registry_root/server-$target:$SERVER_COMMIT-linux-amd64" \
               "$registry_root/server-$target:$SERVER_COMMIT-linux-arm64"
             docker buildx imagetools inspect "$destination"
+            digest="$(docker buildx imagetools inspect "$destination" --raw | sha256sum | cut -d ' ' -f 1)"
+            case "$target" in
+              authserver) variable=REALMBOX_AUTH_SERVER_IMAGE ;;
+              worldserver) variable=REALMBOX_WORLD_SERVER_IMAGE ;;
+              db-import) variable=REALMBOX_DB_IMPORT_IMAGE ;;
+              tools) variable=REALMBOX_TOOLS_IMAGE ;;
+            esac
+            reference="$destination@sha256:$digest"
+            printf '%s=%s\n' "$variable" "$reference" | tee -a server-images.env >> "$GITHUB_OUTPUT"
           done
+      - name: Vérifier que les images sont accessibles sans compte
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io
+          while IFS='=' read -r _ reference; do
+            docker pull "$reference"
+          done < server-images.env
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-images-lock
+          path: server-images.env
+
+  bundle-macos-arm64:
+    if: inputs.publish
+    needs: manifest
+    runs-on: macos-15
+    env:
+      REALMBOX_AUTH_SERVER_IMAGE: ${{ needs.manifest.outputs.authserver }}
+      REALMBOX_WORLD_SERVER_IMAGE: ${{ needs.manifest.outputs.worldserver }}
+      REALMBOX_DB_IMPORT_IMAGE: ${{ needs.manifest.outputs.db_import }}
+      REALMBOX_TOOLS_IMAGE: ${{ needs.manifest.outputs.tools }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: test "$(uname -m)" = "arm64"
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with: { version: 10.33.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with: { toolchain: 1.97.1 }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm --dir apps/desktop tauri build --bundles app,dmg
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: RealmBox-macOS-arm64-prebuilt-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/
+
+  bundle-windows-x64:
+    if: inputs.publish
+    needs: manifest
+    runs-on: windows-2025
+    env:
+      REALMBOX_AUTH_SERVER_IMAGE: ${{ needs.manifest.outputs.authserver }}
+      REALMBOX_WORLD_SERVER_IMAGE: ${{ needs.manifest.outputs.worldserver }}
+      REALMBOX_DB_IMPORT_IMAGE: ${{ needs.manifest.outputs.db_import }}
+      REALMBOX_TOOLS_IMAGE: ${{ needs.manifest.outputs.tools }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with: { version: 10.33.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with: { toolchain: 1.97.1, targets: x86_64-pc-windows-msvc }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm --dir apps/desktop tauri build --bundles nsis
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: RealmBox-Windows-x64-prebuilt-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/

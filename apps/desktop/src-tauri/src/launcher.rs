@@ -27,10 +27,22 @@ const OLLAMA_CHAT_COMMIT: &str = "a9d14b0b8955be136e657ac168dd255f5281a535";
 const OLLAMA_PORT: u16 = 11435;
 const MYSQL_IMAGE: &str =
     "mysql@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
+const AUTH_SERVER_IMAGE: Option<&str> = option_env!("REALMBOX_AUTH_SERVER_IMAGE");
+const WORLD_SERVER_IMAGE: Option<&str> = option_env!("REALMBOX_WORLD_SERVER_IMAGE");
+const DB_IMPORT_IMAGE: Option<&str> = option_env!("REALMBOX_DB_IMPORT_IMAGE");
+const TOOLS_IMAGE: Option<&str> = option_env!("REALMBOX_TOOLS_IMAGE");
 const DEFAULT_DOCKER_BUILD_JOBS: usize = 2;
 const PLAYER_ACCOUNT_NAME: &str = "REALMBOX";
 const PLAYER_ACCOUNT_PASSWORD: &str = "REALMBOX";
 const SRP6_MODULUS: &str = "894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ServerImages {
+    authserver: String,
+    worldserver: String,
+    db_import: String,
+    tools: String,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -583,15 +595,20 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .map_err(|error| format!("Docker Desktop doit être installé et démarré: {error}"))?;
-        let docker_memory = self
-            .runner
-            .run(
-                "docker",
-                &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
-                None,
-            )
-            .unwrap_or_default();
-        let docker_build_jobs = docker_build_jobs(&docker_memory);
+        let server_images = embedded_server_images()?;
+        let docker_build_jobs = if server_images.is_some() {
+            DEFAULT_DOCKER_BUILD_JOBS
+        } else {
+            let docker_memory = self
+                .runner
+                .run(
+                    "docker",
+                    &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
+                    None,
+                )
+                .unwrap_or_default();
+            docker_build_jobs(&docker_memory)
+        };
 
         let staging = self.app_data.join(".installing-v3");
         if staging.exists() {
@@ -652,46 +669,59 @@ impl<R: CommandRunner> LauncherService<R> {
                 }
             };
 
-            self.emit(
-                &mut progress,
-                LauncherPhase::Installing,
-                22,
-                "Téléchargement du serveur épinglé",
-                Some("AzerothCore Playerbots"),
-            );
             let server_root = staging.join("server");
-            clone_pinned(&self.runner, SERVER_REPOSITORY, SERVER_COMMIT, &server_root)?;
-            self.emit(
-                &mut progress,
-                LauncherPhase::Installing,
-                31,
-                "Installation du module Playerbots",
-                Some("Commit immuable vérifié"),
-            );
-            let module_root = server_root.join("modules/mod-playerbots");
-            clone_pinned(
-                &self.runner,
-                PLAYERBOTS_REPOSITORY,
-                PLAYERBOTS_COMMIT,
-                &module_root,
-            )?;
-            if ai_enabled {
+            if server_images.is_some() {
                 self.emit(
                     &mut progress,
                     LauncherPhase::Installing,
-                    35,
-                    "Ajout des dialogues locaux",
-                    Some("Module Ollama épinglé"),
+                    22,
+                    "Préparation du serveur précompilé",
+                    Some("Images immuables adaptées à cette machine"),
                 );
+                fs::create_dir_all(server_root.join("env/dist/etc/modules"))
+                    .map_err(|error| error.to_string())?;
+                fs::create_dir_all(server_root.join("env/dist/logs"))
+                    .map_err(|error| error.to_string())?;
+            } else {
+                self.emit(
+                    &mut progress,
+                    LauncherPhase::Installing,
+                    22,
+                    "Téléchargement du serveur épinglé",
+                    Some("Mode développeur · AzerothCore Playerbots"),
+                );
+                clone_pinned(&self.runner, SERVER_REPOSITORY, SERVER_COMMIT, &server_root)?;
+                self.emit(
+                    &mut progress,
+                    LauncherPhase::Installing,
+                    31,
+                    "Installation du module Playerbots",
+                    Some("Commit immuable vérifié"),
+                );
+                let module_root = server_root.join("modules/mod-playerbots");
                 clone_pinned(
                     &self.runner,
-                    OLLAMA_CHAT_REPOSITORY,
-                    OLLAMA_CHAT_COMMIT,
-                    &server_root.join("modules/mod-ollama-chat"),
+                    PLAYERBOTS_REPOSITORY,
+                    PLAYERBOTS_COMMIT,
+                    &module_root,
                 )?;
+                if ai_enabled {
+                    self.emit(
+                        &mut progress,
+                        LauncherPhase::Installing,
+                        35,
+                        "Ajout des dialogues locaux",
+                        Some("Module Ollama épinglé"),
+                    );
+                    clone_pinned(
+                        &self.runner,
+                        OLLAMA_CHAT_REPOSITORY,
+                        OLLAMA_CHAT_COMMIT,
+                        &server_root.join("modules/mod-ollama-chat"),
+                    )?;
+                }
+                write_realmbox_dockerfile(&server_root)?;
             }
-
-            write_realmbox_dockerfile(&server_root)?;
 
             let (uid, gid) = platform_container_ids(&self.runner)?;
             let database_password = secure_random_hex(24)?;
@@ -699,11 +729,15 @@ impl<R: CommandRunner> LauncherService<R> {
                 &server_root.join(".env"),
                 format!("REALMBOX_DB_PASSWORD={database_password}\n").as_bytes(),
             )?;
-            let compose = compose_file(uid.trim(), gid.trim(), &game_data_root, docker_build_jobs);
+            let compose = compose_file(
+                uid.trim(),
+                gid.trim(),
+                &game_data_root,
+                docker_build_jobs,
+                server_images.as_ref(),
+            );
             let compose_path = server_root.join("compose.realmbox.yaml");
             write_atomic(&compose_path, compose.as_bytes())?;
-            write_playerbots_config(&server_root, bots_enabled)?;
-            write_ollama_chat_config(&server_root, ai_enabled, ai_model.as_deref())?;
 
             let staged_ollama = if ai_enabled {
                 self.emit(
@@ -758,23 +792,43 @@ impl<R: CommandRunner> LauncherService<R> {
                 &mut progress,
                 LauncherPhase::Installing,
                 42,
-                "Construction du serveur local",
-                Some("Cette première installation peut être longue"),
+                if server_images.is_some() {
+                    "Téléchargement du serveur local"
+                } else {
+                    "Construction du serveur local"
+                },
+                if server_images.is_some() {
+                    Some("Images précompilées vérifiées par digest")
+                } else {
+                    Some("Mode développeur · cette étape peut être longue")
+                },
             );
+            let server_action = if server_images.is_some() {
+                [
+                    "pull",
+                    "db-import",
+                    "authserver",
+                    "worldserver",
+                    "server-data-init",
+                ]
+            } else {
+                [
+                    "build",
+                    "db-import",
+                    "authserver",
+                    "worldserver",
+                    "server-data-init",
+                ]
+            };
             self.runner.run_long(
                 "docker",
-                &compose_args(
-                    &compose_path,
-                    &[
-                        "build",
-                        "db-import",
-                        "authserver",
-                        "worldserver",
-                        "server-data-init",
-                    ],
-                ),
+                &compose_args(&compose_path, &server_action),
                 Some(&server_root),
-                &logs.join("docker-build.log"),
+                &logs.join(if server_images.is_some() {
+                    "docker-pull.log"
+                } else {
+                    "docker-build.log"
+                }),
             )?;
 
             self.emit(
@@ -805,6 +859,8 @@ impl<R: CommandRunner> LauncherService<R> {
                 Some(&server_root),
                 &logs.join("database-import.log"),
             )?;
+            write_playerbots_config(&server_root, bots_enabled)?;
+            write_ollama_chat_config(&server_root, ai_enabled, ai_model.as_deref())?;
             self.emit(
                 &mut progress,
                 LauncherPhase::Installing,
@@ -1825,8 +1881,11 @@ fn write_module_config(
     values: &[(&str, String)],
 ) -> Result<(), String> {
     let destination = server_root.join("env/dist/etc/modules").join(filename);
+    let distributed = destination.with_file_name(format!("{filename}.dist"));
     let source = if destination.is_file() {
         destination.clone()
+    } else if distributed.is_file() {
+        distributed
     } else {
         server_root
             .join("modules")
@@ -2048,6 +2107,59 @@ fn docker_build_jobs(memory_output: &str) -> usize {
     }
 }
 
+fn embedded_server_images() -> Result<Option<ServerImages>, String> {
+    server_images_from_values([
+        AUTH_SERVER_IMAGE,
+        WORLD_SERVER_IMAGE,
+        DB_IMPORT_IMAGE,
+        TOOLS_IMAGE,
+    ])
+}
+
+fn server_images_from_values(values: [Option<&str>; 4]) -> Result<Option<ServerImages>, String> {
+    if values.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+    if values.iter().any(Option::is_none) {
+        return Err(
+            "la release RealmBox doit embarquer les quatre images serveur ou aucune".into(),
+        );
+    }
+    let values = values.map(|value| value.expect("les quatre images ont été vérifiées"));
+    for value in values {
+        validate_immutable_server_image(value)?;
+    }
+    Ok(Some(ServerImages {
+        authserver: values[0].into(),
+        worldserver: values[1].into(),
+        db_import: values[2].into(),
+        tools: values[3].into(),
+    }))
+}
+
+fn validate_immutable_server_image(value: &str) -> Result<(), String> {
+    let Some((repository, digest)) = value.rsplit_once("@sha256:") else {
+        return Err(format!(
+            "image serveur non immuable, digest SHA-256 requis: {value}"
+        ));
+    };
+    if !repository.starts_with("ghcr.io/")
+        || repository.len() <= "ghcr.io/".len()
+        || !repository.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'.' | b'_' | b'/' | b'-' | b':')
+        })
+        || digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!("référence d’image serveur refusée: {value}"));
+    }
+    Ok(())
+}
+
 fn write_realmbox_dockerfile(server_root: &Path) -> Result<(), String> {
     let source_path = server_root.join("apps/docker/Dockerfile");
     let destination_path = server_root.join("apps/docker/Dockerfile.realmbox");
@@ -2080,26 +2192,67 @@ fn write_realmbox_dockerfile(server_root: &Path) -> Result<(), String> {
         .replacen(
             worldserver_anchor,
             &format!(
-                "COPY --chown=$DOCKER_USER:$DOCKER_USER \\\n+     modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data\n\n{worldserver_anchor}"
+                "COPY --chown=$DOCKER_USER:$DOCKER_USER \\\n     modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data\n\n{worldserver_anchor}"
             ),
             1,
         );
     write_atomic(&destination_path, patched.as_bytes())
 }
 
-fn compose_file(uid: &str, gid: &str, game_data_root: &Path, docker_build_jobs: usize) -> String {
+fn compose_file(
+    uid: &str,
+    gid: &str,
+    game_data_root: &Path,
+    docker_build_jobs: usize,
+    images: Option<&ServerImages>,
+) -> String {
     let game_data_mount = serde_json::to_string(&format!(
         "{}:/client-data:ro",
         game_data_root.join("Data").display()
     ))
     .expect("un chemin peut être sérialisé");
+    let source = |target, image| compose_service_source(target, image, uid, gid, docker_build_jobs);
     COMPOSE_TEMPLATE
-        .replace("__UID__", uid)
-        .replace("__GID__", gid)
         .replace("__MYSQL_IMAGE__", MYSQL_IMAGE)
-        .replace("__BUILD_JOBS__", &docker_build_jobs.to_string())
+        .replace(
+            "__TOOLS_SOURCE__",
+            &source("tools", images.map(|images| images.tools.as_str())),
+        )
+        .replace(
+            "__DB_IMPORT_SOURCE__",
+            &source("db-import", images.map(|images| images.db_import.as_str())),
+        )
+        .replace(
+            "__AUTH_SERVER_SOURCE__",
+            &source(
+                "authserver",
+                images.map(|images| images.authserver.as_str()),
+            ),
+        )
+        .replace(
+            "__WORLD_SERVER_SOURCE__",
+            &source(
+                "worldserver",
+                images.map(|images| images.worldserver.as_str()),
+            ),
+        )
         .replace("__SOURCE_ID__", &source_id(game_data_root))
         .replace("__GAME_DATA_MOUNT__", &game_data_mount)
+}
+
+fn compose_service_source(
+    target: &str,
+    image: Option<&str>,
+    uid: &str,
+    gid: &str,
+    docker_build_jobs: usize,
+) -> String {
+    match image {
+        Some(image) => format!("    image: {image}"),
+        None => format!(
+            "    build:\n      context: .\n      dockerfile: apps/docker/Dockerfile.realmbox\n      target: {target}\n      args: {{ USER_ID: {uid}, GROUP_ID: {gid}, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: {docker_build_jobs} }}"
+        ),
+    }
 }
 
 fn source_id(game_data_root: &Path) -> String {
@@ -2121,11 +2274,7 @@ const COMPOSE_TEMPLATE: &str = r#"services:
       retries: 60
 
   server-data-init:
-    build:
-      context: .
-      dockerfile: apps/docker/Dockerfile.realmbox
-      target: tools
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
+__TOOLS_SOURCE__
     working_dir: /work
     environment:
       REALMBOX_SOURCE_ID: __SOURCE_ID__
@@ -2149,11 +2298,7 @@ const COMPOSE_TEMPLATE: &str = r#"services:
         fi
 
   db-import:
-    build:
-      context: .
-      dockerfile: apps/docker/Dockerfile.realmbox
-      target: db-import
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
+__DB_IMPORT_SOURCE__
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
       AC_WORLD_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_world"
@@ -2166,11 +2311,7 @@ const COMPOSE_TEMPLATE: &str = r#"services:
       database: { condition: service_healthy }
 
   authserver:
-    build:
-      context: .
-      dockerfile: apps/docker/Dockerfile.realmbox
-      target: authserver
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
+__AUTH_SERVER_SOURCE__
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
     ports:
@@ -2182,11 +2323,7 @@ const COMPOSE_TEMPLATE: &str = r#"services:
       database: { condition: service_healthy }
 
   worldserver:
-    build:
-      context: .
-      dockerfile: apps/docker/Dockerfile.realmbox
-      target: worldserver
-      args: { USER_ID: __UID__, GROUP_ID: __GID__, DOCKER_USER: acore, REALMBOX_BUILD_JOBS: __BUILD_JOBS__ }
+__WORLD_SERVER_SOURCE__
     environment:
       AC_LOGIN_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_auth"
       AC_WORLD_DATABASE_INFO: "database;3306;root;${REALMBOX_DB_PASSWORD};acore_world"
@@ -2387,7 +2524,7 @@ mod tests {
 
     #[test]
     fn compose_pins_database_and_server_data_and_binds_ports_locally() {
-        let compose = compose_file("501", "20", Path::new("/Jeux privés/Wrath"), 3);
+        let compose = compose_file("501", "20", Path::new("/Jeux privés/Wrath"), 3, None);
         assert!(compose.contains(MYSQL_IMAGE));
         assert!(compose.contains("Dockerfile.realmbox"));
         assert!(compose.contains("REALMBOX_BUILD_JOBS: 3"));
@@ -2399,6 +2536,52 @@ mod tests {
         assert!(!compose.contains("3307:3306"));
         assert!(compose.contains("host.docker.internal:host-gateway"));
         assert!(!compose.contains("image: mysql:8.4"));
+    }
+
+    #[test]
+    fn release_images_are_complete_immutable_and_replace_every_server_build() {
+        let digest = "a".repeat(64);
+        let auth = format!("ghcr.io/realmbox/server-auth@sha256:{digest}");
+        let world = format!("ghcr.io/realmbox/server-world@sha256:{digest}");
+        let db_import = format!("ghcr.io/realmbox/server-db-import@sha256:{digest}");
+        let tools = format!("ghcr.io/realmbox/server-tools@sha256:{digest}");
+        let images =
+            server_images_from_values([Some(&auth), Some(&world), Some(&db_import), Some(&tools)])
+                .expect("valid release images")
+                .expect("images");
+        let compose = compose_file("1000", "1000", Path::new("/Games/Wrath"), 2, Some(&images));
+        assert!(compose.contains(&format!("image: {auth}")));
+        assert!(compose.contains(&format!("image: {world}")));
+        assert!(compose.contains(&format!("image: {db_import}")));
+        assert!(compose.contains(&format!("image: {tools}")));
+        assert!(!compose.contains("build:"));
+
+        assert!(server_images_from_values([Some(&auth), None, None, None]).is_err());
+        assert!(
+            server_images_from_values([
+                Some("ghcr.io/realmbox/auth:latest"),
+                Some(&world),
+                Some(&db_import),
+                Some(&tools),
+            ])
+            .is_err()
+        );
+        let injected = format!("ghcr.io/realmbox/auth\nimage@sha256:{digest}");
+        assert!(
+            server_images_from_values([
+                Some(&injected),
+                Some(&world),
+                Some(&db_import),
+                Some(&tools),
+            ])
+            .is_err()
+        );
+        assert_eq!(
+            embedded_server_images()
+                .expect("compile-time image set is valid")
+                .is_some(),
+            AUTH_SERVER_IMAGE.is_some()
+        );
     }
 
     #[test]
@@ -2442,6 +2625,7 @@ mod tests {
             patched
                 .contains("modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data")
         );
+        assert!(!patched.contains("\n+     modules/mod-playerbots/data"));
         assert!(!patched.contains("$(nproc)"));
     }
 
@@ -2471,6 +2655,24 @@ mod tests {
                 .join("env/dist/etc/playerbots.conf")
                 .exists()
         );
+    }
+
+    #[test]
+    fn prebuilt_module_configuration_uses_the_image_dist_file() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let modules = temporary.path().join("env/dist/etc/modules");
+        fs::create_dir_all(&modules).expect("module dir");
+        fs::write(
+            modules.join("playerbots.conf.dist"),
+            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.ImageDefault = keep\n",
+        )
+        .expect("image dist config");
+
+        write_playerbots_config(temporary.path(), true).expect("prebuilt config");
+
+        let config = fs::read_to_string(modules.join("playerbots.conf")).expect("config");
+        assert!(config.contains("AiPlayerbot.Enabled = 1"));
+        assert!(config.contains("AiPlayerbot.ImageDefault = keep"));
     }
 
     #[test]
