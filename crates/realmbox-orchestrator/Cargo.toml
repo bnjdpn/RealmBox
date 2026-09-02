@@ -1,0 +1,14 @@
+[package]
+name = "realmbox-orchestrator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+realmbox-client = { path = "../realmbox-client" }
+realmbox-domain = { path = "../realmbox-domain" }
+realmbox-runtime = { path = "../realmbox-runtime" }
+realmbox-storage = { path = "../realmbox-storage" }
+serde.workspace = true
+thiserror.workspace = true
+

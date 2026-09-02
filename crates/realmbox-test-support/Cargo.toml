@@ -1,0 +1,10 @@
+[package]
+name = "realmbox-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+realmbox-client = { path = "../realmbox-client" }
+realmbox-runtime = { path = "../realmbox-runtime" }
+
