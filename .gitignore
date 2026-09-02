@@ -15,3 +15,5 @@ node_modules/
 *.log
 runtime/downloads/
 runtime/build/
+/.playwright-cli/
+/output/playwright/

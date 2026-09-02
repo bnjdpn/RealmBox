@@ -4,7 +4,7 @@ Mis à jour le 2 septembre 2026 sur macOS 26.6.2 arm64.
 
 | Fonction | macOS arm64 | macOS x86-64 | Windows x64 | Preuve |
 |---|---|---|---|---|
-| UI RealmBox | testé automatiquement | non commencé | non commencé | Vitest + build Vite |
+| UI RealmBox | testé + QA visuelle | non commencé | non commencé | Vitest, build Vite, Playwright 1200 px et 390 px |
 | Machine à états | testé automatiquement | testé automatiquement | testé automatiquement | tests Rust indépendants plateforme |
 | SQLite/migrations | testé automatiquement | testé automatiquement | testé automatiquement | tests mémoire + chemin Unicode |
 | Faux onboarding complet | testé avec fake | non commencé | workflow créé | tests frontend |
