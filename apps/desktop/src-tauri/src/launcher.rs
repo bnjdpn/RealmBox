@@ -969,7 +969,6 @@ impl<R: CommandRunner> LauncherService<R> {
                     &staging.join("install-rollback.log"),
                 );
             }
-            let _ = fs::remove_dir_all(staging);
         }
         result
     }
@@ -2357,6 +2356,9 @@ const COMPOSE_TEMPLATE: &str = r#"services:
 
   server-data-init:
 __TOOLS_SOURCE__
+    # A named Docker volume starts owned by root. The extractors must initialise
+    # it before the unprivileged runtime servers mount the generated data read-only.
+    user: "0:0"
     working_dir: /work
     environment:
       REALMBOX_SOURCE_ID: __SOURCE_ID__
@@ -2664,6 +2666,8 @@ mod tests {
         assert!(compose.contains(&expected_mount));
         assert!(compose.contains("map_extractor"));
         assert!(compose.contains("mmaps_generator"));
+        assert!(compose.contains("server-data-init:\n"));
+        assert!(compose.contains("    user: \"0:0\""));
         assert!(compose.contains("127.0.0.1:3724:3724"));
         assert!(compose.contains("127.0.0.1:8085:8085"));
         assert!(!compose.contains("3307:3306"));
