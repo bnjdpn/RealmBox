@@ -1,0 +1,17 @@
+{
+  "name": "realmbox",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --dir apps/desktop tauri dev",
+    "dev:fake": "pnpm --dir apps/desktop dev",
+    "build": "pnpm --dir apps/desktop build",
+    "test": "pnpm --dir apps/desktop test",
+    "typecheck": "pnpm --dir apps/desktop typecheck",
+    "lint": "pnpm --dir apps/desktop lint",
+    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm check:rust"
+  }
+}
+
