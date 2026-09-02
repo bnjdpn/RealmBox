@@ -34,6 +34,36 @@ pub struct OwnedProcess {
     pub ownership_token: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+    pub timeout: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+pub trait Clock: Send + Sync {
+    fn unix_timestamp_millis(&self) -> Result<u64, RuntimeError>;
+}
+
+pub trait FileSystem: Send + Sync {
+    fn exists(&self, path: &Path) -> bool;
+    fn read(&self, path: &Path) -> Result<Vec<u8>, RuntimeError>;
+    fn write_atomic(&self, path: &Path, contents: &[u8]) -> Result<(), RuntimeError>;
+}
+
+pub trait HttpClient: Send + Sync {
+    fn execute(&self, request: HttpRequest) -> Result<HttpResponse, RuntimeError>;
+}
+
 pub trait PlatformPaths: Send + Sync {
     fn state_dir(&self) -> Result<PathBuf, RuntimeError>;
     fn logs_dir(&self) -> Result<PathBuf, RuntimeError>;
