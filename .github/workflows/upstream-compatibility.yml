@@ -22,8 +22,8 @@ jobs:
             artifact: openwow-windows-x64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: rkabachenko/OpenWow-snapshot
           ref: 2521e1f72eeffd661913be63d1e2b374073c316c
@@ -60,12 +60,12 @@ jobs:
         os: [macos-15, macos-15-intel, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: mod-playerbots/azerothcore-wotlk, ref: 47960183bb03b83e8943eb2f0f39c16df9710c9d, path: upstream/server }
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: mod-playerbots/mod-playerbots, ref: 2f7d9f774987d0157c6a0d0cc08c40bec3db3945, path: upstream/server/modules/mod-playerbots }
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { repository: DustinHendrickson/mod-ollama-chat, ref: a9d14b0b8955be136e657ac168dd255f5281a535, path: upstream/server/modules/mod-ollama-chat }
       - name: Install macOS server dependencies
         if: runner.os == 'macOS'
