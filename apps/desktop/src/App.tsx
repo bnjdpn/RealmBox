@@ -151,11 +151,11 @@ export default function App() {
   }, [status]);
 
   async function selectData() {
-    const selected = await chooseGameData();
-    if (!selected) return;
     setRequestPending(true);
     setGameDataError(null);
     try {
+      const selected = await chooseGameData();
+      if (!selected) return;
       const inspection = await inspectGameData(selected);
       setGameDataInspection(inspection);
       setGameDataPath(inspection.path);

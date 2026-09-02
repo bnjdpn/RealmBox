@@ -122,6 +122,19 @@ describe("RealmBox launcher", () => {
     expect(runtime.installRealm).not.toHaveBeenCalled();
   });
 
+  it("surfaces a native folder-picker failure instead of leaving the button inert", async () => {
+    const user = userEvent.setup();
+    runtime.chooseGameData.mockRejectedValue("dialog.open not allowed");
+    render(<App />);
+
+    await screen.findByRole("heading", { name: /données de jeu requises/i });
+    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+
+    expect(await screen.findByText(/dialog\.open not allowed/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /installer/i })).toBeDisabled();
+    expect(runtime.inspectGameData).not.toHaveBeenCalled();
+  });
+
   it("persists the player-provided Windows client choice", async () => {
     const user = userEvent.setup();
     render(<App />);
