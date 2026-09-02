@@ -1,7 +1,9 @@
 # RealmBox Companions
 
-Le squelette 0.1 utilise uniquement des boutons associés à une table de commandes constante. Aucune saisie utilisateur n'est concaténée à une commande Playerbots. Les commandes `follow`, `attack`, `stay`, `summon` et `leave` sont documentées dans le wiki du projet Playerbots consulté le 2 septembre 2026. `cooldowns on` reste à vérifier dans le commit épinglé avant activation en parcours réel.
+L’addon expose uniquement des boutons associés à des commandes constantes. Aucune saisie utilisateur n’est concaténée à une commande Playerbots.
 
-Cette première version envoie les commandes fixes sur le canal de groupe. Elle ne fournit pas encore de passerelle serveur authentifiée, de sélection de composition, ni de dialogue avec `mod-ollama-chat`. Le panneau sert de squelette testable visuellement lorsque l'API addon OpenWoW est disponible avec des données utilisateur.
+`Former mon équipe` envoie successivement quatre commandes bornées `addclass` pour obtenir un paladin, un prêtre, un mage et un chasseur du niveau du joueur. Playerbots crée le groupe et invoque les bots près du joueur. Les boutons suivants envoient `follow`, `attack`, `stay`, `summon`, `cooldowns on` ou `leave` sur le canal du groupe.
 
-Test manuel : copier le dossier dans `Interface/AddOns`, vérifier que l'addon est listé, entrer dans un groupe de bots, puis tester chaque bouton avec les logs Playerbots ouverts. Ne pas considérer ce test comme validé tant que les réponses du serveur ne sont pas observées.
+Preuve réelle du 2 septembre 2026 : OpenWoW a chargé l’addon, les quatre commandes `addclass` ont créé un groupe complet autour du joueur, les cadres de groupe étaient visibles et la base locale a confirmé les cinq membres. Les actions de combat et le changement de composition restent à tester séparément.
+
+Le dialogue `mod-ollama-chat` n’est pas géré par ce panneau. Il reste désactivable depuis RealmBox et doit être prouvé avec un modèle local avant d’ajouter un contrôle en jeu.

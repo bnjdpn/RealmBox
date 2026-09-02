@@ -10,12 +10,23 @@ use std::{
 
 use ai::AiCapability;
 use launcher::{
-    ClientChoice, GameDataInspection, LauncherPhase, LauncherProgress, LauncherService,
-    LauncherStatus, SystemCommandRunner,
+    ClientChoice, GameDataInspection, InstallationOptions, LauncherPhase, LauncherProgress,
+    LauncherService, LauncherStatus, SystemCommandRunner,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState(Arc<Mutex<LauncherService<SystemCommandRunner>>>);
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallRealmRequest {
+    game_data_path: String,
+    client_choice: ClientChoice,
+    bots_enabled: bool,
+    bot_count: usize,
+    ai_enabled: bool,
+    ai_model: Option<String>,
+}
 
 fn emit_progress(app: &AppHandle, progress: LauncherProgress) {
     let _ = app.emit("realmbox://progress", progress);
@@ -108,11 +119,7 @@ async fn bootstrap_launcher(
 async fn install_realm(
     app: AppHandle,
     state: State<'_, AppState>,
-    game_data_path: String,
-    client_choice: ClientChoice,
-    bots_enabled: bool,
-    ai_enabled: bool,
-    ai_model: Option<String>,
+    request: InstallRealmRequest,
 ) -> Result<LauncherStatus, String> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
@@ -121,11 +128,14 @@ async fn install_realm(
             .lock()
             .map_err(|_| "état du lanceur indisponible".to_string())?
             .install(
-                game_data_path.as_ref(),
-                client_choice,
-                bots_enabled,
-                ai_enabled,
-                ai_model,
+                request.game_data_path.as_ref(),
+                InstallationOptions {
+                    client_choice: request.client_choice,
+                    bots_enabled: request.bots_enabled,
+                    bot_count: request.bot_count,
+                    ai_enabled: request.ai_enabled,
+                    ai_model: request.ai_model,
+                },
                 |progress| emit_progress(&app_handle, progress),
             )
     })
@@ -138,6 +148,7 @@ async fn start_realm(
     app: AppHandle,
     state: State<'_, AppState>,
     bots_enabled: bool,
+    bot_count: usize,
     ai_enabled: bool,
 ) -> Result<LauncherStatus, String> {
     let service = Arc::clone(&state.0);
@@ -146,9 +157,12 @@ async fn start_realm(
         service
             .lock()
             .map_err(|_| "état du lanceur indisponible".to_string())?
-            .start(Some(bots_enabled), Some(ai_enabled), |progress| {
-                emit_progress(&app_handle, progress)
-            })
+            .start(
+                Some(bots_enabled),
+                Some(bot_count),
+                Some(ai_enabled),
+                |progress| emit_progress(&app_handle, progress),
+            )
     })
     .await
     .map_err(|error| error.to_string())??;

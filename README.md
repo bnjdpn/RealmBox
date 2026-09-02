@@ -7,7 +7,7 @@
 [![Windows x64](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml)
 [![Licence AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg)](LICENSE)
 
-RealmBox est un lanceur Windows x64 et macOS Apple Silicon pour jouer sur un monde 3.3.5a entièrement local. Au premier lancement, il demande le dossier d'une copie compatible appartenant au joueur, puis prépare automatiquement le client, le serveur, la base locale et Playerbots. Si la machine est assez confortable, il peut aussi installer Ollama et `mod-ollama-chat` pour donner aux compagnons des dialogues calculés localement. Aux lancements suivants, il démarre la pile dans l'ordre et ouvre directement le client.
+RealmBox est un lanceur Windows x64 et macOS Apple Silicon pour jouer sur un monde 3.3.5a entièrement local. Au premier lancement, il demande le dossier d'une copie compatible appartenant au joueur, puis prépare le client, le serveur, la base locale et Playerbots. Si la machine est assez confortable, il peut aussi installer Ollama et `mod-ollama-chat` pour calculer localement les dialogues des bots. Aux lancements suivants, il démarre la pile dans l'ordre et ouvre le client.
 
 L'interface reprend la composition des lanceurs MMO de l'ère Wrath — grande scène originale, nouvelles à droite, métal bleuté, barre de mise à jour et grand bouton d'action — sans logo, illustration, texte ni ressource Blizzard.
 
@@ -16,7 +16,7 @@ L'interface reprend la composition des lanceurs MMO de l'ère Wrath — grande s
 1. Démarrer Docker Desktop.
 2. Choisir le client : **OpenWoW géré par RealmBox** (recommandé) ou, sous Windows x64, **client original fourni par le joueur**.
 3. Choisir le dossier qui contient `Data` dans une copie 3.3.5a build 12340 obtenue légalement. RealmBox contrôle immédiatement les signatures MPQ, les archives WotLK (`common`, `expansion`, `lichking`) et l’archive de locale avant d’autoriser l’installation.
-4. Activer ou désactiver les compagnons Playerbots.
+4. Activer ou désactiver Playerbots et choisir une population de 5, 25, 50, 100 ou 150 bots. RealmBox limite la valeur selon la mémoire réellement accordée à Docker.
 5. Facultatif : accepter les dialogues IA si CanIRun classe un modèle compact comme confortable sur cette machine.
 6. Cliquer sur **Installer**.
 
@@ -35,6 +35,16 @@ MySQL local → vérification des données serveur → migrations → Ollama loc
 ```
 
 Playerbots est activé uniquement si le joueur l'a demandé. Ollama écoute sur `127.0.0.1:11435`, avec les fonctions cloud désactivées pendant le jeu, une seule requête parallèle et un seul modèle chargé. Les ports de jeu sont liés à `127.0.0.1` et MySQL n'est pas publié sur l'hôte. RealmBox surveille le processus client qu'il a démarré et arrête automatiquement le monde, la base et Ollama quand ce client se ferme. Les journaux, sauvegardes de configuration et composants gérés restent dans le répertoire applicatif `org.realmbox.desktop`.
+
+Dans le jeu, l’addon RealmBox permet de former une équipe équilibrée de quatre bots au niveau du joueur, puis de leur demander de suivre, attaquer, attendre ou se regrouper. Les autres bots continuent de parcourir le monde de façon autonome.
+
+## Client selon la plateforme
+
+- **Windows x64** : une copie 3.3.5a avec `Wow.exe` peut être lancée directement ; OpenWoW reste disponible comme option expérimentale.
+- **macOS Apple Silicon** : le package Windows fournit les données, mais pas un exécutable natif. RealmBox utilise OpenWoW arm64 pour éviter une machine virtuelle Windows.
+- **Linux** : prévu, non implémenté. Les options à qualifier sont OpenWoW natif et le client Windows via Wine.
+
+La matrice et les décisions détaillées sont suivies dans [ROADMAP.md](ROADMAP.md) et [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 ## Développement
 

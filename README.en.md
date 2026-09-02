@@ -16,7 +16,7 @@ The interface is an original Wrath-era MMO launcher composition. RealmBox contai
 1. Start Docker Desktop.
 2. Choose **OpenWoW managed by RealmBox** (recommended), or on Windows x64 choose a player-provided original client.
 3. Select a legally obtained 3.3.5a build 12340 folder containing `Data`.
-4. Enable or disable Playerbots.
+4. Enable or disable Playerbots and choose a population of 5, 25, 50, 100, or 150. RealmBox caps it against the memory actually assigned to Docker.
 5. Optionally enable local AI dialogue when CanIRun reports a comfortable model.
 6. Select **Install**.
 
@@ -33,6 +33,16 @@ local MySQL → server-data check → migrations → optional local Ollama → a
 ```
 
 Game ports bind only to `127.0.0.1`; MySQL is not published to the host. RealmBox supervises the client process and shuts down the world, database, and Ollama when the owned client exits. Player data remains on the player's machine.
+
+The in-game RealmBox addon can create a balanced party of four level-matched bots next to the player, then issue bounded follow, attack, stay, regroup, and leave commands. The remaining bots continue roaming the world autonomously.
+
+## Client by platform
+
+- **Windows x64**: a compatible copy containing `Wow.exe` can run directly; OpenWoW remains an experimental alternative.
+- **Apple Silicon macOS**: the Windows package supplies the data but not a native executable. RealmBox uses OpenWoW arm64 instead of requiring a Windows VM.
+- **Linux**: planned but not implemented. Native OpenWoW and the Windows client through Wine both need real-path qualification.
+
+See [ROADMAP.md](ROADMAP.md) and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the tracked product work and client matrix.
 
 ## Development
 

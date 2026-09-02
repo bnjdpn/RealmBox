@@ -15,6 +15,7 @@ function browserStatus(): LauncherStatus {
     progress: 0,
     installed: false,
     botsEnabled: true,
+    botCount: 50,
     aiEnabled: false,
     aiModel: null,
     gameDataPath: null,
@@ -71,14 +72,15 @@ export async function installRealm(
   gameDataPath: string,
   clientChoice: ClientChoice,
   botsEnabled: boolean,
+  botCount: number,
   aiEnabled: boolean,
   aiModel: string | null,
 ): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("install_realm", { gameDataPath, clientChoice, botsEnabled, aiEnabled, aiModel });
+  return invoke<LauncherStatus>("install_realm", { request: { gameDataPath, clientChoice, botsEnabled, botCount, aiEnabled, aiModel } });
 }
 
-export async function startRealm(botsEnabled: boolean, aiEnabled: boolean): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("start_realm", { botsEnabled, aiEnabled });
+export async function startRealm(botsEnabled: boolean, botCount: number, aiEnabled: boolean): Promise<LauncherStatus> {
+  return invoke<LauncherStatus>("start_realm", { botsEnabled, botCount, aiEnabled });
 }
 
 export async function stopRealm(): Promise<LauncherStatus> {

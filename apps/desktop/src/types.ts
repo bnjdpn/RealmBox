@@ -25,6 +25,7 @@ export interface LauncherStatus {
   progress: number;
   installed: boolean;
   botsEnabled: boolean;
+  botCount: number;
   aiEnabled: boolean;
   aiModel: string | null;
   gameDataPath: string | null;

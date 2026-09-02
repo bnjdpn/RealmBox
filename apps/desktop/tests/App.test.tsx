@@ -11,6 +11,7 @@ const missing: LauncherStatus = {
   progress: 0,
   installed: false,
   botsEnabled: true,
+  botCount: 50,
   aiEnabled: false,
   aiModel: null,
   gameDataPath: null,
@@ -105,7 +106,7 @@ describe("RealmBox launcher", () => {
     expect(install).toBeEnabled();
 
     await user.click(install);
-    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, true, "qwen3:8b");
+    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, 50, true, "qwen3:8b");
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
   });
 
@@ -148,6 +149,7 @@ describe("RealmBox launcher", () => {
       "/Jeux/Wrath",
       "originalWindows",
       true,
+      50,
       true,
       "qwen3:8b",
     );

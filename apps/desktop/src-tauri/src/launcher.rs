@@ -149,6 +149,7 @@ pub struct LauncherStatus {
     pub progress: u8,
     pub installed: bool,
     pub bots_enabled: bool,
+    pub bot_count: usize,
     pub ai_enabled: bool,
     pub ai_model: Option<String>,
     pub game_data_path: Option<String>,
@@ -177,6 +178,15 @@ pub struct GameDataInspection {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallationOptions {
+    pub client_choice: ClientChoice,
+    pub bots_enabled: bool,
+    pub bot_count: usize,
+    pub ai_enabled: bool,
+    pub ai_model: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InstallationRecord {
@@ -187,6 +197,8 @@ struct InstallationRecord {
     client_choice: ClientChoice,
     compose_file: PathBuf,
     bots_enabled: bool,
+    #[serde(default = "default_bot_count")]
+    bot_count: usize,
     ai_enabled: bool,
     ai_model: Option<String>,
     ollama_executable: Option<PathBuf>,
@@ -342,7 +354,7 @@ impl CommandRunner for SystemCommandRunner {
         }
         let log = File::create(log_path).map_err(|error| error.to_string())?;
         let errors = log.try_clone().map_err(|error| error.to_string())?;
-        let child = Command::new(program)
+        let mut child = Command::new(program)
             .args(args)
             .envs(environment.iter().cloned())
             .current_dir(current_dir.unwrap_or_else(|| Path::new(".")))
@@ -350,7 +362,11 @@ impl CommandRunner for SystemCommandRunner {
             .stderr(Stdio::from(errors))
             .spawn()
             .map_err(|error| format!("impossible de lancer {}: {error}", program.display()))?;
-        Ok(child.id())
+        let process_id = child.id();
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(process_id)
     }
 
     fn terminate(&self, process_id: u32) -> Result<(), String> {
@@ -503,6 +519,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 progress: 0,
                 installed: false,
                 bots_enabled: record.bots_enabled,
+                bot_count: record.bot_count,
                 ai_enabled: record.ai_enabled,
                 ai_model: record.ai_model.clone(),
                 game_data_path: Some(record.game_data_root.display().to_string()),
@@ -514,6 +531,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 components: components(
                     ComponentState::Error,
                     record.bots_enabled,
+                    record.bot_count,
                     record.ai_enabled,
                     record.ai_model.as_deref(),
                     record.client_choice,
@@ -527,6 +545,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 progress: 0,
                 installed: false,
                 bots_enabled: true,
+                bot_count: default_bot_count(),
                 ai_enabled: false,
                 ai_model: None,
                 game_data_path: None,
@@ -538,6 +557,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 components: components(
                     ComponentState::Error,
                     true,
+                    default_bot_count(),
                     false,
                     None,
                     ClientChoice::ManagedOpenWow,
@@ -551,7 +571,7 @@ impl<R: CommandRunner> LauncherService<R> {
         F: FnMut(LauncherProgress),
     {
         if self.load_record()?.is_some() {
-            self.start(None, None, progress)
+            self.start(None, None, None, progress)
         } else {
             Ok(self.status())
         }
@@ -560,15 +580,19 @@ impl<R: CommandRunner> LauncherService<R> {
     pub fn install<F>(
         &mut self,
         selected_path: &Path,
-        client_choice: ClientChoice,
-        bots_enabled: bool,
-        ai_enabled: bool,
-        ai_model: Option<String>,
+        options: InstallationOptions,
         mut progress: F,
     ) -> Result<LauncherStatus, String>
     where
         F: FnMut(LauncherProgress),
     {
+        let InstallationOptions {
+            client_choice,
+            bots_enabled,
+            bot_count,
+            ai_enabled,
+            ai_model,
+        } = options;
         let platform = platform_assets()?;
         if client_choice == ClientChoice::OriginalWindows && !original_client_supported() {
             return Err("le client original fourni par le joueur est pris en charge uniquement sur Windows x64".into());
@@ -606,18 +630,19 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .map_err(|error| format!("Docker Desktop doit être installé et démarré: {error}"))?;
+        let docker_memory = self
+            .runner
+            .run(
+                "docker",
+                &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
+                None,
+            )
+            .unwrap_or_default();
+        let bot_count = effective_playerbot_count(&docker_memory, bots_enabled, bot_count);
         let server_images = embedded_server_images()?;
         let docker_build_jobs = if server_images.is_some() {
             DEFAULT_DOCKER_BUILD_JOBS
         } else {
-            let docker_memory = self
-                .runner
-                .run(
-                    "docker",
-                    &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
-                    None,
-                )
-                .unwrap_or_default();
             docker_build_jobs(&docker_memory)
         };
 
@@ -870,7 +895,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 Some(&server_root),
                 &logs.join("database-import.log"),
             )?;
-            write_playerbots_config(&server_root, bots_enabled)?;
+            write_playerbots_config(&server_root, bots_enabled, bot_count)?;
             write_ollama_chat_config(&server_root, ai_enabled, ai_model.as_deref())?;
             self.emit(
                 &mut progress,
@@ -933,6 +958,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 compose_file: runtime_root.join("server/compose.realmbox.yaml"),
                 runtime_root: runtime_root.clone(),
                 bots_enabled,
+                bot_count,
                 ai_enabled,
                 ai_model: ai_model.clone(),
                 ollama_executable: ai_enabled
@@ -976,6 +1002,7 @@ impl<R: CommandRunner> LauncherService<R> {
     pub fn start<F>(
         &mut self,
         bots_enabled: Option<bool>,
+        bot_count: Option<usize>,
         ai_enabled: Option<bool>,
         mut progress: F,
     ) -> Result<LauncherStatus, String>
@@ -987,6 +1014,9 @@ impl<R: CommandRunner> LauncherService<R> {
             .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
         if let Some(enabled) = bots_enabled {
             record.bots_enabled = enabled;
+        }
+        if let Some(requested) = bot_count {
+            record.bot_count = normalize_bot_count(requested);
         }
         if let Some(enabled) = ai_enabled {
             if enabled && !record.bots_enabled {
@@ -1005,7 +1035,6 @@ impl<R: CommandRunner> LauncherService<R> {
             .compose_file
             .parent()
             .ok_or_else(|| "chemin serveur invalide".to_string())?;
-        write_playerbots_config(server_root, record.bots_enabled)?;
         write_ollama_chat_config(server_root, record.ai_enabled, record.ai_model.as_deref())?;
         self.runner
             .run(
@@ -1018,6 +1047,18 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .map_err(|error| format!("Docker Desktop doit être démarré: {error}"))?;
+        let docker_memory = self
+            .runner
+            .run(
+                "docker",
+                &["info".into(), "--format".into(), "{{.MemTotal}}".into()],
+                None,
+            )
+            .unwrap_or_default();
+        record.bot_count =
+            effective_playerbot_count(&docker_memory, record.bots_enabled, record.bot_count);
+        self.save_record(&record)?;
+        write_playerbots_config(server_root, record.bots_enabled, record.bot_count)?;
 
         self.emit(
             &mut progress,
@@ -1291,6 +1332,7 @@ impl<R: CommandRunner> LauncherService<R> {
             progress: 100,
             installed: true,
             bots_enabled: record.bots_enabled,
+            bot_count: record.bot_count,
             ai_enabled: record.ai_enabled,
             ai_model: record.ai_model.clone(),
             game_data_path: Some(record.game_data_root.display().to_string()),
@@ -1306,6 +1348,7 @@ impl<R: CommandRunner> LauncherService<R> {
                     ComponentState::Ready
                 },
                 record.bots_enabled,
+                record.bot_count,
                 record.ai_enabled,
                 record.ai_model.as_deref(),
                 record.client_choice,
@@ -1322,6 +1365,7 @@ fn missing_status() -> LauncherStatus {
         progress: 0,
         installed: false,
         bots_enabled: true,
+        bot_count: default_bot_count(),
         ai_enabled: false,
         ai_model: None,
         game_data_path: None,
@@ -1333,6 +1377,7 @@ fn missing_status() -> LauncherStatus {
         components: components(
             ComponentState::Missing,
             true,
+            default_bot_count(),
             false,
             None,
             ClientChoice::ManagedOpenWow,
@@ -1343,6 +1388,7 @@ fn missing_status() -> LauncherStatus {
 fn components(
     state: ComponentState,
     bots_enabled: bool,
+    bot_count: usize,
     ai_enabled: bool,
     ai_model: Option<&str>,
     client_choice: ClientChoice,
@@ -1378,7 +1424,7 @@ fn components(
                 ComponentState::Stopped
             },
             detail: if bots_enabled {
-                "Prêts à peupler le monde".into()
+                format!("{bot_count} aventuriers autonomes · équipe invocable en jeu")
             } else {
                 "Désactivés par le joueur".into()
             },
@@ -1792,9 +1838,13 @@ fn prepare_game_for_client<R: CommandRunner>(
     backup_root: &Path,
 ) -> Result<(), String> {
     match client_choice {
-        ClientChoice::ManagedOpenWow => {
-            prepare_managed_openwow_game(runner, game_data_root, managed_game, addon_source)
-        }
+        ClientChoice::ManagedOpenWow => prepare_managed_openwow_game(
+            runner,
+            game_data_root,
+            managed_game,
+            addon_source,
+            backup_root,
+        ),
         ClientChoice::OriginalWindows => {
             prepare_original_client_files(game_data_root, addon_source, backup_root)
         }
@@ -1806,33 +1856,113 @@ fn prepare_managed_openwow_game<R: CommandRunner>(
     game_data_root: &Path,
     managed_game: &Path,
     addon_source: &Path,
+    backup_root: &Path,
 ) -> Result<(), String> {
     fs::create_dir_all(managed_game.join("WTF")).map_err(|error| error.to_string())?;
     #[cfg(unix)]
-    std::os::unix::fs::symlink(game_data_root.join("Data"), managed_game.join("Data"))
-        .map_err(|error| error.to_string())?;
+    prepare_managed_openwow_data_overlay(game_data_root, managed_game)?;
 
     #[cfg(windows)]
-    runner.run(
-        "cmd.exe",
-        &[
-            "/C".into(),
-            "mklink".into(),
-            "/J".into(),
-            managed_game.join("Data").as_os_str().into(),
-            game_data_root.join("Data").as_os_str().into(),
-        ],
-        None,
-    )?;
+    {
+        runner.run(
+            "cmd.exe",
+            &[
+                "/C".into(),
+                "mklink".into(),
+                "/J".into(),
+                managed_game.join("Data").as_os_str().into(),
+                game_data_root.join("Data").as_os_str().into(),
+            ],
+            None,
+        )?;
+        backup_and_write_local_realmlist(game_data_root, backup_root)?;
+    }
 
     #[cfg(unix)]
-    let _ = runner;
+    let _ = (runner, backup_root);
 
     write_atomic(
         &managed_game.join("WTF/Config.wtf"),
         b"SET realmlist \"127.0.0.1\"\nSET portal \"127.0.0.1\"\n",
     )?;
     install_companion_addon(addon_source, managed_game)
+}
+
+#[cfg(unix)]
+fn prepare_managed_openwow_data_overlay(
+    game_data_root: &Path,
+    managed_game: &Path,
+) -> Result<(), String> {
+    let source_data = game_data_root.join("Data");
+    let managed_data = managed_game.join("Data");
+    fs::create_dir_all(&managed_data).map_err(|error| error.to_string())?;
+    let mut localized_realmlist_count = 0;
+
+    for entry in fs::read_dir(&source_data).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let source = entry.path();
+        let destination = managed_data.join(entry.file_name());
+        let is_locale_directory = entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+            && source.join("realmlist.wtf").is_file();
+        if !is_locale_directory {
+            std::os::unix::fs::symlink(&source, &destination).map_err(|error| error.to_string())?;
+            continue;
+        }
+
+        fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+        for locale_entry in fs::read_dir(&source).map_err(|error| error.to_string())? {
+            let locale_entry = locale_entry.map_err(|error| error.to_string())?;
+            if locale_entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("realmlist.wtf")
+            {
+                continue;
+            }
+            std::os::unix::fs::symlink(
+                locale_entry.path(),
+                destination.join(locale_entry.file_name()),
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        write_atomic(
+            &destination.join("realmlist.wtf"),
+            b"set realmlist 127.0.0.1\nset portal 127.0.0.1\n",
+        )?;
+        localized_realmlist_count += 1;
+    }
+
+    if localized_realmlist_count == 0 {
+        return Err("aucun realmlist localisable n’a été trouvé dans Data".into());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn backup_and_write_local_realmlist(
+    game_data_root: &Path,
+    backup_root: &Path,
+) -> Result<(), String> {
+    let locale = ["frFR", "enUS", "deDE", "esES", "ruRU"]
+        .into_iter()
+        .find(|locale| game_data_root.join("Data").join(locale).is_dir())
+        .ok_or_else(|| "aucune locale compatible n’a été trouvée".to_string())?;
+    let realmlist = game_data_root
+        .join("Data")
+        .join(locale)
+        .join("realmlist.wtf");
+    fs::create_dir_all(backup_root).map_err(|error| error.to_string())?;
+    let backup = backup_root.join(format!("managed-openwow-realmlist-{locale}.wtf"));
+    if realmlist.is_file() && !backup.exists() {
+        fs::copy(&realmlist, backup).map_err(|error| error.to_string())?;
+    }
+    write_atomic(
+        &realmlist,
+        b"set realmlist 127.0.0.1\nset portal 127.0.0.1\n",
+    )
 }
 
 fn prepare_original_client_files(
@@ -1882,9 +2012,13 @@ fn install_companion_addon(addon_source: &Path, game_root: &Path) -> Result<(), 
     Ok(())
 }
 
-fn write_playerbots_config(server_root: &Path, enabled: bool) -> Result<(), String> {
+fn write_playerbots_config(
+    server_root: &Path,
+    enabled: bool,
+    requested_count: usize,
+) -> Result<(), String> {
     let value = if enabled { 1 } else { 0 };
-    let count = if enabled { 50 } else { 0 };
+    let count = if enabled { requested_count.max(1) } else { 0 };
     write_module_config(
         server_root,
         "mod-playerbots",
@@ -1894,8 +2028,42 @@ fn write_playerbots_config(server_root: &Path, enabled: bool) -> Result<(), Stri
             ("AiPlayerbot.RandomBotAutologin", value.to_string()),
             ("AiPlayerbot.MinRandomBots", count.to_string()),
             ("AiPlayerbot.MaxRandomBots", count.to_string()),
+            ("AiPlayerbot.RandomBotGuildCount", "0".to_string()),
         ],
     )
+}
+
+fn default_bot_count() -> usize {
+    50
+}
+
+fn normalize_bot_count(requested: usize) -> usize {
+    match requested {
+        0..=5 => 5,
+        6..=25 => 25,
+        26..=50 => 50,
+        51..=100 => 100,
+        _ => 150,
+    }
+}
+
+fn playerbot_capacity(memory_output: &str) -> usize {
+    let memory_bytes = memory_output.trim().parse::<u64>().unwrap_or_default();
+    const GIB: u64 = 1024 * 1024 * 1024;
+    match memory_bytes {
+        0 => 5,
+        bytes if bytes < 12 * GIB => 5,
+        bytes if bytes < 20 * GIB => 50,
+        bytes if bytes < 28 * GIB => 100,
+        _ => 150,
+    }
+}
+
+fn effective_playerbot_count(memory_output: &str, enabled: bool, requested: usize) -> usize {
+    if !enabled {
+        return 0;
+    }
+    normalize_bot_count(requested).min(playerbot_capacity(memory_output))
 }
 
 fn write_ollama_chat_config(
@@ -2102,7 +2270,9 @@ fn configure_local_account<R: CommandRunner>(
     let salt = decode_hex_32(salt_hex.trim())?;
     let verifier = srp6_verifier(PLAYER_ACCOUNT_NAME, PLAYER_ACCOUNT_PASSWORD, &salt)?;
     let sql = format!(
-        "INSERT IGNORE INTO account(username,salt,verifier,expansion,reg_mail,email,joindate) VALUES('{PLAYER_ACCOUNT_NAME}',UNHEX('{}'),UNHEX('{}'),2,'','',NOW()); INSERT IGNORE INTO realmcharacters(realmid,acctid,numchars) SELECT realmlist.id,account.id,0 FROM realmlist,account LEFT JOIN realmcharacters ON acctid=account.id WHERE account.username='{PLAYER_ACCOUNT_NAME}' AND acctid IS NULL; UPDATE realmlist SET name='RealmBox',address='127.0.0.1',localAddress='127.0.0.1',port=8085,flag=0,gamebuild=12340 WHERE id=1;",
+        "INSERT IGNORE INTO account(username,salt,verifier,expansion,reg_mail,email,joindate) VALUES('{PLAYER_ACCOUNT_NAME}',UNHEX('{}'),UNHEX('{}'),2,'','',NOW()); UPDATE account SET salt=UNHEX('{}'),verifier=UNHEX('{}'),expansion=2 WHERE username='{PLAYER_ACCOUNT_NAME}'; INSERT IGNORE INTO realmcharacters(realmid,acctid,numchars) SELECT realmlist.id,account.id,0 FROM realmlist,account LEFT JOIN realmcharacters ON acctid=account.id WHERE account.username='{PLAYER_ACCOUNT_NAME}' AND acctid IS NULL; UPDATE realmlist SET name='RealmBox',address='127.0.0.1',localAddress='127.0.0.1',port=8085,flag=0,gamebuild=12340 WHERE id=1;",
+        encode_hex(&salt),
+        encode_hex(&verifier),
         encode_hex(&salt),
         encode_hex(&verifier),
     );
@@ -2660,6 +2830,63 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn managed_openwow_uses_a_local_realmlist_without_changing_player_data() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let game = temporary.path().join("Wrath");
+        let locale = game.join("Data/enUS");
+        let managed_game = temporary.path().join("managed");
+        let addon = temporary.path().join("addon");
+        fs::create_dir_all(&locale).expect("locale");
+        fs::create_dir_all(&addon).expect("addon");
+        fs::write(game.join("Data/common.MPQ"), "player data").expect("data");
+        fs::write(
+            locale.join("realmlist.wtf"),
+            "set realmlist logon.example.invalid\n",
+        )
+        .expect("source realmlist");
+        fs::write(locale.join("locale-enUS.MPQ"), "locale data").expect("locale data");
+        for filename in [
+            "RealmBoxCompanions.lua",
+            "RealmBoxCompanions.toc",
+            "RealmBoxCompanions.xml",
+        ] {
+            fs::write(addon.join(filename), filename).expect("addon fixture");
+        }
+
+        prepare_managed_openwow_game(
+            &RecordingRunner::default(),
+            &game,
+            &managed_game,
+            &addon,
+            &temporary.path().join("backup"),
+        )
+        .expect("managed OpenWoW game");
+
+        assert_eq!(
+            fs::read_to_string(locale.join("realmlist.wtf")).expect("source unchanged"),
+            "set realmlist logon.example.invalid\n"
+        );
+        assert_eq!(
+            fs::read_to_string(managed_game.join("Data/enUS/realmlist.wtf"))
+                .expect("managed realmlist"),
+            "set realmlist 127.0.0.1\nset portal 127.0.0.1\n"
+        );
+        assert!(
+            fs::symlink_metadata(managed_game.join("Data/common.MPQ"))
+                .expect("data link")
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            !fs::symlink_metadata(managed_game.join("Data/enUS"))
+                .expect("locale overlay")
+                .file_type()
+                .is_symlink()
+        );
+    }
+
     #[test]
     fn compose_pins_database_and_server_data_and_binds_ports_locally() {
         let game_root = Path::new("/Jeux privés/Wrath");
@@ -2743,6 +2970,18 @@ mod tests {
     }
 
     #[test]
+    fn playerbot_capacity_tracks_memory_available_to_docker() {
+        assert_eq!(effective_playerbot_count("", true, 150), 5);
+        assert_eq!(effective_playerbot_count("8589934592", true, 50), 5);
+        assert_eq!(effective_playerbot_count("17179869184", true, 25), 25);
+        assert_eq!(effective_playerbot_count("17179869184", true, 100), 50);
+        assert_eq!(effective_playerbot_count("25769803776", true, 150), 100);
+        assert_eq!(effective_playerbot_count("34359738368", true, 150), 150);
+        assert_eq!(effective_playerbot_count("34359738368", false, 150), 0);
+        assert_eq!(normalize_bot_count(12), 25);
+    }
+
+    #[test]
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn docker_desktop_uses_the_portable_upstream_user() {
         let runner = RecordingRunner::default();
@@ -2788,10 +3027,10 @@ mod tests {
         fs::create_dir_all(&source).expect("source dir");
         fs::write(
             source.join("playerbots.conf.dist"),
-            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.UnmanagedDefault = 42\n",
+            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.RandomBotGuildCount = 20\nAiPlayerbot.UnmanagedDefault = 42\n",
         )
         .expect("source config");
-        write_playerbots_config(temporary.path(), true).expect("playerbots config");
+        write_playerbots_config(temporary.path(), true, 50).expect("playerbots config");
         let config = fs::read_to_string(
             temporary
                 .path()
@@ -2800,6 +3039,7 @@ mod tests {
         .expect("config");
         assert!(config.contains("AiPlayerbot.Enabled = 1"));
         assert!(config.contains("AiPlayerbot.MaxRandomBots = 50"));
+        assert!(config.contains("AiPlayerbot.RandomBotGuildCount = 0"));
         assert!(config.contains("AiPlayerbot.UnmanagedDefault = 42"));
         assert!(
             !temporary
@@ -2816,11 +3056,11 @@ mod tests {
         fs::create_dir_all(&modules).expect("module dir");
         fs::write(
             modules.join("playerbots.conf.dist"),
-            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.ImageDefault = keep\n",
+            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.RandomBotGuildCount = 20\nAiPlayerbot.ImageDefault = keep\n",
         )
         .expect("image dist config");
 
-        write_playerbots_config(temporary.path(), true).expect("prebuilt config");
+        write_playerbots_config(temporary.path(), true, 5).expect("prebuilt config");
 
         let config = fs::read_to_string(modules.join("playerbots.conf")).expect("config");
         assert!(config.contains("AiPlayerbot.Enabled = 1"));
@@ -2887,6 +3127,7 @@ mod tests {
         let commands = runner.commands.lock().expect("commands");
         assert!(commands[0].contains("docker compose -p realmbox"));
         assert!(commands[0].contains("INSERT IGNORE INTO account"));
+        assert!(commands[0].contains("UPDATE account SET salt=UNHEX"));
         assert!(commands[0].contains("UPDATE realmlist SET name='RealmBox'"));
         assert!(commands[0].contains("flag=0"));
     }
@@ -2963,6 +3204,7 @@ mod tests {
                 client_choice: ClientChoice::ManagedOpenWow,
                 compose_file,
                 bots_enabled: true,
+                bot_count: 50,
                 ai_enabled: true,
                 ai_model: Some("qwen3:8b".into()),
                 ollama_executable: Some(temporary.path().join("ai/ollama")),
@@ -2991,6 +3233,33 @@ mod tests {
         assert!(!commands.iter().any(|command| command == "terminate 42"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn completed_client_process_is_reaped_and_reported_stopped() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = SystemCommandRunner;
+        let process_id = runner
+            .spawn(
+                Path::new("/bin/sh"),
+                &["-c".into(), "exit 0".into()],
+                &[],
+                None,
+                &temporary.path().join("client.log"),
+            )
+            .expect("spawn client");
+
+        for _ in 0..40 {
+            if !runner
+                .is_process_running(process_id)
+                .expect("inspect client")
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("completed client process remained visible after one second");
+    }
+
     #[test]
     fn managed_openwow_starts_from_its_writable_game_root() {
         let temporary = tempfile::tempdir().expect("tempdir");
@@ -3008,7 +3277,7 @@ mod tests {
         fs::write(&client_executable, "binary").expect("client");
         fs::write(
             playerbots_config,
-            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\n",
+            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.RandomBotGuildCount = 20\n",
         )
         .expect("playerbots config");
         let mut service = LauncherService::new(
@@ -3026,6 +3295,7 @@ mod tests {
                 client_choice: ClientChoice::ManagedOpenWow,
                 compose_file,
                 bots_enabled: true,
+                bot_count: 50,
                 ai_enabled: false,
                 ai_model: None,
                 ollama_executable: None,
@@ -3037,7 +3307,7 @@ mod tests {
             })
             .expect("record");
 
-        let status = service.start(None, None, |_| {}).expect("start");
+        let status = service.start(None, None, None, |_| {}).expect("start");
         assert_eq!(status.phase, LauncherPhase::Running);
         assert_eq!(service.client_process_id(), Some(42));
         let commands = service.runner.commands.lock().expect("commands");

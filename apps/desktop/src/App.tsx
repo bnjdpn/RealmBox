@@ -19,6 +19,7 @@ const initialStatus: LauncherStatus = {
   progress: 0,
   installed: false,
   botsEnabled: true,
+  botCount: 50,
   aiEnabled: false,
   aiModel: null,
   gameDataPath: null,
@@ -42,6 +43,14 @@ const checkingAi: AiCapability = {
   detail: "CanIRun évalue la mémoire disponible pour le jeu et les dialogues…",
   sourceUrl: "https://www.canirun.ai/",
 };
+
+const botPopulationOptions = [
+  { count: 5, label: "Discret · 5" },
+  { count: 25, label: "Léger · 25" },
+  { count: 50, label: "Équilibré · 50" },
+  { count: 100, label: "Dense · 100" },
+  { count: 150, label: "Très dense · 150" },
+];
 
 function isBusy(status: LauncherStatus) {
   return ["checking", "installing", "starting", "stopping"].includes(status.phase);
@@ -79,6 +88,7 @@ export default function App() {
   const [gameDataInspection, setGameDataInspection] = useState<GameDataInspection | null>(null);
   const [gameDataError, setGameDataError] = useState<string | null>(null);
   const [botsEnabled, setBotsEnabled] = useState(true);
+  const [botCount, setBotCount] = useState(50);
   const [clientChoice, setClientChoice] = useState<ClientChoice>("managedOpenWow");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiCapability, setAiCapability] = useState<AiCapability>(checkingAi);
@@ -101,6 +111,7 @@ export default function App() {
       if (!active) return;
       setStatus(next);
       setBotsEnabled(next.botsEnabled);
+      setBotCount(next.botCount);
       setAiEnabled(next.aiEnabled);
       setClientChoice(next.clientChoice);
     }).then((stopListening) => { unlistenStatus = stopListening; });
@@ -113,6 +124,7 @@ export default function App() {
         installationKnown.current = next.installed;
         setGameDataPath(next.gameDataPath);
         setBotsEnabled(next.botsEnabled);
+        setBotCount(next.botCount);
         setAiEnabled(next.aiEnabled);
         setClientChoice(next.clientChoice);
         if (next.aiModel) {
@@ -173,7 +185,7 @@ export default function App() {
     setRequestPending(true);
     setStatus((current) => ({ ...current, phase: "installing", message: "Préparation de l’installation", detail: null, progress: 1 }));
     try {
-      setStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, aiEnabled, aiCapability.ollamaModel));
+      setStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, botCount, aiEnabled, aiCapability.ollamaModel));
     } catch (error) {
       setStatus((current) => ({ ...current, phase: "error", message: "L’installation s’est arrêtée", detail: String(error) }));
     } finally {
@@ -184,7 +196,7 @@ export default function App() {
   async function start() {
     setRequestPending(true);
     try {
-      setStatus(await startRealm(botsEnabled, aiEnabled));
+      setStatus(await startRealm(botsEnabled, botCount, aiEnabled));
     } catch (error) {
       setStatus((current) => ({ ...current, phase: "error", message: "Le monde n’a pas démarré", detail: String(error) }));
     } finally {
@@ -260,6 +272,12 @@ export default function App() {
                 }}/>
                 <span><strong>Peupler le monde avec des compagnons</strong><small>Active Playerbots au démarrage. Modifiable plus tard.</small></span>
               </label>
+              {botsEnabled && <label className="bot-population">
+                <span><strong>Population du monde</strong><small>RealmBox la limite automatiquement selon la mémoire accordée à Docker.</small></span>
+                <select value={botCount} onChange={(event) => setBotCount(Number(event.target.value))}>
+                  {botPopulationOptions.map((option) => <option key={option.count} value={option.count}>{option.label}</option>)}
+                </select>
+              </label>}
               <label className={`bot-toggle ai-toggle ${aiCapability.state !== "recommended" ? "unavailable" : ""}`}>
                 <input
                   type="checkbox"
@@ -304,6 +322,9 @@ export default function App() {
                   setAiEnabled(false);
                 }
               }}/><span>Compagnons au prochain démarrage</span></label>
+              {botsEnabled && <label className="ready-population"><span>Population</span><select value={botCount} onChange={(event) => setBotCount(Number(event.target.value))}>
+                {botPopulationOptions.map((option) => <option key={option.count} value={option.count}>{option.label}</option>)}
+              </select></label>}
               {status.aiModel && <label><input type="checkbox" checked={aiEnabled} disabled={!botsEnabled} onChange={(event) => {
                 aiChoiceTouched.current = true;
                 setAiEnabled(event.target.checked);
