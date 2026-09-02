@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { LauncherProgress, LauncherStatus } from "./types";
+import type { AiCapability, LauncherProgress, LauncherStatus } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -15,6 +15,8 @@ function browserStatus(): LauncherStatus {
     progress: 0,
     installed: false,
     botsEnabled: true,
+    aiEnabled: false,
+    aiModel: null,
     gameDataPath: null,
     accountName: null,
     accountPassword: null,
@@ -23,6 +25,7 @@ function browserStatus(): LauncherStatus {
       { id: "database", label: "Sauvegarde du royaume", state: "missing", detail: "À préparer" },
       { id: "server", label: "Monde privé", state: "missing", detail: "À préparer" },
       { id: "bots", label: "Compagnons", state: "missing", detail: "Optionnels" },
+      { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon ce Mac" },
     ],
   };
 }
@@ -38,12 +41,33 @@ export async function chooseGameData(): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function installRealm(gameDataPath: string, botsEnabled: boolean): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("install_realm", { gameDataPath, botsEnabled });
+export async function inspectAiCapability(): Promise<AiCapability> {
+  if (!window.__TAURI_INTERNALS__) return {
+    state: "unavailable",
+    deviceName: null,
+    ramGb: null,
+    modelId: null,
+    modelName: null,
+    ollamaModel: null,
+    grade: null,
+    estimatedTokensPerSecond: null,
+    detail: "Le conseil matériel est disponible dans l’application desktop.",
+    sourceUrl: "https://www.canirun.ai/",
+  };
+  return invoke<AiCapability>("inspect_ai_capability");
 }
 
-export async function startRealm(botsEnabled: boolean): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("start_realm", { botsEnabled });
+export async function installRealm(
+  gameDataPath: string,
+  botsEnabled: boolean,
+  aiEnabled: boolean,
+  aiModel: string | null,
+): Promise<LauncherStatus> {
+  return invoke<LauncherStatus>("install_realm", { gameDataPath, botsEnabled, aiEnabled, aiModel });
+}
+
+export async function startRealm(botsEnabled: boolean, aiEnabled: boolean): Promise<LauncherStatus> {
+  return invoke<LauncherStatus>("start_realm", { botsEnabled, aiEnabled });
 }
 
 export async function stopRealm(): Promise<LauncherStatus> {
@@ -55,4 +79,11 @@ export async function subscribeLauncherProgress(
 ): Promise<UnlistenFn> {
   if (!window.__TAURI_INTERNALS__) return () => undefined;
   return listen<LauncherProgress>("realmbox://progress", (event) => onProgress(event.payload));
+}
+
+export async function subscribeLauncherStatus(
+  onStatus: (status: LauncherStatus) => void,
+): Promise<UnlistenFn> {
+  if (!window.__TAURI_INTERNALS__) return () => undefined;
+  return listen<LauncherStatus>("realmbox://status", (event) => onStatus(event.payload));
 }

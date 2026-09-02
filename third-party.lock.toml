@@ -52,13 +52,24 @@ test_status = "module compiled into macos-arm64 worldserver; Ollama request not 
 [[component]]
 name = "ollama"
 repository = "https://github.com/ollama/ollama"
-commit = "e5e437711540eb4becb393c2847fed6cae6e5cd5"
-branch = "main"
+source_version = "0.33.2"
+artifact_url_macos_universal = "https://github.com/ollama/ollama/releases/download/v0.33.2/ollama-darwin.tgz"
+artifact_sha256_macos_universal = "5751e296a2cd545939bdd51b700de0c20d319f0e723c9d7f48bebb5ab0b731d4"
 license = "MIT"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
 patch_set = "none"
 redistribution_status = "source license identified; application/runtime redistribution not yet approved"
-test_status = "not installed on development machine"
+test_status = "official 0.33.2 universal macOS archive independently downloaded; sha256 and Developer ID signatures verified; server started on 127.0.0.1:11435 with cloud disabled and /api/version returned 0.33.2; model pull and generation not tested"
+
+[[component]]
+name = "canirun-compatibility-api"
+repository = "https://github.com/midudev/canirun.ai"
+contract_commit = "7029d663125845842c5901a7a375fe1a425c0782"
+endpoint = "https://www.canirun.ai/api/compatibility"
+platforms = ["service"]
+data_sent = ["cpu-name", "core-count", "ram-gb"]
+redistribution_status = "not redistributed; live optional recommendation service"
+test_status = "live API returned comfortable Q4_K_M estimates for the four allowlisted models on the development Mac; estimates are not benchmarks"
 
 [[component]]
 name = "mysql-runtime"
@@ -69,7 +80,3 @@ license = "GPL-2.0-only"
 platforms = ["macos-arm64"]
 redistribution_status = "pulled by Docker during local installation; notices require review before binary distribution"
 test_status = "manifest inspected for linux/arm64; RealmBox compose path not yet run against a real installation"
-
-[[unresolved]]
-name = "canirun"
-reason = "No official public source repository or API contract was identified on 2026-09-02; no endpoint is configured."

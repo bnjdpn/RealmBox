@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
@@ -11,6 +11,8 @@ const missing: LauncherStatus = {
   progress: 0,
   installed: false,
   botsEnabled: true,
+  aiEnabled: false,
+  aiModel: null,
   gameDataPath: null,
   accountName: null,
   accountPassword: null,
@@ -19,6 +21,7 @@ const missing: LauncherStatus = {
     { id: "database", label: "Sauvegarde du royaume", state: "missing", detail: "À préparer" },
     { id: "server", label: "Monde privé", state: "missing", detail: "À préparer" },
     { id: "bots", label: "Compagnons", state: "missing", detail: "Optionnels" },
+    { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon ce Mac" },
   ],
 };
 
@@ -48,6 +51,8 @@ const runtime = vi.hoisted(() => ({
   startRealm: vi.fn(),
   stopRealm: vi.fn(),
   subscribeLauncherProgress: vi.fn(),
+  subscribeLauncherStatus: vi.fn(),
+  inspectAiCapability: vi.fn(),
 }));
 
 vi.mock("../src/runtime", () => runtime);
@@ -61,6 +66,19 @@ describe("RealmBox launcher", () => {
     runtime.startRealm.mockResolvedValue(running);
     runtime.stopRealm.mockResolvedValue(ready);
     runtime.subscribeLauncherProgress.mockResolvedValue(() => undefined);
+    runtime.subscribeLauncherStatus.mockResolvedValue(() => undefined);
+    runtime.inspectAiCapability.mockResolvedValue({
+      state: "recommended",
+      deviceName: "Apple M4 Max",
+      ramGb: 36,
+      modelId: "qwen3-8b",
+      modelName: "Qwen 3 8B",
+      ollamaModel: "qwen3:8b",
+      grade: "S",
+      estimatedTokensPerSecond: 77,
+      detail: "CanIRun le classe confortable.",
+      sourceUrl: "https://www.canirun.ai/",
+    });
   });
 
   it("requires owned game data before the real installation", async () => {
@@ -76,8 +94,27 @@ describe("RealmBox launcher", () => {
     expect(install).toBeEnabled();
 
     await user.click(install);
-    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", true);
+    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", true, true, "qwen3:8b");
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
+  it("keeps local dialogue disabled when CanIRun finds no comfortable model", async () => {
+    runtime.inspectAiCapability.mockResolvedValue({
+      state: "unavailable",
+      deviceName: "Apple M1",
+      ramGb: 8,
+      modelId: null,
+      modelName: null,
+      ollamaModel: null,
+      grade: null,
+      estimatedTokensPerSecond: null,
+      detail: "Mémoire insuffisante.",
+      sourceUrl: "https://www.canirun.ai/",
+    });
+    render(<App />);
+
+    expect(await screen.findByText(/aucun modèle confortable/i)).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: /dialogues IA/i })).toBeDisabled();
   });
 
   it("renders the already-started result returned on a later launch", async () => {
@@ -87,5 +124,19 @@ describe("RealmBox launcher", () => {
     expect(await screen.findByRole("heading", { name: /le monde est lancé/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /arrêter/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /installer/i })).not.toBeInTheDocument();
+  });
+
+  it("returns to the ready state when the supervised client exits", async () => {
+    let publishStatus: ((status: LauncherStatus) => void) | undefined;
+    runtime.bootstrapLauncher.mockResolvedValue(running);
+    runtime.subscribeLauncherStatus.mockImplementation(async (listener) => {
+      publishStatus = listener;
+      return () => undefined;
+    });
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /arrêter/i })).toBeVisible();
+
+    act(() => publishStatus?.(ready));
+    expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
   });
 });

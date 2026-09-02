@@ -7,3 +7,6 @@
 - Ajout de l'état d'installation atomique, du démarrage automatique aux lancements suivants, de l'option Playerbots et de l'arrêt ordonné.
 - Ajout d'un compte joueur local idempotent et de tests du calcul SRP6.
 - Conservation des crates fake historiques comme banc de tests isolé, hors du flux produit Tauri actuel.
+- Nouvelle composition visuelle fidèle aux proportions du launcher 3.3.5a, avec une scène fantasy originale générée pour RealmBox et aucun asset Blizzard.
+- Ajout du conseil CanIRun borné, de l'installation optionnelle Ollama 0.33.2 + `mod-ollama-chat`, du modèle local en allowlist et de l'arrêt coordonné de l'IA.
+- Ajout de la supervision du client : la fermeture d'OpenWoW déclenche l'arrêt automatique du monde, de la base et du moteur de dialogue.

@@ -11,7 +11,7 @@ export type LauncherPhase =
 export type ComponentState = "missing" | "installing" | "ready" | "running" | "stopped" | "error";
 
 export interface LauncherComponent {
-  id: "client" | "database" | "server" | "bots";
+  id: "client" | "database" | "server" | "bots" | "ai";
   label: string;
   state: ComponentState;
   detail: string;
@@ -24,10 +24,25 @@ export interface LauncherStatus {
   progress: number;
   installed: boolean;
   botsEnabled: boolean;
+  aiEnabled: boolean;
+  aiModel: string | null;
   gameDataPath: string | null;
   accountName: string | null;
   accountPassword: string | null;
   components: LauncherComponent[];
+}
+
+export interface AiCapability {
+  state: "checking" | "recommended" | "unavailable";
+  deviceName: string | null;
+  ramGb: number | null;
+  modelId: string | null;
+  modelName: string | null;
+  ollamaModel: string | null;
+  grade: string | null;
+  estimatedTokensPerSecond: number | null;
+  detail: string;
+  sourceUrl: string;
 }
 
 export interface LauncherProgress {
