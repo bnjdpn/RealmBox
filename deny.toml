@@ -1,9 +1,23 @@
+[graph]
+# RealmBox distribue actuellement uniquement ces deux cibles. Les dépendances
+# GTK/Linux présentes dans le lockfile Tauri ne sont jamais liées aux bundles.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+
 [advisories]
 yanked = "deny"
+# Les avis de vulnérabilité et d'insoundness restent bloquants. Les avis
+# « unmaintained » ne le sont que pour nos dépendances directes : Tauri traîne
+# actuellement quelques crates Unicode transitives sans remplacement publiable.
+unmaintained = "workspace"
+unsound = "all"
 
 [licenses]
 confidence-threshold = 0.8
 allow = [
+  "AGPL-3.0-only",
   "MIT",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
@@ -23,4 +37,3 @@ wildcards = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-
