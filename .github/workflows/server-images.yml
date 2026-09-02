@@ -50,7 +50,7 @@ jobs:
           path: upstream/server/modules/mod-ollama-chat
       - name: Appliquer le correctif de build borné
         run: node scripts/prepare-server-dockerfile.mjs upstream/server/apps/docker/Dockerfile
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: inputs.publish
         with:
@@ -92,7 +92,7 @@ jobs:
       db_import: ${{ steps.lock.outputs.REALMBOX_DB_IMPORT_IMAGE }}
       tools: ${{ steps.lock.outputs.REALMBOX_TOOLS_IMAGE }}
     steps:
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
