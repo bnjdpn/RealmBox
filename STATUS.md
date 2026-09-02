@@ -2,7 +2,7 @@
 
 Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots. GO automatisé pour RealmBox 0.2.0, son site FR/EN et ses images serveur multiarchitecture. NO-GO pour déclarer le réglage Playerbots à chaud prouvé dans un vrai worldserver, pour une release publique prête pour Windows, pour les dialogues LLM en jeu et pour l’affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
+Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots. GO automatisé pour RealmBox 0.2.0, son site FR/EN, ses images serveur multiarchitecture et sa pré-release GitHub en brouillon. NO-GO pour publier ce brouillon comme release publique prête pour Windows, pour déclarer le réglage Playerbots à chaud prouvé dans un vrai worldserver, pour les dialogues LLM en jeu et pour l’affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
 
 ## Jalon 0.2.0
 
@@ -16,8 +16,10 @@ Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore
 | Population à chaud en jeu | non prouvé | le runtime réel actif utilise encore l’ancien Compose ; aucun redémarrage de la partie en cours n’a été imposé |
 | Site GitHub Pages | contrôle visuel + déploiement | page complète FR/EN contrôlée en desktop et mobile, workflow vert, publication HTTPS relue sur `bnjdpn.github.io/RealmBox/` |
 | Images serveur | build CI + lecture anonyme | quatre manifestes GHCR immuables authserver, worldserver, db-import et tools, chacun linux-amd64 + linux-arm64 ; pull sans compte réussi dans le run 33687674728 |
-| Bundle macOS 0.2.0 | build + inspection locale | DMG généré, somme interne valide, application arm64 et signature ad hoc vérifiée avec `codesign --deep --strict` ; non notarié |
-| Vérification locale | automatisée | `pnpm verify` : typecheck, lint, 10 tests UI, build Vite, clippy strict et 42 tests Rust du workspace |
+| Bundle macOS 0.2.0 | build CI + inspection fraîche | DMG du run 33692911683 retéléchargé, somme interne valide, application arm64 et signature ad hoc vérifiée avec `codesign --deep --strict` ; non notarié |
+| Bundle Windows 0.2.0 | build CI + inspection de format | installateur NSIS produit par Windows 2025 dans le run 33692911683 et retéléchargé ; parcours réel Windows 11 non exécuté |
+| Pré-release GitHub | lecture fraîche | brouillon privé `v0.2.0`, DMG + EXE + `SHA256SUMS.txt` présents ; SHA-256 `40d395…b44ae` et `c2275f…ef59c` revérifiés après retéléchargement |
+| Vérification locale | automatisée | `pnpm verify` : typecheck, lint, 10 tests UI, 1 test de packaging, build Vite, clippy strict et 42 tests Rust du workspace |
 
 ## Preuve réelle sur ce Mac
 
@@ -60,8 +62,8 @@ Le bundle courant est installé dans `/Users/benjamin/Applications/RealmBox.app`
 - Windows x64 compile en CI mais n’a pas de parcours réel Windows 11. `Wow.exe` doit devenir le choix recommandé quand une copie compatible est présente ; OpenWoW doit rester optionnel.
 - Linux et Mac Intel ne sont pas pris en charge par le produit actuel.
 - La signature de distribution et la notarisation macOS restent bloquées faute de certificats.
-- Le DMG macOS 0.2.0 est construit et vérifié localement, mais reste signé uniquement en ad hoc et non notarié.
-- Les exécutables 0.2.0 ne sont pas déclarés publiés avant lecture fraîche du workflow de release et de ses artefacts GitHub.
+- Le DMG macOS 0.2.0 du brouillon est construit et vérifié, mais reste signé uniquement en ad hoc et non notarié.
+- Les exécutables 0.2.0 sont attachés à une pré-release GitHub en brouillon. Ils ne sont pas publiés au public tant que l’audit des notices, la signature de distribution et le parcours Windows 11 ne sont pas terminés.
 
 ## Suite
 
