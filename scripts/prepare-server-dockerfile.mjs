@@ -17,7 +17,7 @@ const replacements = [
   ],
   [
     'VOLUME /azerothcore/env/dist/etc\n\nCMD ["worldserver"]',
-    'COPY --chown=$DOCKER_USER:$DOCKER_USER \\\n+     modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data\n\nVOLUME /azerothcore/env/dist/etc\n\nCMD ["worldserver"]',
+    'COPY --chown=$DOCKER_USER:$DOCKER_USER \\\n     modules/mod-playerbots/data /azerothcore/modules/mod-playerbots/data\n\nVOLUME /azerothcore/env/dist/etc\n\nCMD ["worldserver"]',
   ],
 ];
 

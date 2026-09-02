@@ -14,7 +14,7 @@ Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore
 | Diagnostic | tests UI/Rust | composant, chemin des logs, avertissements/erreurs filtrés, masquage des lignes sensibles et copie |
 | Population à chaud | test Rust + preuve Docker isolée | migration Compose idempotente, limite mémoire, commandes `playerbot rndbot reload` et `playerbot rndbot update` réellement consommées par un conteneur éphémère sans redémarrage |
 | Population à chaud en jeu | non prouvé | le runtime réel actif utilise encore l’ancien Compose ; aucun redémarrage de la partie en cours n’a été imposé |
-| Site GitHub Pages | contrôle visuel local | page complète FR/EN, viewport desktop et mobile ; publication distante à vérifier après le push |
+| Site GitHub Pages | contrôle visuel + déploiement | page complète FR/EN contrôlée en desktop et mobile, workflow vert, publication HTTPS relue sur `bnjdpn.github.io/RealmBox/` |
 | Bundle macOS 0.2.0 | build + inspection locale | DMG généré, somme interne valide, application arm64 et signature ad hoc vérifiée avec `codesign --deep --strict` ; non notarié |
 | Vérification locale | automatisée | `pnpm verify` : typecheck, lint, 10 tests UI, build Vite, clippy strict et 42 tests Rust du workspace |
 
@@ -60,7 +60,7 @@ Le bundle courant est installé dans `/Users/benjamin/Applications/RealmBox.app`
 - Linux et Mac Intel ne sont pas pris en charge par le produit actuel.
 - La signature de distribution et la notarisation macOS restent bloquées faute de certificats.
 - Le DMG macOS 0.2.0 est construit et vérifié localement, mais reste signé uniquement en ad hoc et non notarié.
-- Le site Pages et les exécutables 0.2.0 ne sont pas déclarés publiés avant lecture fraîche des workflows et des artefacts GitHub.
+- Les exécutables 0.2.0 ne sont pas déclarés publiés avant lecture fraîche du workflow de release et de ses artefacts GitHub.
 
 ## Suite
 

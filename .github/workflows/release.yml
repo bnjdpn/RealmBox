@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -26,6 +26,13 @@ jobs:
         with: { toolchain: 1.97.1 }
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
+      - name: Valider le tag de version
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag de release invalide: $GITHUB_REF_NAME"
+            exit 1
+          fi
       - name: Refuser une release sans les quatre images immuables
         shell: bash
         run: |
@@ -114,7 +121,7 @@ jobs:
 
           - macOS Apple Silicon : parcours local réellement qualifié.
           - Windows x64 : installateur construit en CI, parcours complet Windows 11 non encore qualifié.
-          - Artefacts non signés et non notariés : vérifiez `SHA256SUMS.txt` avant ouverture.
+          - Artefacts sans signature de distribution et non notariés : vérifiez \`SHA256SUMS.txt\` avant ouverture.
           - Aucune donnée de jeu propriétaire n’est incluse. Une copie compatible build 12340 appartenant au joueur est requise.
 
           FR : https://bnjdpn.github.io/RealmBox/?lang=fr
