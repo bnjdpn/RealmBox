@@ -3,13 +3,14 @@ import {
   bootstrapLauncher,
   chooseGameData,
   inspectAiCapability,
+  inspectGameData,
   installRealm,
   startRealm,
   stopRealm,
   subscribeLauncherProgress,
   subscribeLauncherStatus,
 } from "./runtime";
-import type { AiCapability, ClientChoice, LauncherComponent, LauncherStatus } from "./types";
+import type { AiCapability, ClientChoice, GameDataInspection, LauncherComponent, LauncherStatus } from "./types";
 
 const initialStatus: LauncherStatus = {
   phase: "checking",
@@ -75,6 +76,8 @@ function setupComponent(
 export default function App() {
   const [status, setStatus] = useState(initialStatus);
   const [gameDataPath, setGameDataPath] = useState<string | null>(null);
+  const [gameDataInspection, setGameDataInspection] = useState<GameDataInspection | null>(null);
+  const [gameDataError, setGameDataError] = useState<string | null>(null);
   const [botsEnabled, setBotsEnabled] = useState(true);
   const [clientChoice, setClientChoice] = useState<ClientChoice>("managedOpenWow");
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -149,7 +152,20 @@ export default function App() {
 
   async function selectData() {
     const selected = await chooseGameData();
-    if (selected) setGameDataPath(selected);
+    if (!selected) return;
+    setRequestPending(true);
+    setGameDataError(null);
+    try {
+      const inspection = await inspectGameData(selected);
+      setGameDataInspection(inspection);
+      setGameDataPath(inspection.path);
+    } catch (error) {
+      setGameDataInspection(null);
+      setGameDataPath(null);
+      setGameDataError(String(error));
+    } finally {
+      setRequestPending(false);
+    }
   }
 
   async function install() {
@@ -231,6 +247,9 @@ export default function App() {
               <button className="path-picker" onClick={selectData} disabled={requestPending}>
                 <span>{gameDataPath ?? "Choisir le dossier qui contient Data"}</span><b>PARCOURIR</b>
               </button>
+              <p className={`data-check ${gameDataError ? "error" : gameDataInspection ? "valid" : ""}`}>
+                {gameDataError ?? gameDataInspection?.detail ?? "Requis : Data complet de WoW 3.3.5a build 12340 avec common.MPQ, expansion.MPQ, lichking.MPQ et une locale complète."}
+              </p>
               <label className="bot-toggle">
                 <input type="checkbox" checked={botsEnabled} onChange={(event) => {
                   setBotsEnabled(event.target.checked);

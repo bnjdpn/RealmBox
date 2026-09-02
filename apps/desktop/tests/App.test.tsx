@@ -56,6 +56,7 @@ const runtime = vi.hoisted(() => ({
   subscribeLauncherProgress: vi.fn(),
   subscribeLauncherStatus: vi.fn(),
   inspectAiCapability: vi.fn(),
+  inspectGameData: vi.fn(),
 }));
 
 vi.mock("../src/runtime", () => runtime);
@@ -65,6 +66,11 @@ describe("RealmBox launcher", () => {
     vi.clearAllMocks();
     runtime.bootstrapLauncher.mockResolvedValue(missing);
     runtime.chooseGameData.mockResolvedValue("/Jeux/Wrath");
+    runtime.inspectGameData.mockResolvedValue({
+      path: "/Jeux/Wrath",
+      locale: "frFR",
+      detail: "Données WotLK frFR reconnues ; la build 12340 sera confirmée par les extracteurs locaux.",
+    });
     runtime.installRealm.mockResolvedValue(ready);
     runtime.startRealm.mockResolvedValue(running);
     runtime.stopRealm.mockResolvedValue(ready);
@@ -93,12 +99,27 @@ describe("RealmBox launcher", () => {
     expect(install).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /parcourir/i }));
+    expect(runtime.inspectGameData).toHaveBeenCalledWith("/Jeux/Wrath");
     expect(screen.getByText("/Jeux/Wrath")).toBeVisible();
+    expect(screen.getByText(/données WotLK frFR reconnues/i)).toBeVisible();
     expect(install).toBeEnabled();
 
     await user.click(install);
     expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, true, "qwen3:8b");
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
+  it("rejects incomplete game data before installation starts", async () => {
+    const user = userEvent.setup();
+    runtime.inspectGameData.mockRejectedValue("archive WotLK requise absente : Data/lichking.MPQ");
+    render(<App />);
+
+    await screen.findByRole("heading", { name: /données de jeu requises/i });
+    await user.click(screen.getByRole("button", { name: /parcourir/i }));
+
+    expect(await screen.findByText(/lichking\.MPQ/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /installer/i })).toBeDisabled();
+    expect(runtime.installRealm).not.toHaveBeenCalled();
   });
 
   it("persists the player-provided Windows client choice", async () => {

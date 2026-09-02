@@ -1,0 +1,41 @@
+name: Bug
+description: Signaler un problème reproductible sans joindre de données propriétaires
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "N’attachez aucun MPQ, client WoW, base utilisateur, secret ou journal non expurgé. / Do not attach MPQs, a WoW client, user databases, secrets, or unredacted logs."
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Plateforme / Platform
+      options: [macOS Apple Silicon, Windows x64, Other]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version ou commit / Version or commit
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction minimale / Minimal reproduction
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: Résultat attendu / Expected result
+    validations: { required: true }
+  - type: textarea
+    id: actual
+    attributes:
+      label: Résultat observé / Actual result
+    validations: { required: true }
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Données / Data
+      options:
+        - label: Je confirme n’avoir joint aucune donnée propriétaire ou personnelle. / I attached no proprietary or personal data.
+          required: true

@@ -158,6 +158,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #d6bd75; outline-
 .path-picker { width: 100%; min-width: 0; display: flex; align-items: center; gap: 0; overflow: hidden; padding: 0; color: #aeb9bf; text-align: left; border: 1px solid #4c5960; background: #090e12; }
 .path-picker span { min-width: 0; flex: 1; overflow: hidden; padding: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .path-picker b { flex: 0 0 auto; align-self: stretch; display: grid; place-items: center; padding: 0 12px; color: #d0c29c; border-left: 1px solid #4c5960; background: linear-gradient(#303b42, #1c252b); font-size: 9px; letter-spacing: .08em; }
+.data-check { margin: 7px 0 0; color: #87979f; font-size: 9px; line-height: 1.45; }
+.data-check.valid { color: #8eae7e; }
+.data-check.error { color: #c77970; }
 .bot-toggle { display: flex; align-items: flex-start; gap: 11px; margin-top: 12px; color: #d3d8d9; }
 .bot-toggle input { accent-color: #a9874d; }
 .bot-toggle strong, .bot-toggle small { display: block; }

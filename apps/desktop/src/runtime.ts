@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AiCapability, ClientChoice, LauncherProgress, LauncherStatus } from "./types";
+import type { AiCapability, ClientChoice, GameDataInspection, LauncherProgress, LauncherStatus } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -58,6 +58,13 @@ export async function inspectAiCapability(): Promise<AiCapability> {
     sourceUrl: "https://www.canirun.ai/",
   };
   return invoke<AiCapability>("inspect_ai_capability");
+}
+
+export async function inspectGameData(gameDataPath: string): Promise<GameDataInspection> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { path: gameDataPath, locale: "frFR", detail: "Aperçu navigateur sans lecture du disque." };
+  }
+  return invoke<GameDataInspection>("inspect_game_data", { gameDataPath });
 }
 
 export async function installRealm(

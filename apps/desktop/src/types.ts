@@ -49,6 +49,12 @@ export interface AiCapability {
   sourceUrl: string;
 }
 
+export interface GameDataInspection {
+  path: string;
+  locale: string;
+  detail: string;
+}
+
 export interface LauncherProgress {
   phase: LauncherPhase;
   message: string;

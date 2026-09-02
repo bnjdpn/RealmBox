@@ -2,6 +2,7 @@ mod ai;
 mod launcher;
 
 use std::{
+    path::Path,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
@@ -9,8 +10,8 @@ use std::{
 
 use ai::AiCapability;
 use launcher::{
-    ClientChoice, LauncherPhase, LauncherProgress, LauncherService, LauncherStatus,
-    SystemCommandRunner,
+    ClientChoice, GameDataInspection, LauncherPhase, LauncherProgress, LauncherService,
+    LauncherStatus, SystemCommandRunner,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -171,6 +172,15 @@ async fn inspect_ai_capability(state: State<'_, AppState>) -> Result<AiCapabilit
 }
 
 #[tauri::command]
+async fn inspect_game_data(game_data_path: String) -> Result<GameDataInspection, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        launcher::inspect_game_data_root(Path::new(&game_data_path))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn stop_realm(app: AppHandle, state: State<'_, AppState>) -> Result<LauncherStatus, String> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
@@ -208,7 +218,8 @@ pub fn run() {
             install_realm,
             start_realm,
             stop_realm,
-            inspect_ai_capability
+            inspect_ai_capability,
+            inspect_game_data
         ])
         .run(tauri::generate_context!())
         .expect("RealmBox n'a pas pu initialiser sa boucle applicative");

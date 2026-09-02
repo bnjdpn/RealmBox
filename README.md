@@ -1,5 +1,12 @@
 # RealmBox
 
+[Français](README.md) · [English](README.en.md)
+
+[![Validation commune](https://github.com/bnjdpn/RealmBox/actions/workflows/validation.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/validation.yml)
+[![macOS arm64](https://github.com/bnjdpn/RealmBox/actions/workflows/macos-arm64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/macos-arm64.yml)
+[![Windows x64](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml/badge.svg)](https://github.com/bnjdpn/RealmBox/actions/workflows/windows-x64.yml)
+[![Licence AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg)](LICENSE)
+
 RealmBox est un lanceur Windows x64 et macOS Apple Silicon pour jouer sur un monde 3.3.5a entièrement local. Au premier lancement, il demande le dossier d'une copie compatible appartenant au joueur, puis prépare automatiquement le client, le serveur, la base locale et Playerbots. Si la machine est assez confortable, il peut aussi installer Ollama et `mod-ollama-chat` pour donner aux compagnons des dialogues calculés localement. Aux lancements suivants, il démarre la pile dans l'ordre et ouvre directement le client.
 
 L'interface reprend la composition des lanceurs MMO de l'ère Wrath — grande scène originale, nouvelles à droite, métal bleuté, barre de mise à jour et grand bouton d'action — sans logo, illustration, texte ni ressource Blizzard.
@@ -8,7 +15,7 @@ L'interface reprend la composition des lanceurs MMO de l'ère Wrath — grande s
 
 1. Démarrer Docker Desktop.
 2. Choisir le client : **OpenWoW géré par RealmBox** (recommandé) ou, sous Windows x64, **client original fourni par le joueur**.
-3. Choisir le dossier qui contient `Data` dans une copie 3.3.5a build 12340 obtenue légalement.
+3. Choisir le dossier qui contient `Data` dans une copie 3.3.5a build 12340 obtenue légalement. RealmBox contrôle immédiatement les signatures MPQ, les archives WotLK (`common`, `expansion`, `lichking`) et l’archive de locale avant d’autoriser l’installation.
 4. Activer ou désactiver les compagnons Playerbots.
 5. Facultatif : accepter les dialogues IA si CanIRun classe un modèle compact comme confortable sur cette machine.
 6. Cliquer sur **Installer**.
@@ -42,4 +49,4 @@ pnpm verify
 
 Le parcours complet avec données de jeu n'est pas déclaré validé tant qu'une copie utilisateur n'a pas permis de terminer l'installation et d'entrer en jeu. Voir [STATUS.md](STATUS.md) pour la séparation entre tests, build et preuve réelle.
 
-RealmBox est licencié sous AGPL-3.0-only. La redistribution de binaires et de leurs dépendances doit encore faire l'objet d'une revue juridique avant publication.
+RealmBox est licencié sous AGPL-3.0-only. Les contributions sont décrites dans [CONTRIBUTING.md](CONTRIBUTING.md). La redistribution de binaires et de leurs dépendances doit encore faire l'objet d'une revue juridique avant publication ; aucune donnée WoW n'est acceptée dans les issues, artefacts ou releases.

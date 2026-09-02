@@ -22,8 +22,8 @@ jobs:
             artifact: openwow-windows-x64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: rkabachenko/OpenWow-snapshot
           ref: 2521e1f72eeffd661913be63d1e2b374073c316c
@@ -48,7 +48,7 @@ jobs:
         shell: bash
         working-directory: upstream/openwow
         run: cmake --build --preset "${{ matrix.preset }}" --target openwow-client --parallel 4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
           path: upstream/openwow/build/${{ matrix.preset }}/apps/client/
@@ -60,12 +60,12 @@ jobs:
         os: [macos-15, macos-15-intel, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { repository: mod-playerbots/azerothcore-wotlk, ref: 47960183bb03b83e8943eb2f0f39c16df9710c9d, path: upstream/server }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { repository: mod-playerbots/mod-playerbots, ref: 2f7d9f774987d0157c6a0d0cc08c40bec3db3945, path: upstream/server/modules/mod-playerbots }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { repository: DustinHendrickson/mod-ollama-chat, ref: a9d14b0b8955be136e657ac168dd255f5281a535, path: upstream/server/modules/mod-ollama-chat }
       - name: Install macOS server dependencies
         if: runner.os == 'macOS'
@@ -87,7 +87,7 @@ jobs:
       - name: Build server
         shell: bash
         run: cmake --build upstream/server/build --parallel 4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: server-build-${{ matrix.os }}-logs

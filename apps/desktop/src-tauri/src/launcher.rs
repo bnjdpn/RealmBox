@@ -35,6 +35,9 @@ const DEFAULT_DOCKER_BUILD_JOBS: usize = 2;
 const PLAYER_ACCOUNT_NAME: &str = "REALMBOX";
 const PLAYER_ACCOUNT_PASSWORD: &str = "REALMBOX";
 const SRP6_MODULUS: &str = "894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7";
+const SUPPORTED_GAME_LOCALES: [&str; 10] = [
+    "frFR", "enUS", "enGB", "deDE", "esES", "esMX", "ruRU", "koKR", "zhCN", "zhTW",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ServerImages {
@@ -164,6 +167,14 @@ pub struct LauncherProgress {
     pub message: String,
     pub detail: Option<String>,
     pub progress: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameDataInspection {
+    pub path: String,
+    pub locale: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1393,7 +1404,7 @@ fn components(
     ]
 }
 
-fn validate_game_data_root(selected: &Path) -> Result<PathBuf, String> {
+pub(crate) fn inspect_game_data_root(selected: &Path) -> Result<GameDataInspection, String> {
     let root = if selected
         .file_name()
         .is_some_and(|name| name.eq_ignore_ascii_case("Data"))
@@ -1406,25 +1417,93 @@ fn validate_game_data_root(selected: &Path) -> Result<PathBuf, String> {
     if !data.is_dir() {
         return Err("le dossier choisi ne contient pas de sous-dossier Data".into());
     }
-    let locale_found = ["frFR", "enUS", "deDE", "esES", "ruRU"]
+
+    for archive in ["common.MPQ", "expansion.MPQ", "lichking.MPQ"] {
+        let path = find_file_case_insensitive(&data, archive)
+            .ok_or_else(|| format!("archive WotLK requise absente : Data/{archive}"))?;
+        validate_mpq_header(&path)?;
+    }
+
+    let (locale, locale_dir) = SUPPORTED_GAME_LOCALES
         .iter()
-        .any(|locale| data.join(locale).is_dir());
-    if !locale_found {
-        return Err("aucune locale 3.3.5a reconnue n’a été trouvée dans Data".into());
+        .find_map(|locale| {
+            let directory = find_directory_case_insensitive(&data, locale)?;
+            find_file_case_insensitive(&directory, &format!("locale-{locale}.MPQ"))
+                .map(|_| ((*locale).to_owned(), directory))
+        })
+        .ok_or_else(|| {
+            "aucune archive de locale reconnue (par exemple Data/frFR/locale-frFR.MPQ)".to_string()
+        })?;
+    for archive in [
+        format!("locale-{locale}.MPQ"),
+        format!("lichking-locale-{locale}.MPQ"),
+    ] {
+        let path = find_file_case_insensitive(&locale_dir, &archive).ok_or_else(|| {
+            format!("archive de locale WotLK requise absente : {locale}/{archive}")
+        })?;
+        validate_mpq_header(&path)?;
     }
-    let has_mpq = fs::read_dir(&data)
-        .map_err(|error| error.to_string())?
+
+    let canonical = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    Ok(GameDataInspection {
+        path: canonical.display().to_string(),
+        locale: locale.clone(),
+        detail: format!(
+            "Données WotLK {locale} reconnues ; la build 12340 sera confirmée par les extracteurs locaux."
+        ),
+    })
+}
+
+fn validate_game_data_root(selected: &Path) -> Result<PathBuf, String> {
+    inspect_game_data_root(selected).map(|inspection| PathBuf::from(inspection.path))
+}
+
+fn find_file_case_insensitive(directory: &Path, expected: &str) -> Option<PathBuf> {
+    fs::read_dir(directory)
+        .ok()?
         .filter_map(Result::ok)
-        .any(|entry| {
+        .find(|entry| {
             entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("mpq"))
-        });
-    if !has_mpq {
-        return Err("aucune archive MPQ n’a été trouvée à la racine de Data".into());
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(expected)
+                && entry.path().is_file()
+        })
+        .map(|entry| entry.path())
+}
+
+fn find_directory_case_insensitive(directory: &Path, expected: &str) -> Option<PathBuf> {
+    fs::read_dir(directory)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(expected)
+                && entry.path().is_dir()
+        })
+        .map(|entry| entry.path())
+}
+
+fn validate_mpq_header(path: &Path) -> Result<(), String> {
+    let mut file = File::open(path).map_err(|error| format!("{} : {error}", path.display()))?;
+    let mut header = [0_u8; 4096];
+    let read = file
+        .read(&mut header)
+        .map_err(|error| format!("{} : {error}", path.display()))?;
+    let valid = (0..read.saturating_sub(3)).step_by(512).any(|offset| {
+        let signature = &header[offset..offset + 4];
+        signature == b"MPQ\x1a" || signature == b"MPQ\x1b"
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} n’est pas une archive MPQ lisible",
+            path.display()
+        ))
     }
-    fs::canonicalize(root).map_err(|error| error.to_string())
 }
 
 fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
@@ -1540,16 +1619,19 @@ fn extract_ollama<R: CommandRunner>(
     Err("extraction Ollama non prise en charge sur cette plateforme".into())
 }
 
-fn verify_platform_client<R: CommandRunner>(runner: &R, client_root: &Path) -> Result<(), String> {
+fn verify_platform_client<R: CommandRunner>(
+    _runner: &R,
+    _client_root: &Path,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    return runner
+    return _runner
         .run(
             "codesign",
             &[
                 "--verify".into(),
                 "--deep".into(),
                 "--strict".into(),
-                client_root.join("OpenWoW.app").as_os_str().into(),
+                _client_root.join("OpenWoW.app").as_os_str().into(),
             ],
             None,
         )
@@ -2352,6 +2434,27 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    fn write_mpq(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("MPQ parent");
+        }
+        let mut bytes = b"MPQ\x1a".to_vec();
+        bytes.resize(32, 0);
+        fs::write(path, bytes).expect("MPQ fixture");
+    }
+
+    fn write_complete_game_data(root: &Path, locale: &str) {
+        for archive in ["common.MPQ", "expansion.MPQ", "lichking.MPQ"] {
+            write_mpq(&root.join("Data").join(archive));
+        }
+        for archive in [
+            format!("locale-{locale}.MPQ"),
+            format!("lichking-locale-{locale}.MPQ"),
+        ] {
+            write_mpq(&root.join("Data").join(locale).join(archive));
+        }
+    }
+
     #[derive(Default)]
     struct RecordingRunner {
         commands: Mutex<Vec<String>>,
@@ -2468,11 +2571,10 @@ mod tests {
     }
 
     #[test]
-    fn validates_data_directory_or_its_parent_without_reading_assets() {
+    fn validates_complete_wotlk_data_directory_or_its_parent() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let root = temporary.path().join("Jeu privé");
-        fs::create_dir_all(root.join("Data/frFR")).expect("fixture");
-        fs::write(root.join("Data/common.MPQ"), []).expect("fixture");
+        write_complete_game_data(&root, "frFR");
         assert_eq!(
             validate_game_data_root(&root).expect("root"),
             fs::canonicalize(&root).expect("canonical")
@@ -2480,6 +2582,31 @@ mod tests {
         assert_eq!(
             validate_game_data_root(&root.join("Data")).expect("data"),
             fs::canonicalize(&root).expect("canonical")
+        );
+        let inspection = inspect_game_data_root(&root).expect("inspection");
+        assert_eq!(inspection.locale, "frFR");
+        assert!(inspection.detail.contains("build 12340"));
+    }
+
+    #[test]
+    fn rejects_incomplete_or_spoofed_game_data_before_installation() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let root = temporary.path().join("Wrath");
+        write_complete_game_data(&root, "enGB");
+        fs::write(root.join("Data/lichking.MPQ"), b"not an archive").expect("spoofed archive");
+        assert!(
+            inspect_game_data_root(&root)
+                .expect_err("spoofed MPQ must fail")
+                .contains("n’est pas une archive MPQ lisible")
+        );
+
+        write_mpq(&root.join("Data/lichking.MPQ"));
+        fs::remove_file(root.join("Data/enGB/lichking-locale-enGB.MPQ"))
+            .expect("remove locale archive");
+        assert!(
+            inspect_game_data_root(&root)
+                .expect_err("incomplete locale must fail")
+                .contains("lichking-locale-enGB.MPQ")
         );
     }
 
