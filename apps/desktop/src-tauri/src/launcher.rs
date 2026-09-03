@@ -4549,7 +4549,9 @@ fn create_pre_migration_backup<R: CommandRunner>(
         &temporary,
         error_log,
     )?;
-    File::open(&temporary)
+    OpenOptions::new()
+        .write(true)
+        .open(&temporary)
         .and_then(|file| file.sync_all())
         .map_err(|error| error.to_string())?;
     validate_database_backup(&temporary)?;
