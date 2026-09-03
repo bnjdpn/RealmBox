@@ -12,7 +12,7 @@ RealmBox is an open-source desktop launcher for playing World of Warcraft locall
 
 - one player-oriented application for setup, start, stop, configuration, and diagnostics;
 - a local AzerothCore authentication and world server with MySQL;
-- autonomous Playerbots that quickly gather a same-faction majority within sight of active players, plus a controllable companion party in game;
+- autonomous Playerbots that progressively keep a same-faction majority near active players, plus a controllable companion party in game;
 - managed OpenWoW on Apple Silicon macOS, plus `Wow.exe` or OpenWoW on Windows x64;
 - optional, rate-limited local player-to-bot and bot-to-bot dialogue powered by a RealmBox-managed Ollama runtime;
 - atomic installation, immutable server images, persistent character data, and verified pre-migration backups.

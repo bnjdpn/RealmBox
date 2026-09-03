@@ -149,7 +149,7 @@ test("declares a native minimap control, close button, persistence, and 3.3.5a m
   assert.match(xml, /RealmBoxCompanions_Minimap_OnDragStart/);
   assert.match(toc, /## Interface: 30300/);
   assert.match(toc, /## SavedVariables: RealmBoxCompanionsDB/);
-  assert.match(toc, /## Version: 0\.3\.3-dev/);
+  assert.match(toc, /## Version: 0\.3\.2-dev/);
 });
 
 test("opens only on first run, toggles from slash commands, and persists positions", () => {

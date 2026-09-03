@@ -2,15 +2,7 @@
 
 Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO automatisé pour les sources RealmBox 0.3.3 : présence dense réappliquée à chaque démarrage, suivi rapide du joueur entre les zones du monde ouvert, comportements de l’addon et dialogues locaux bornés. Le bundle macOS 0.3.3 est installé et le worldserver a relu les nouvelles valeurs ; la validation visuelle et gameplay reste volontairement à effectuer par l’utilisateur. Aucune release publique 0.3.3 n’est revendiquée. Le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
-
-## Évolution bots 0.3.3
-
-| Fonction | Niveau de preuve | Résultat |
-|---|---|---|
-| Présence persistante | tests Rust de génération | à chaque démarrage, le lanceur écrit une passe par seconde, un rayon proche de 150 mètres et un placement à 30–90 mètres ; le cooldown bot de dix secondes permet de suivre un changement de zone sans cibler Stormwind |
-| Bavardage à proximité | tests Rust de génération | le profil Vivant conserve un bavardage local borné et utilise le même rayon de 150 mètres autour du joueur |
-| Bundle macOS 0.3.3 | build + installation + readback serveur | bundle arm64 installé, signature ad hoc stricte valide, SHA-256 exécutable `17bfb70e…ae9f5` ; worldserver prêt avec présence `150 yd`, placement `30..90 yd` et bavardage local `150 yd` ; gameplay laissé à la validation de l’utilisateur |
+Décision actuelle : **GO automatisé pour les sources RealmBox 0.3.2 : concentration progressive des bots autonomes, comportements de l’addon, dialogues bot-à-bot bornés et site Astro FR/EN. Le bundle macOS 0.3.1 est installé et ouvert, mais les comportements 0.3.1–0.3.2 n’ont pas encore été rejoués dans le vrai monde ; la dernière preuve de gameplay reste en 0.2.4. Le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
 
 ## Évolution bots 0.3.1–0.3.2
 
