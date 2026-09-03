@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
@@ -8,8 +9,32 @@ const output = fileURLToPath(new URL("../site/public/assets", import.meta.url));
 const origin = "http://127.0.0.1:4173";
 const server = spawn("pnpm", ["--dir", "apps/desktop", "dev", "--host", "127.0.0.1", "--port", "4173", "--strictPort"], {
   cwd: root,
-  stdio: ["ignore", "pipe", "pipe"],
+  detached: process.platform !== "win32",
+  stdio: "ignore",
 });
+
+function signalServer(signal) {
+  if (server.exitCode !== null) return;
+  server.kill(signal);
+  if (process.platform !== "win32" && server.pid) {
+    try {
+      process.kill(-server.pid, signal);
+    } catch (error) {
+      if (error?.code !== "ESRCH" && error?.code !== "EPERM") throw error;
+    }
+  }
+}
+
+async function stopServer() {
+  if (server.exitCode !== null) return;
+  const exited = once(server, "exit");
+  signalServer("SIGTERM");
+  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+  if (server.exitCode === null) {
+    signalServer("SIGKILL");
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1_000))]);
+  }
+}
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -48,5 +73,5 @@ try {
   await capture(browser, { name: "launcher-dialogues-en.webp", state: "ready", language: "en", panel: "dialogues" });
 } finally {
   await browser?.close();
-  server.kill("SIGTERM");
+  await stopServer();
 }
