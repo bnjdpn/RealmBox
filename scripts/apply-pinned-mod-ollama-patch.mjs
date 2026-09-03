@@ -46,7 +46,12 @@ function assertPinnedCleanTarget(sourceDirectory) {
 
   const canonicalSource = realpathSync(sourceDirectory);
   const repositoryRoot = realpathSync(git(canonicalSource, ["rev-parse", "--show-toplevel"]));
-  if (repositoryRoot !== canonicalSource)
+  const canonicalStats = statSync(canonicalSource);
+  const repositoryStats = statSync(repositoryRoot);
+  if (
+    canonicalStats.dev !== repositoryStats.dev ||
+    canonicalStats.ino !== repositoryStats.ino
+  )
     fail(`source must be the checkout root, got ${canonicalSource}`);
 
   const head = git(canonicalSource, ["rev-parse", "HEAD"]);
