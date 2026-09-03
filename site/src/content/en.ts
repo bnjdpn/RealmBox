@@ -123,5 +123,6 @@ export const en: SiteCopy = {
     license: "AGPL-3.0",
     documentation: "Documentation",
     source: "Source code",
+    portfolio: "More projects",
   },
 };

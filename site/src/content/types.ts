@@ -66,5 +66,5 @@ export type SiteCopy = {
     title: string;
     items: Array<{ question: string; answer: string }>;
   };
-  footer: { independent: string; license: string; documentation: string; source: string };
+  footer: { independent: string; license: string; documentation: string; source: string; portfolio: string };
 };
