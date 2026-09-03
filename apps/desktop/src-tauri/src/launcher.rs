@@ -4169,15 +4169,16 @@ fn write_realmbox_presence_config(server_root: &Path, enabled: bool) -> Result<(
         "realmbox-presence.conf",
         &[
             ("RealmBoxPresence.Enabled", u8::from(enabled).to_string()),
-            ("RealmBoxPresence.ScanIntervalMs", "3000".into()),
+            ("RealmBoxPresence.ScanIntervalMs", "1000".into()),
+            ("RealmBoxPresence.PlayerCooldownSeconds", "0".into()),
             ("RealmBoxPresence.TargetFraction", "0.60".into()),
             ("RealmBoxPresence.MinBotsPerPlayer", "4".into()),
             ("RealmBoxPresence.MaxBotsPerPlayer", "30".into()),
-            ("RealmBoxPresence.NearbyRadius", "260.0".into()),
-            ("RealmBoxPresence.SpawnMinRadius", "110.0".into()),
-            ("RealmBoxPresence.SpawnMaxRadius", "220.0".into()),
+            ("RealmBoxPresence.NearbyRadius", "150.0".into()),
+            ("RealmBoxPresence.SpawnMinRadius", "30.0".into()),
+            ("RealmBoxPresence.SpawnMaxRadius", "90.0".into()),
             ("RealmBoxPresence.MaxMovesPerScan", "1".into()),
-            ("RealmBoxPresence.BotCooldownSeconds", "120".into()),
+            ("RealmBoxPresence.BotCooldownSeconds", "10".into()),
             ("RealmBoxPresence.ReleasedBotGraceSeconds", "300".into()),
         ],
     )
@@ -4549,7 +4550,7 @@ fn write_ollama_chat_config(
             ("OllamaChat.EnableRandomChatter", automatic_chatter.into()),
             ("OllamaChat.MinRandomInterval", min_random_interval.into()),
             ("OllamaChat.MaxRandomInterval", max_random_interval.into()),
-            ("OllamaChat.RandomChatterRealPlayerDistance", "120.0".into()),
+            ("OllamaChat.RandomChatterRealPlayerDistance", "150.0".into()),
             (
                 "OllamaChat.RandomChatterBotCommentChance",
                 random_chance.into(),
@@ -6148,10 +6149,15 @@ mod tests {
         )
         .expect("presence config");
         assert!(config.contains("RealmBoxPresence.Enabled = 1"));
+        assert!(config.contains("RealmBoxPresence.ScanIntervalMs = 1000"));
+        assert!(config.contains("RealmBoxPresence.PlayerCooldownSeconds = 0"));
         assert!(config.contains("RealmBoxPresence.TargetFraction = 0.60"));
         assert!(config.contains("RealmBoxPresence.MaxBotsPerPlayer = 30"));
+        assert!(config.contains("RealmBoxPresence.NearbyRadius = 150.0"));
+        assert!(config.contains("RealmBoxPresence.SpawnMinRadius = 30.0"));
+        assert!(config.contains("RealmBoxPresence.SpawnMaxRadius = 90.0"));
         assert!(config.contains("RealmBoxPresence.MaxMovesPerScan = 1"));
-        assert!(config.contains("RealmBoxPresence.BotCooldownSeconds = 120"));
+        assert!(config.contains("RealmBoxPresence.BotCooldownSeconds = 10"));
         assert!(config.contains("RealmBoxPresence.ReleasedBotGraceSeconds = 300"));
     }
 
@@ -6242,6 +6248,7 @@ mod tests {
         assert!(lively.contains("OllamaChat.RateLimit.GlobalPerMinute = 6"));
         assert!(lively.contains("OllamaChat.MinRandomInterval = 20"));
         assert!(lively.contains("OllamaChat.MaxRandomInterval = 60"));
+        assert!(lively.contains("OllamaChat.RandomChatterRealPlayerDistance = 150.0"));
         assert!(lively.contains("OllamaChat.BotConversation.MaxChainDepth = 2"));
         write_ollama_chat_config(
             temporary.path(),

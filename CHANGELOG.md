@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 — 2026-09-03
+
+- Réapplique à chaque démarrage une présence dense autour du joueur : un bot autonome de même faction par seconde, placé à 30–90 mètres, jusqu'à la cible existante de 60 %.
+- Aligne le rayon de présence sur le garde-fou de visibilité à 150 mètres afin que les bots protégés du déplacement soient également comptés comme proches.
+- Réduit à dix secondes le délai avant qu'un bot autonome puisse suivre un nouveau changement de zone et aligne le bavardage local du profil Vivant sur le rayon de présence de 150 mètres.
+
 ## 0.3.2 — 2026-09-03
 
 - Ajoute un module serveur RealmBox qui rassemble progressivement jusqu’à 60 % des bots autonomes en ligne près des joueurs réels, sans déplacer les bots groupés, en combat, en instance ou visibles par un autre joueur.
