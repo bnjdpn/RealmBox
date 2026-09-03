@@ -8,7 +8,7 @@ declare global {
 }
 
 function browserStatus(): LauncherStatus {
-  return {
+  const base: LauncherStatus = {
     phase: "needsGameData",
     message: "Données de jeu requises",
     detail: "L’installation réelle est disponible dans l’application desktop RealmBox.",
@@ -32,6 +32,37 @@ function browserStatus(): LauncherStatus {
       { id: "ai", label: "Dialogues vivants", state: "stopped", detail: "Selon cette machine" },
     ],
   };
+
+  if (!import.meta.env.DEV) return base;
+  const previewState = new URLSearchParams(window.location.search).get("previewState");
+  if (previewState === "checking") return { ...base, phase: "checking", message: "Vérification de l’installation", progress: 18, components: [] };
+  if (previewState === "installing") return {
+    ...base,
+    phase: "installing",
+    message: "Préparation du serveur précompilé",
+    progress: 63,
+    components: base.components.map((component, index) => ({
+      ...component,
+      state: index < 2 ? "ready" : index === 2 ? "running" : component.state,
+      detail: index < 2 ? "Installé" : index === 2 ? "En cours" : component.detail,
+    })),
+  };
+  if (["ready", "running", "error"].includes(previewState ?? "")) {
+    const running = previewState === "running";
+    return {
+      ...base,
+      phase: previewState as "ready" | "running" | "error",
+      message: running ? "Le monde est lancé" : "Installation terminée",
+      detail: previewState === "error" ? "Le serveur local n’a pas répondu dans le délai prévu" : null,
+      progress: previewState === "error" ? 76 : 100,
+      installed: true,
+      gameDataPath: "/Jeux/RealmBox",
+      accountName: "REALMBOX",
+      accountPassword: "REALMBOX",
+      components: base.components.map((component) => ({ ...component, state: running ? "running" : "ready", detail: running ? "Actif" : "Installé" })),
+    };
+  }
+  return base;
 }
 
 export async function bootstrapLauncher(): Promise<LauncherStatus> {
@@ -46,19 +77,47 @@ export async function chooseGameData(): Promise<string | null> {
 }
 
 export async function inspectAiCapability(): Promise<AiCapability> {
-  if (!window.__TAURI_INTERNALS__) return {
-    state: "unavailable",
-    deviceName: null,
-    ramGb: null,
-    modelId: null,
-    modelName: null,
-    ollamaModel: null,
-    grade: null,
-    estimatedTokensPerSecond: null,
-    detail: "Le conseil matériel est disponible dans l’application desktop.",
-    sourceUrl: "https://www.canirun.ai/",
-  };
+  if (!window.__TAURI_INTERNALS__) {
+    const visualPreview = import.meta.env.DEV && ["ready", "running", "error"].includes(new URLSearchParams(window.location.search).get("previewState") ?? "");
+    return visualPreview ? {
+      state: "recommended",
+      deviceName: "Aperçu visuel",
+      ramGb: 16,
+      modelId: "preview-model",
+      modelName: "Modèle local recommandé",
+      ollamaModel: "preview:3b",
+      grade: "A",
+      estimatedTokensPerSecond: 42,
+      downloadSizeGb: 2,
+      modelLicense: "Licence du modèle affichée avant installation",
+      detail: "Exemple visuel local, sans téléchargement ni exécution.",
+      sourceUrl: "https://www.canirun.ai/",
+    } : {
+      state: "unavailable",
+      deviceName: null,
+      ramGb: null,
+      modelId: null,
+      modelName: null,
+      ollamaModel: null,
+      grade: null,
+      estimatedTokensPerSecond: null,
+      downloadSizeGb: null,
+      modelLicense: null,
+      detail: "Le conseil matériel est disponible dans l’application desktop.",
+      sourceUrl: "https://www.canirun.ai/",
+    };
+  }
   return invoke<AiCapability>("inspect_ai_capability");
+}
+
+export async function configureLocalDialogue(
+  enabled: boolean,
+  model: string | null,
+): Promise<LauncherStatus> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { ...browserStatus(), phase: "ready", installed: true, aiEnabled: enabled, aiModel: enabled ? model : null };
+  }
+  return invoke<LauncherStatus>("configure_local_dialogue", { enabled, model });
 }
 
 export async function inspectGameData(gameDataPath: string): Promise<GameDataInspection> {
@@ -66,6 +125,13 @@ export async function inspectGameData(gameDataPath: string): Promise<GameDataIns
     return { path: gameDataPath, locale: "frFR", detail: "Aperçu navigateur sans lecture du disque." };
   }
   return invoke<GameDataInspection>("inspect_game_data", { gameDataPath });
+}
+
+export async function changeGameDataPath(gameDataPath: string): Promise<LauncherStatus> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { ...browserStatus(), phase: "ready", installed: true, gameDataPath };
+  }
+  return invoke<LauncherStatus>("change_game_data_path", { gameDataPath });
 }
 
 export async function installRealm(
@@ -96,10 +162,11 @@ export async function updatePlayerbotPopulation(botsEnabled: boolean, botCount: 
 
 export async function getRealmDiagnostics(): Promise<RealmDiagnostics> {
   if (!window.__TAURI_INTERNALS__) {
+    const english = document.documentElement.lang === "en";
     return {
-      summary: "Aucun diagnostic réel dans l’aperçu navigateur.",
+      summary: english ? "No real diagnostics are available in browser preview." : "Aucun diagnostic réel dans l’aperçu navigateur.",
       component: "launcher",
-      logsPath: "Indisponible dans l’aperçu navigateur",
+      logsPath: english ? "Unavailable in browser preview" : "Indisponible dans l’aperçu navigateur",
       recentEntries: [],
     };
   }

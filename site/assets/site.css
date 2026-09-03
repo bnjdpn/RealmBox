@@ -3,12 +3,21 @@
   background: #03070b;
   font-family: "Trebuchet MS", Verdana, Arial, sans-serif;
   font-synthesis: none;
-  --ice: #7ac7dd;
-  --ice-bright: #d6f7ff;
-  --gold: #d6ab4f;
-  --gold-pale: #f1d785;
-  --ink: #231d15;
-  --parchment: #c9b88c;
+  --abyss: #050b12;
+  --night: #071725;
+  --steel-dark: #10293a;
+  --steel: #1c4358;
+  --ice-deep: #326e8d;
+  --ice: #9ed2e5;
+  --ice-bright: #d8f2f7;
+  --bronze: #5a3e21;
+  --brass: #98723a;
+  --gold: #c7a65a;
+  --gold-pale: #e7d293;
+  --parchment: #d7c39c;
+  --ink: #221a13;
+  --success: #7fa46b;
+  --error: #8e3037;
   --line: #31434c;
 }
 
@@ -35,6 +44,7 @@ body::before {
 
 a { color: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--ice-bright); outline-offset: 3px; }
 img { display: block; max-width: 100%; }
 code { font-family: Consolas, "SFMono-Regular", Menlo, monospace; }
 [data-en] { display: none !important; }
@@ -67,9 +77,20 @@ html[lang="en"] [data-en] { display: revert !important; }
   min-height: 326px;
   border-bottom: 1px solid #5c7180;
   background:
-    linear-gradient(180deg, #07111acc, #07111a33 35%, #06101bd9 87%, #03080e),
-    url("realm-frost.webp") center 43% / cover no-repeat;
+    linear-gradient(90deg, #03080ddd 0, #06101a8c 42%, transparent 72%),
+    linear-gradient(180deg, #07111a99, transparent 38%, #06101bd9 88%, #03080e),
+    url("hero-realmbox.webp") 57% 56% / cover no-repeat;
   box-shadow: inset 0 -24px 48px #020609;
+}
+
+.realm-header::before {
+  position: absolute;
+  z-index: 1;
+  inset: 10px;
+  border: 1px solid #a6dce722;
+  box-shadow: inset 0 0 22px #0008;
+  content: "";
+  pointer-events: none;
 }
 
 .realm-header::after {
@@ -223,9 +244,8 @@ html[lang="en"] [data-en] { display: revert !important; }
   overflow: hidden;
   border-bottom: 1px solid #49616a;
   background:
-    linear-gradient(90deg, #06111cf2 0, #081a28c7 42%, #07131d1c 72%),
-    linear-gradient(0deg, #061019e8, transparent 60%),
-    url("realm-frost.webp") 64% 46% / cover no-repeat;
+    radial-gradient(circle at 87% 16%, #24495a73, transparent 35%),
+    linear-gradient(112deg, #0c1f2a, #07131d 64%, #050c12);
 }
 .hero::before {
   position: absolute;
@@ -447,18 +467,19 @@ html[lang="en"] [data-en] { display: revert !important; }
 
 @media (max-width: 640px) {
   html { scroll-padding-top: 0; }
-  .realm-header { min-height: 267px; }
-  .header-bar { width: 100%; height: 46px; border-inline: 0; }
+  .realm-header { min-height: 245px; }
+  .header-bar { width: 100%; height: auto; min-height: 46px; flex-wrap: wrap; border-inline: 0; }
   .mini-brand { padding: 0 10px; }
-  .header-bar nav { display: none; }
-  .masthead { width: 100%; padding: 42px 20px 45px; text-align: center; }
+  .header-bar nav { order: 3; width: 100%; height: 36px; display: flex; overflow-x: auto; border-top: 1px solid #2f4650; }
+  .header-bar nav a { min-width: 0; flex: 1; padding: 0 5px; font-size: 8px; }
+  .masthead { width: 100%; padding: 25px 20px 34px; text-align: center; }
   .eyebrow { margin-left: 0; }
   .wordmark { margin-inline: auto; }
   .masthead-copy { margin-left: 0; }
   .page-shell { width: 100%; margin-bottom: 0; border-inline: 0; }
   .nav-rail { width: 100%; }
-  .hero { min-height: 390px; align-items: flex-end; background-position: 42% center; }
-  .hero-copy { padding: 38px 28px 52px; }
+  .hero { min-height: 340px; align-items: flex-end; background-position: 46% center; }
+  .hero-copy { padding: 31px 28px 45px; }
   .hero h1 { font-size: 33px; }
   .hero-actions { align-items: flex-start; flex-direction: column; gap: 12px; }
   .independent-note { right: 17px; bottom: 12px; left: 28px; font-size: 7px; }
@@ -486,4 +507,7 @@ html[lang="en"] [data-en] { display: revert !important; }
   .quest-number { width: 25px; height: 25px; }
 }
 
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}

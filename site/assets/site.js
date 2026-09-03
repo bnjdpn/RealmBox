@@ -19,6 +19,10 @@ function setLanguage(language) {
     button.setAttribute("aria-pressed", String(active));
   });
 
+  document.querySelectorAll("[data-aria-fr][data-aria-en]").forEach((element) => {
+    element.setAttribute("aria-label", selected === "fr" ? element.dataset.ariaFr : element.dataset.ariaEn);
+  });
+
   document.title = selected === "fr"
     ? "RealmBox — votre monde 3.3.5a local"
     : "RealmBox — your local 3.3.5a world";

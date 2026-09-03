@@ -2,24 +2,43 @@
 
 Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots. GO automatisé pour RealmBox 0.2.0, son site FR/EN, ses images serveur multiarchitecture et sa pré-release GitHub en brouillon. NO-GO pour publier ce brouillon comme release publique prête pour Windows, pour déclarer le réglage Playerbots à chaud prouvé dans un vrai worldserver, pour les dialogues LLM en jeu et pour l’affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
+Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots, ainsi que pour les dialogues joueur-bot locaux observés en français et en anglais. GO automatisé pour RealmBox 0.2.0, son site FR/EN, ses images serveur multiarchitecture et sa pré-release GitHub en brouillon. NO-GO pour publier ce brouillon comme release publique prête pour Windows et pour l'affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
+
+## Refonte desktop et correctifs 0.2.2–0.2.4
+
+| Fonction | Niveau de preuve | Résultat |
+|---|---|---|
+| Launcher fixe | configuration + test Node + build Tauri | fenêtre 1024 × 640, min/max identiques, non redimensionnable, non maximisable et centrée ; bundle `.app` accepté par le schéma Tauri 2 |
+| Composition joueur | 18 tests UI + QA visuelle simulée | une illustration ImageGen plein cadre, une marque, un état et une action ; réglages, langue, compagnons, dialogues et diagnostic dans un panneau contextuel ; états premier lancement, vérification, installation, prêt et erreur contrôlés à 1024 × 640 |
+| Progression et erreurs | tests UI + QA visuelle simulée | aucune jauge à 0 ou 100 %, progression visible uniquement pendant une opération active ; détails techniques absents de l’accueil et accessibles dans Diagnostic |
+| Activation des dialogues après 0.2.0 | tests UI/Rust + parcours réel | l'ouverture ne démarre plus automatiquement le monde ; le blocage monde actif propose un arrêt explicite ; runtime serveur préparé en staging après backup SQL vérifié, ancien serveur conservé hors runtime et projet Compose `realmbox-v3` inchangé ; extraction corrigée depuis `/azerothcore/env/ref/etc/modules/mod_ollama_chat.conf.dist` |
+| Dossier client modifiable | 2 tests UI + 3 tests Rust | changement interdit pendant la partie ; nouveau dossier 3.3.5a revalidé ; overlay OpenWoW remplacé atomiquement ou chemin `Wow.exe` mis à jour ; Compose et base joueurs inchangés ; parcours Windows réel non rejoué |
+| Addon Compagnons 0.2.0-dev | 5 tests exécutant le Lua + analyse XML | réduction dans une icône de minimap, visibilité et positions persistées, FR/EN, composition du groupe, prérequis d’action et commandes bornées couverts avec API WoW simulée ; rendu et commandes `co ±boost` non encore rejoués dans OpenWoW |
+| Bundle macOS local | build + installation + inspection locale | RealmBox 0.2.4 arm64 installé dans `/Users/benjamin/Applications/RealmBox.app`, signé ad hoc ; `codesign --deep --strict` valide ; exécutable SHA-256 `e136e64c…d2c308` ; les quatre références serveur immuables, le prompt bilingue minimal et l’addon de reconnexion sont intégrés |
+| Vérification locale | automatisée | `pnpm verify` réussi : typecheck, lint, 18 tests UI, 7 tests de scripts dont 5 exécutant le Lua de l’addon, build Vite, Clippy strict et 57 tests Rust du workspace |
 
 ## Jalon 0.2.0
 
 | Fonction | Niveau de preuve | Résultat |
 |---|---|---|
-| Interface FR/EN | test UI + contrôle visuel local | 10 tests UI réussis ; vues FR et EN contrôlées en 1200 × 960 |
-| Parcours joueur | test UI + build | vues Mon monde, Compagnons et Diagnostic ; textes décoratifs retirés ; build Vite réussi |
+| Interface FR/EN | test UI + contrôle visuel local | 13 tests UI réussis ; nouvelle navigation Dialogues contrôlée en aperçu FR, parcours FR/EN couvert par tests |
+| Identité visuelle launcher/site | tests UI + build + QA visuelle simulée | panoramas ImageGen distincts optimisés en WebP, icône SVG originale, anciens décors sans provenance ou procéduraux retirés ; launcher `ready` contrôlé à 1140×900 et 780×650, site FR à 1440×1000 et 390×844, bascule EN relue dans l’arbre accessible |
+| Responsive du site | aperçu navigateur statique | captures FR/EN à 1440×900, 1280×800, 768×1024, 390×844 et 360×800 ; contrôles supplémentaires 1920×1080 et 1024×768 ; aucun débordement horizontal mesuré |
+| Icône native | génération + build macOS | source SVG et variante monochrome, PNG 1024, ICNS et ICO générés ; `CFBundleIconFile=icon.icns`, hash identique à la source générée, bundle ad hoc valide |
+| Parcours joueur | test UI + build | vues Mon monde, Compagnons, Dialogues et Diagnostic ; action Jouer dominante et arrêt secondaire en jeu ; build Vite réussi |
 | Erreurs récupérables | test UI | cause courte et action affichées dans Mon monde ; détail technique présent uniquement dans Diagnostic |
 | Diagnostic | tests UI/Rust | composant, chemin des logs, avertissements/erreurs filtrés, masquage des lignes sensibles et copie |
 | Population à chaud | test Rust + preuve Docker isolée | migration Compose idempotente, limite mémoire, commandes `playerbot rndbot reload` et `playerbot rndbot update` réellement consommées par un conteneur éphémère sans redémarrage |
+| Protection des personnages lors des mises à jour | tests Rust | réinstallation par-dessus un royaume refusée, schéma inconnu traité en erreur, suppression de volumes interdite, dump des quatre bases vérifié et signé avant `db-import`, sauvegarde privée hors runtime et jamais écrasée |
 | Population à chaud en jeu | non prouvé | le runtime réel actif utilise encore l’ancien Compose ; aucun redémarrage de la partie en cours n’a été imposé |
+| Activation des dialogues locaux | tests UI/Rust + parcours réel | RealmBox a choisi `llama3.2:3b`, téléchargé Ollama 0.33.2 et 1,9 Go de modèle sur l'hôte, publié le runtime atomiquement et obtenu la réponse locale attendue ; le module du vrai worldserver est chargé et atteint `host.docker.internal:11435` |
 | Site GitHub Pages | contrôle visuel + déploiement | page complète FR/EN contrôlée en desktop et mobile, workflow vert, publication HTTPS relue sur `bnjdpn.github.io/RealmBox/` |
 | Images serveur | build CI + lecture anonyme | quatre manifestes GHCR immuables authserver, worldserver, db-import et tools, chacun linux-amd64 + linux-arm64 ; pull sans compte réussi dans le run 33687674728 |
 | Bundle macOS 0.2.0 | build CI + inspection fraîche | DMG du run 33692911683 retéléchargé, somme interne valide, application arm64 et signature ad hoc vérifiée avec `codesign --deep --strict` ; non notarié |
+| Bundle macOS local avec Dialogues | build + installation + inspection locale | `.app` 0.2.0 arm64 installé dans `/Users/benjamin/Applications/RealmBox.app` avec les quatre digests serveur, signature ad hoc stricte valide, exécutable SHA-256 `15314d02…bbf2a` ; non lancé après réinstallation |
 | Bundle Windows 0.2.0 | build CI + inspection de format | installateur NSIS produit par Windows 2025 dans le run 33692911683 et retéléchargé ; parcours réel Windows 11 non exécuté |
 | Pré-release GitHub | lecture fraîche | brouillon privé `v0.2.0`, DMG + EXE + `SHA256SUMS.txt` présents ; SHA-256 `40d395…b44ae` et `c2275f…ef59c` revérifiés après retéléchargement |
-| Vérification locale | automatisée | `pnpm verify` : typecheck, lint, 10 tests UI, 1 test de packaging, build Vite, clippy strict et 42 tests Rust du workspace |
+| Vérification locale | automatisée | `pnpm verify` : typecheck, lint, 13 tests UI, 1 test de packaging, build Vite, clippy strict et 50 tests Rust du workspace |
 
 ## Preuve réelle sur ce Mac
 
@@ -35,6 +54,7 @@ Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore
 | Équipe de compagnons | réussi | le bouton `Former mon équipe` de l’addon a invoqué à côté du joueur `Kayarid` paladin, `Jillo` prêtre, `Manuela` mage et `Garea` chasseur ; les cinq membres sont confirmés dans le groupe local |
 | Mémoire | stable avec 50 bots | Mac : 36 Gio physiques ; Docker Desktop : 15,8 Gio alloués ; `worldserver` observé autour de 5,2 Gio après démarrage, sans nouvel OOM |
 | Arrêt manuel et supervision | réussi | le bouton `ARRÊTER` coupe le monde proprement ; le nouveau bundle est revenu automatiquement à l’état prêt quand un processus OpenWoW de lancement s’est terminé |
+| Dialogues locaux | parcours réel bilingue réussi | modèle `llama3.2:3b` présent hors conteneur dans le runtime hôte ; module worldserver rechargé à chaud avec réponses joueur à 100 %, un bot par message, zéro cooldown et bavardages automatiques coupés ; une question anglaise a reçu une réponse anglaise de Killat, puis une question française différente a reçu une réponse française de Killat ; le prompt complet observé ne contenait que le message courant |
 
 La preuve visuelle reste locale et n’est pas ajoutée au dépôt, car elle contient des ressources du jeu.
 
@@ -50,14 +70,17 @@ La preuve visuelle reste locale et n’est pas ajoutée au dépôt, car elle con
 | Supervision du client | le processus enfant est réclamé par un thread d’attente ; test de régression réel Unix contre l’état zombie |
 | Vérification locale du bundle installé | preuve antérieure : typecheck, lint, 7 tests UI, build Vite, clippy strict, 24 tests desktop Rust et tous les tests/doc-tests du workspace |
 
-Le bundle courant est installé dans `/Users/benjamin/Applications/RealmBox.app`, signé localement ad hoc, relancé avec son WebView et son monde local, et son exécutable a le SHA-256 `f0a329169c03abbb101f941f7104b37109f70190014c3abc8429120917230000`.
+Le bundle 0.2.4 est installé dans `/Users/benjamin/Applications/RealmBox.app`, signé localement ad hoc, et son exécutable a le SHA-256 `e136e64c6587a4ef1c58fbef56fae8c2faed6eb92f3bd323982d65e384d2c308`. Le processus du lanceur déjà ouvert reste celui de la session précédente jusqu'à sa fermeture, mais la configuration bilingue 0.2.4 a été rechargée à chaud dans le worldserver actif. Le modèle n'est pas dans Docker : Ollama et ses modèles sont publiés sous `~/Library/Application Support/org.realmbox.desktop/runtime-v3/ai`, tandis que le projet Compose reste `realmbox-v3` et conserve ses deux volumes nommés.
 
 ## Défauts et travaux ouverts
 
 - OpenWoW a affiché une alerte macOS de restauration après une fermeture inattendue. Le lanceur ne doit pas laisser cette alerte produire une instance non supervisée ; la récupération automatique reste à durcir.
 - Les 50 bots autonomes sont répartis dans Azeroth. Seuls les quatre bots d’équipe sont garantis près du joueur.
+- La nouvelle ergonomie 0.2.0-dev de l’addon Compagnons passe son harnais Lua simulé, mais l’icône de minimap, la persistance, le bilingue et les commandes `co +boost` / `co -boost` doivent encore être observés dans OpenWoW.
 - Le contrôle à chaud est implémenté dans 0.2.0 et prouvé avec fakes plus un conteneur Docker isolé. Il reste à le rejouer sur le vrai worldserver après le prochain démarrage géré, sans interrompre la session actuellement ouverte.
-- Ollama et `mod-ollama-chat` sont intégrés et épinglés, mais aucun modèle n’a encore été téléchargé et aucune conversation en jeu n’est prouvée.
+- Le contrat de mise à jour protège désormais le volume et impose une sauvegarde avant migration. Trois dumps réels présents ont une empreinte SHA-256 valide, dont ceux créés pendant le parcours 0.2.2 ; aucune restauration complète n'a toutefois été exécutée.
+- L'activation Ollama après une installation antérieure est prouvée sur ce Mac avec staging, sauvegarde, rollback du runtime, téléchargement et inférence. Le correctif 0.2.4 a été rechargé par la commande upstream `ollama reload` et les réponses FR puis EN ont été observées dans le canal de groupe. La qualité factuelle reste celle d'un modèle local 3B et n'est pas garantie.
+- Les fichiers du nouvel addon 0.2.4 sont identiques à la source dans le runtime actif, mais son interface enrichie n'a pas été confirmée visuellement après `/reload` dans OpenWoW ; le prochain démarrage géré le réinstallera avant d'ouvrir le client.
 - Les images serveur RealmBox sont publiées et épinglées par digest. Le prochain parcours réel doit confirmer qu’une installation neuve les télécharge sans recompiler AzerothCore et Playerbots.
 - Windows x64 compile en CI mais n’a pas de parcours réel Windows 11. `Wow.exe` doit devenir le choix recommandé quand une copie compatible est présente ; OpenWoW doit rester optionnel.
 - Linux et Mac Intel ne sont pas pris en charge par le produit actuel.

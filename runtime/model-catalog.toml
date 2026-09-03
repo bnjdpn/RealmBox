@@ -1,7 +1,41 @@
-schema_version = 1
-verified_at = "2026-09-02"
+schema_version = 2
+verified_at = "2026-09-03"
+decision_source = "https://www.canirun.ai/api/compatibility"
+registry_source = "https://registry.ollama.ai/v2/library"
 
-# Intentionally empty. A model becomes selectable only after its exact Ollama
-# tag, downloadable size, licence, French quality, latency, memory footprint,
-# and platform matrix have been measured. CanIRun integration is unresolved.
+# RealmBox evaluates every entry through CanIRun on the player's machine. It
+# keeps only comfortable candidates inside the memory budget reserved for the
+# game, then maximizes estimated tokens/s per official Ollama download GB.
+# The 1B entry is used only when every 3B+ candidate is rejected.
 
+[[models]]
+canirun_id = "qwen3-8b"
+ollama_model = "qwen3:8b"
+ollama_manifest_sha256 = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
+download_size_gb = 5.2
+license = "Apache-2.0"
+fallback_only = false
+
+[[models]]
+canirun_id = "gemma3-4b"
+ollama_model = "gemma3:4b"
+ollama_manifest_sha256 = "a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a"
+download_size_gb = 3.3
+license = "Gemma Terms of Use"
+fallback_only = false
+
+[[models]]
+canirun_id = "llama3.2-3b"
+ollama_model = "llama3.2:3b"
+ollama_manifest_sha256 = "a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72"
+download_size_gb = 2.0
+license = "Llama 3.2 Community License"
+fallback_only = false
+
+[[models]]
+canirun_id = "llama3.2-1b"
+ollama_model = "llama3.2:1b"
+ollama_manifest_sha256 = "baf6a787fdffd633537aa2eb51cfd54cb93ff08e28040095462bb63daf552878"
+download_size_gb = 1.3
+license = "Llama 3.2 Community License"
+fallback_only = true

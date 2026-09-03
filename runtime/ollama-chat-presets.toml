@@ -24,20 +24,20 @@ label_fr = "Discret"
 [immersive]
 label_fr = "Immersif"
 "OllamaChat.MaxConcurrentQueries" = 1
-"OllamaChat.NumPredict" = 60
+"OllamaChat.NumPredict" = 96
 "OllamaChat.NumCtx" = 3072
 "OllamaChat.ThinkMode" = "off"
 "OllamaChat.EnableChatHistory" = 1
 "OllamaChat.MaxConversationHistory" = 5
 "OllamaChat.EnableRandomChatter" = 0
-"OllamaChat.EnableEventChatter" = 1
+"OllamaChat.EnableEventChatter" = 0
 "OllamaChat.EnableSentimentTracking" = 0
 "OllamaChat.EnableChatBotSnapshotTemplate" = 0
 "OllamaChat.DisableForCustomChannels" = 1
 "OllamaChat.DisableForSayYell" = 1
 "OllamaChat.DisableForGuild" = 1
 "OllamaChat.DisableForParty" = 0
-"OllamaChat.PlayerReplyChance.Party" = 90
+"OllamaChat.PlayerReplyChance.Party" = 100
 "OllamaChat.BotReplyChance.Party" = 0
 
 [talkative]
@@ -59,4 +59,3 @@ performance_warning = true
 "OllamaChat.DisableForParty" = 0
 "OllamaChat.PlayerReplyChance.Party" = 100
 "OllamaChat.BotReplyChance.Party" = 2
-

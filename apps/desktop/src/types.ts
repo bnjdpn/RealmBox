@@ -46,6 +46,8 @@ export interface AiCapability {
   ollamaModel: string | null;
   grade: string | null;
   estimatedTokensPerSecond: number | null;
+  downloadSizeGb: number | null;
+  modelLicense: string | null;
   detail: string;
   sourceUrl: string;
 }

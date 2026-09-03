@@ -1,15 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <radialGradient id="bg" cx="50%" cy="36%" r="70%">
-      <stop offset="0" stop-color="#343d2f"/>
-      <stop offset="1" stop-color="#10130f"/>
-    </radialGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#ead38d"/>
-      <stop offset="1" stop-color="#a88439"/>
-    </linearGradient>
-  </defs>
-  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
-  <path d="M512 130 836 318v388L512 894 188 706V318z" fill="none" stroke="url(#gold)" stroke-width="22"/>
-  <path d="M350 730V292h192c107 0 180 58 180 151 0 69-41 119-106 139l123 148H620L514 595h-58v135zm106-226h76c51 0 82-22 82-61 0-40-31-61-82-61h-76z" fill="url(#gold)"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs><radialGradient id="a"><stop stop-color="#326e8d"/><stop offset=".55" stop-color="#071725"/><stop offset="1" stop-color="#03070b"/></radialGradient><linearGradient id="b" x2="1" y2="1"><stop stop-color="#f0d990"/><stop offset=".22" stop-color="#9f7837"/><stop offset=".55" stop-color="#4b3018"/><stop offset=".78" stop-color="#c39b4e"/></linearGradient></defs><path d="M512 36 878 170l110 359-226 315-370 144L78 776 38 397 276 100Z" fill="#02070b"/><path d="M512 63 854 188l103 336-211 294-350 136L105 758 68 404 290 126Z" fill="#102b39" stroke="#98723a" stroke-width="18"/><circle cx="512" cy="512" r="354" fill="#050c12" stroke="url(#b)" stroke-width="42"/><circle cx="512" cy="512" r="303" fill="url(#a)" stroke="#9ed2e5" stroke-width="20"/><circle cx="512" cy="512" r="238" fill="none" stroke="#bfeef6" stroke-width="18"/><path d="M368 706V318h170c92 0 153 47 153 122 0 55-31 90-80 107 60 15 91 54 91 110 0 31-8 60-24 84h-91c22-19 34-44 34-73 0-48-31-73-94-73h-76v111Zm83-274v92h71c55 0 84-16 84-50 0-28-23-42-69-42Z" fill="#071725" stroke="url(#b)" stroke-width="16" stroke-linejoin="round"/></svg>

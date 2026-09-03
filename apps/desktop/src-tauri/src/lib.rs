@@ -186,9 +186,46 @@ async fn inspect_ai_capability(state: State<'_, AppState>) -> Result<AiCapabilit
 }
 
 #[tauri::command]
+async fn configure_local_dialogue(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+    model: Option<String>,
+) -> Result<LauncherStatus, String> {
+    let service = Arc::clone(&state.0);
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .configure_local_dialogue(enabled, model, |progress| {
+                emit_progress(&app_handle, progress)
+            })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn inspect_game_data(game_data_path: String) -> Result<GameDataInspection, String> {
     tauri::async_runtime::spawn_blocking(move || {
         launcher::inspect_game_data_root(Path::new(&game_data_path))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn change_game_data_path(
+    state: State<'_, AppState>,
+    game_data_path: String,
+) -> Result<LauncherStatus, String> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .change_game_data_path(Path::new(&game_data_path))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -265,7 +302,9 @@ pub fn run() {
             update_playerbot_population,
             get_realm_diagnostics,
             inspect_ai_capability,
-            inspect_game_data
+            configure_local_dialogue,
+            inspect_game_data,
+            change_game_data_path
         ])
         .run(tauri::generate_context!())
         .expect("RealmBox n'a pas pu initialiser sa boucle applicative");

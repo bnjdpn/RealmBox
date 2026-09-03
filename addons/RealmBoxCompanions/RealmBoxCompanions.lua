@@ -1,31 +1,362 @@
+local ADDON_NAME = "RealmBoxCompanions"
+local MINIMAP_RADIUS = 80
+
 local COMMANDS = {
   follow = "follow",
   attack = "attack",
   stay = "stay",
   regroup = "summon",
-  cooldowns_on = "cooldowns on",
   leave = "leave",
 }
 
 local PARTY_TEMPLATE = {
-  ".playerbots bot addclass paladin",
-  ".playerbots bot addclass priest",
-  ".playerbots bot addclass mage",
-  ".playerbots bot addclass hunter",
+  { classToken = "PALADIN", command = ".playerbots bot addclass paladin" },
+  { classToken = "PRIEST", command = ".playerbots bot addclass priest" },
+  { classToken = "MAGE", command = ".playerbots bot addclass mage" },
+  { classToken = "HUNTER", command = ".playerbots bot addclass hunter" },
+}
+
+local CLASS_NAMES = {
+  fr = {
+    DEATHKNIGHT = "Chevalier de la mort",
+    DRUID = "Druide",
+    HUNTER = "Chasseur",
+    MAGE = "Mage",
+    PALADIN = "Paladin",
+    PRIEST = "Prêtre",
+    ROGUE = "Voleur",
+    SHAMAN = "Chaman",
+    WARLOCK = "Démoniste",
+    WARRIOR = "Guerrier",
+  },
+  en = {
+    DEATHKNIGHT = "Death Knight",
+    DRUID = "Druid",
+    HUNTER = "Hunter",
+    MAGE = "Mage",
+    PALADIN = "Paladin",
+    PRIEST = "Priest",
+    ROGUE = "Rogue",
+    SHAMAN = "Shaman",
+    WARLOCK = "Warlock",
+    WARRIOR = "Warrior",
+  },
+}
+
+local STRINGS = {
+  fr = {
+    title = "COMPAGNONS",
+    formParty = "Former mon équipe",
+    follow = "Me suivre",
+    attack = "Attaquer",
+    stay = "Attendre ici",
+    regroup = "Se regrouper",
+    leave = "Libérer l'équipe",
+    boostDefault = "Capacités fortes : serveur",
+    boostOn = "Capacités fortes : demandées",
+    boostOff = "Capacités fortes : limitées",
+    ready = "Aventuriers autonomes actifs",
+    groupEmpty = "Équipe : 0/4",
+    groupState = "Équipe : %d/4 · %s",
+    offline = "%d hors ligne",
+    noTarget = "Sélectionnez une cible ennemie",
+    noParty = "Formez d'abord une équipe",
+    complete = "Votre groupe est déjà complet",
+    reconnecting = "Reconnexion des compagnons hors ligne…",
+    forming = "Formation d'une équipe équilibrée…",
+    remaining = "Formation de l'équipe · %d restant(s)",
+    regrouping = "Équipe demandée · regroupement en cours",
+    actionRefused = "RealmBox : action refusée",
+    commandSent = "Ordre envoyé : %s",
+    available = "Action disponible",
+    boostHelp = "Préférence envoyée à la stratégie Playerbots ; le serveur ne fournit pas d'accusé de réception.",
+    boostRequestedOn = "Capacités fortes demandées",
+    boostRequestedOff = "Capacités fortes limitées",
+    tooltipTitle = "RealmBox Companions",
+    tooltipToggle = "Clic gauche : afficher ou masquer",
+    tooltipDrag = "Glisser : déplacer autour de la minimap",
+    tooltipSlash = "/realmbox ou /rb",
+    language = "EN",
+  },
+  en = {
+    title = "COMPANIONS",
+    formParty = "Build my party",
+    follow = "Follow me",
+    attack = "Attack",
+    stay = "Stay here",
+    regroup = "Regroup",
+    leave = "Release party",
+    boostDefault = "Strong abilities: server",
+    boostOn = "Strong abilities: requested",
+    boostOff = "Strong abilities: limited",
+    ready = "Autonomous adventurers active",
+    groupEmpty = "Party: 0/4",
+    groupState = "Party: %d/4 · %s",
+    offline = "%d offline",
+    noTarget = "Select an enemy target",
+    noParty = "Build a party first",
+    complete = "Your party is already full",
+    reconnecting = "Replacing offline companions…",
+    forming = "Building a balanced party…",
+    remaining = "Building party · %d remaining",
+    regrouping = "Party requested · regrouping",
+    actionRefused = "RealmBox: action refused",
+    commandSent = "Command sent: %s",
+    available = "Action available",
+    boostHelp = "Preference sent to the Playerbots strategy; the server does not provide an acknowledgement.",
+    boostRequestedOn = "Strong abilities requested",
+    boostRequestedOff = "Strong abilities limited",
+    tooltipTitle = "RealmBox Companions",
+    tooltipToggle = "Left-click: show or hide",
+    tooltipDrag = "Drag: move around the minimap",
+    tooltipSlash = "/realmbox or /rb",
+    language = "FR",
+  },
 }
 
 local partyQueue = {}
 local partyQueueElapsed = 0
+local initialized = false
+local minimapDragging = false
+
+local function CurrentLanguage()
+  if RealmBoxCompanionsDB and RealmBoxCompanionsDB.language == "en" then
+    return "en"
+  end
+  return "fr"
+end
+
+local function Text(key)
+  return STRINGS[CurrentLanguage()][key]
+end
 
 local function SetStatus(message)
-  RealmBoxCompanionsFrameStatus:SetText(message)
+  if RealmBoxCompanionsFrameStatus then
+    RealmBoxCompanionsFrameStatus:SetText(message)
+  end
+end
+
+local function IsAttackableTarget()
+  return UnitExists("target") and UnitCanAttack("player", "target") and not UnitIsDeadOrGhost("target")
+end
+
+local function SetButtonEnabled(button, enabled)
+  if enabled then
+    button:Enable()
+  else
+    button:Disable()
+  end
+end
+
+local function PartySnapshot()
+  local connectedClasses = {}
+  local connectedClassTokens = {}
+  local connectedCount = 0
+  local offlineNames = {}
+
+  for index = 1, GetNumPartyMembers() do
+    local unit = "party" .. index
+    local name = UnitName(unit)
+    if name then
+      if UnitIsConnected(unit) then
+        local _, classToken = UnitClass(unit)
+        if classToken then
+          connectedClasses[classToken] = true
+          table.insert(connectedClassTokens, classToken)
+        end
+        connectedCount = connectedCount + 1
+      else
+        table.insert(offlineNames, name)
+      end
+    end
+  end
+
+  return connectedClasses, connectedClassTokens, connectedCount, offlineNames
+end
+
+local function UpdatePanelPosition()
+  if not RealmBoxCompanionsDB or not RealmBoxCompanionsFrame then
+    return
+  end
+
+  local point, _, relativePoint, x, y = RealmBoxCompanionsFrame:GetPoint(1)
+  if point and relativePoint and x and y then
+    RealmBoxCompanionsDB.panelPoint = point
+    RealmBoxCompanionsDB.panelRelativePoint = relativePoint
+    RealmBoxCompanionsDB.panelX = x
+    RealmBoxCompanionsDB.panelY = y
+  end
+end
+
+local function PositionMinimapButton()
+  if not RealmBoxCompanionsMinimapButton then
+    return
+  end
+
+  local angle = 225
+  if RealmBoxCompanionsDB and type(RealmBoxCompanionsDB.minimapAngle) == "number" then
+    angle = RealmBoxCompanionsDB.minimapAngle
+  end
+  local radians = math.rad(angle)
+  RealmBoxCompanionsMinimapButton:ClearAllPoints()
+  RealmBoxCompanionsMinimapButton:SetPoint(
+    "CENTER",
+    Minimap,
+    "CENTER",
+    MINIMAP_RADIUS * math.cos(radians),
+    MINIMAP_RADIUS * math.sin(radians)
+  )
+end
+
+local function CursorAngleFromMinimap()
+  local cursorX, cursorY = GetCursorPosition()
+  local scale = Minimap:GetEffectiveScale()
+  local centerX, centerY = Minimap:GetCenter()
+  cursorX = cursorX / scale
+  cursorY = cursorY / scale
+
+  local deltaX = cursorX - centerX
+  local deltaY = cursorY - centerY
+  if deltaX == 0 then
+    if deltaY >= 0 then
+      return 90
+    end
+    return 270
+  end
+
+  local angle = math.deg(math.atan(deltaY / deltaX))
+  if deltaX < 0 then
+    angle = angle + 180
+  elseif deltaY < 0 then
+    angle = angle + 360
+  end
+  return angle
+end
+
+local function ApplyTranslations()
+  RealmBoxCompanionsFrameTitle:SetText(Text("title"))
+  RealmBoxCompanionsFrameFormParty:SetText(Text("formParty"))
+  RealmBoxCompanionsFrameFollow:SetText(Text("follow"))
+  RealmBoxCompanionsFrameAttack:SetText(Text("attack"))
+  RealmBoxCompanionsFrameStay:SetText(Text("stay"))
+  RealmBoxCompanionsFrameRegroup:SetText(Text("regroup"))
+  RealmBoxCompanionsFrameLeave:SetText(Text("leave"))
+  RealmBoxCompanionsFrameLanguage:SetText(Text("language"))
+end
+
+local function UpdateGroupState()
+  if not initialized then
+    return
+  end
+
+  local _, connectedClassTokens, connectedCount, offlineNames = PartySnapshot()
+  local classNames = {}
+  for _, classToken in ipairs(connectedClassTokens) do
+    table.insert(classNames, CLASS_NAMES[CurrentLanguage()][classToken] or classToken)
+  end
+
+  if connectedCount == 0 and table.getn(offlineNames) == 0 then
+    RealmBoxCompanionsFrameGroupStatus:SetText(Text("groupEmpty"))
+  else
+    local details = table.concat(classNames, ", ")
+    if details == "" then
+      details = "—"
+    end
+    if table.getn(offlineNames) > 0 then
+      details = details .. " · " .. string.format(Text("offline"), table.getn(offlineNames))
+    end
+    RealmBoxCompanionsFrameGroupStatus:SetText(string.format(Text("groupState"), connectedCount, details))
+  end
+
+  local hasParty = GetNumPartyMembers() > 0
+  SetButtonEnabled(RealmBoxCompanionsFrameFollow, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameAttack, hasParty and IsAttackableTarget())
+  SetButtonEnabled(RealmBoxCompanionsFrameStay, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameRegroup, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameBoost, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameLeave, hasParty)
+
+  if RealmBoxCompanionsDB.boostPreference == true then
+    RealmBoxCompanionsFrameBoost:SetText(Text("boostOn"))
+  elseif RealmBoxCompanionsDB.boostPreference == false then
+    RealmBoxCompanionsFrameBoost:SetText(Text("boostOff"))
+  else
+    RealmBoxCompanionsFrameBoost:SetText(Text("boostDefault"))
+  end
+end
+
+local function RestorePanelPosition()
+  RealmBoxCompanionsFrame:ClearAllPoints()
+  if type(RealmBoxCompanionsDB.panelPoint) == "string"
+      and type(RealmBoxCompanionsDB.panelRelativePoint) == "string"
+      and type(RealmBoxCompanionsDB.panelX) == "number"
+      and type(RealmBoxCompanionsDB.panelY) == "number" then
+    RealmBoxCompanionsFrame:SetPoint(
+      RealmBoxCompanionsDB.panelPoint,
+      UIParent,
+      RealmBoxCompanionsDB.panelRelativePoint,
+      RealmBoxCompanionsDB.panelX,
+      RealmBoxCompanionsDB.panelY
+    )
+  else
+    RealmBoxCompanionsFrame:SetPoint("CENTER", UIParent, "CENTER", 330, 0)
+  end
+end
+
+local function Initialize()
+  local firstRun = type(RealmBoxCompanionsDB) ~= "table" or not RealmBoxCompanionsDB.seen
+  if type(RealmBoxCompanionsDB) ~= "table" then
+    RealmBoxCompanionsDB = {}
+  end
+
+  if RealmBoxCompanionsDB.language ~= "fr" and RealmBoxCompanionsDB.language ~= "en" then
+    if GetLocale and string.sub(GetLocale(), 1, 2) == "fr" then
+      RealmBoxCompanionsDB.language = "fr"
+    else
+      RealmBoxCompanionsDB.language = "en"
+    end
+  end
+  if type(RealmBoxCompanionsDB.minimapAngle) ~= "number" then
+    RealmBoxCompanionsDB.minimapAngle = 225
+  end
+  if firstRun then
+    RealmBoxCompanionsDB.panelShown = true
+  end
+  RealmBoxCompanionsDB.seen = true
+
+  initialized = true
+  ApplyTranslations()
+  RestorePanelPosition()
+  PositionMinimapButton()
+  UpdateGroupState()
+  SetStatus(Text("ready"))
+
+  if RealmBoxCompanionsDB.panelShown then
+    RealmBoxCompanionsFrame:Show()
+  else
+    RealmBoxCompanionsFrame:Hide()
+  end
 end
 
 function RealmBoxCompanions_OnLoad(frame)
   frame:RegisterForDrag("LeftButton")
   frame:SetClampedToScreen(true)
   frame:SetBackdropColor(0.04, 0.05, 0.04, 0.94)
-  SetStatus("Aventuriers autonomes actifs")
+  frame:RegisterEvent("ADDON_LOADED")
+  frame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+  frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+  table.insert(UISpecialFrames, "RealmBoxCompanionsFrame")
+end
+
+function RealmBoxCompanions_OnEvent(frame, event, argument)
+  if event == "ADDON_LOADED" and argument == ADDON_NAME then
+    Initialize()
+    return
+  end
+  if initialized then
+    UpdateGroupState()
+  end
 end
 
 function RealmBoxCompanions_OnUpdate(frame, elapsed)
@@ -42,39 +373,190 @@ function RealmBoxCompanions_OnUpdate(frame, elapsed)
   local command = table.remove(partyQueue, 1)
   SendChatMessage(command, "SAY")
   if table.getn(partyQueue) == 0 then
-    SetStatus("Équipe demandée · regroupement en cours")
+    SetStatus(Text("regrouping"))
   else
-    SetStatus("Formation de l'équipe · " .. table.getn(partyQueue) .. " restant(s)")
+    SetStatus(string.format(Text("remaining"), table.getn(partyQueue)))
   end
 end
 
+function RealmBoxCompanions_OnShow()
+  if initialized then
+    RealmBoxCompanionsDB.panelShown = true
+    UpdateGroupState()
+  end
+end
+
+function RealmBoxCompanions_OnHide()
+  if initialized then
+    RealmBoxCompanionsDB.panelShown = false
+  end
+end
+
+function RealmBoxCompanions_OnDragStop(frame)
+  frame:StopMovingOrSizing()
+  UpdatePanelPosition()
+end
+
+function RealmBoxCompanions_Toggle()
+  if RealmBoxCompanionsFrame:IsShown() then
+    RealmBoxCompanionsFrame:Hide()
+  else
+    RealmBoxCompanionsFrame:Show()
+  end
+end
+
+function RealmBoxCompanions_ToggleLanguage()
+  if CurrentLanguage() == "fr" then
+    RealmBoxCompanionsDB.language = "en"
+  else
+    RealmBoxCompanionsDB.language = "fr"
+  end
+  ApplyTranslations()
+  UpdateGroupState()
+  SetStatus(Text("ready"))
+end
+
 function RealmBoxCompanions_FormParty()
-  if GetNumPartyMembers() >= 4 then
-    SetStatus("Votre groupe est déjà complet")
+  local connectedClasses, _, connectedCount, offlineNames = PartySnapshot()
+
+  if connectedCount >= 4 and table.getn(offlineNames) == 0 then
+    SetStatus(Text("complete"))
     return
   end
 
+  for _, name in ipairs(offlineNames) do
+    UninviteUnit(name)
+  end
+
   partyQueue = {}
-  local missing = 4 - GetNumPartyMembers()
-  for index, command in ipairs(PARTY_TEMPLATE) do
-    if index > missing then
+  local slotsRemaining = 4 - connectedCount
+  for _, companion in ipairs(PARTY_TEMPLATE) do
+    if slotsRemaining == 0 then
       break
     end
-    table.insert(partyQueue, command)
+    if not connectedClasses[companion.classToken] then
+      table.insert(partyQueue, companion.command)
+      slotsRemaining = slotsRemaining - 1
+    end
   end
+
+  if table.getn(partyQueue) == 0 then
+    SetStatus(Text("complete"))
+    return
+  end
+
   partyQueueElapsed = 0.8
-  SetStatus("Formation d'une équipe équilibrée…")
+  if table.getn(offlineNames) > 0 then
+    SetStatus(Text("reconnecting"))
+  else
+    SetStatus(Text("forming"))
+  end
 end
 
 function RealmBoxCompanions_Run(action)
   local command = COMMANDS[action]
   if not command then
-    DEFAULT_CHAT_FRAME:AddMessage("RealmBox : action refusée")
+    DEFAULT_CHAT_FRAME:AddMessage(Text("actionRefused"))
     return
   end
   if GetNumPartyMembers() == 0 then
-    SetStatus("Formez d'abord une équipe")
+    SetStatus(Text("noParty"))
+    return
+  end
+  if action == "attack" and not IsAttackableTarget() then
+    SetStatus(Text("noTarget"))
     return
   end
   SendChatMessage(command, "PARTY")
+  SetStatus(string.format(Text("commandSent"), Text(action)))
+end
+
+function RealmBoxCompanions_ToggleBoost()
+  if GetNumPartyMembers() == 0 then
+    SetStatus(Text("noParty"))
+    return
+  end
+
+  RealmBoxCompanionsDB.boostPreference = RealmBoxCompanionsDB.boostPreference ~= true
+  if RealmBoxCompanionsDB.boostPreference then
+    SendChatMessage("co +boost", "PARTY")
+    SetStatus(Text("boostRequestedOn"))
+  else
+    SendChatMessage("co -boost", "PARTY")
+    SetStatus(Text("boostRequestedOff"))
+  end
+  UpdateGroupState()
+end
+
+function RealmBoxCompanions_Minimap_OnLoad(button)
+  button:RegisterForClicks("LeftButtonUp")
+  button:RegisterForDrag("LeftButton")
+  PositionMinimapButton()
+end
+
+function RealmBoxCompanions_Minimap_OnDragStart(button)
+  minimapDragging = true
+  button:LockHighlight()
+end
+
+function RealmBoxCompanions_Minimap_OnUpdate()
+  if not minimapDragging then
+    return
+  end
+  RealmBoxCompanionsDB.minimapAngle = CursorAngleFromMinimap()
+  PositionMinimapButton()
+end
+
+function RealmBoxCompanions_Minimap_OnDragStop(button)
+  minimapDragging = false
+  button:UnlockHighlight()
+end
+
+function RealmBoxCompanions_Minimap_OnEnter(button)
+  GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+  GameTooltip:SetText(Text("tooltipTitle"))
+  GameTooltip:AddLine(Text("tooltipToggle"), 1, 1, 1)
+  GameTooltip:AddLine(Text("tooltipDrag"), 0.8, 0.8, 0.8)
+  GameTooltip:AddLine(Text("tooltipSlash"), 0.8, 0.8, 0.8)
+  GameTooltip:Show()
+end
+
+function RealmBoxCompanions_Action_OnEnter(button, action)
+  local title = Text(action)
+  if action == "boost" then
+    if RealmBoxCompanionsDB.boostPreference == true then
+      title = Text("boostOn")
+    elseif RealmBoxCompanionsDB.boostPreference == false then
+      title = Text("boostOff")
+    else
+      title = Text("boostDefault")
+    end
+  end
+  GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+  GameTooltip:SetText(title)
+  if GetNumPartyMembers() == 0 then
+    GameTooltip:AddLine(Text("noParty"), 1, 0.35, 0.35)
+  elseif action == "attack" and not IsAttackableTarget() then
+    GameTooltip:AddLine(Text("noTarget"), 1, 0.35, 0.35)
+  elseif action == "boost" then
+    GameTooltip:AddLine(Text("boostHelp"), 0.8, 0.8, 0.8, true)
+  else
+    GameTooltip:AddLine(Text("available"), 0.8, 0.8, 0.8)
+  end
+  GameTooltip:Show()
+end
+
+SLASH_REALMBOXCOMPANIONS1 = "/realmbox"
+SLASH_REALMBOXCOMPANIONS2 = "/rb"
+SlashCmdList.REALMBOXCOMPANIONS = function(message)
+  local command = string.lower(message or "")
+  if command == "fr" or command == "en" then
+    RealmBoxCompanionsDB.language = command
+    ApplyTranslations()
+    UpdateGroupState()
+    SetStatus(Text("ready"))
+    RealmBoxCompanionsFrame:Show()
+    return
+  end
+  RealmBoxCompanions_Toggle()
 end

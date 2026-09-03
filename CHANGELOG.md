@@ -1,13 +1,46 @@
 # Changelog
 
+## 0.2.4 — 2026-09-03
+
+- Ajoute à l’addon une icône de minimap déplaçable, la réduction/restauration du panneau, un bouton de fermeture, les commandes `/realmbox` et `/rb`, ainsi que la mémorisation des positions et de la visibilité.
+- Rend l’addon bilingue FR/EN, affiche la composition connectée du groupe et les membres hors ligne, puis désactive les ordres impossibles en expliquant leur prérequis.
+- Remplace la commande inexistante `cooldowns on` par le vrai contrôle Playerbots `co +boost` / `co -boost`, affiché honnêtement comme une préférence envoyée sans accusé serveur.
+- Exécute le Lua de l’addon dans cinq tests Fengari avec une API WoW simulée, en plus de valider la structure XML et les métadonnées 3.3.5a.
+- Remplace le prompt de conversation par un gabarit minimal et déterministe : seul le dernier message joueur décide du français ou de l’anglais, sans historique susceptible d’imposer la langue précédente.
+- Réinstalle atomiquement l’addon compagnon intégré à chaque démarrage afin que les correctifs atteignent aussi les mondes déjà installés.
+- Remplace automatiquement les compagnons hors ligne au lieu de considérer leurs emplacements de groupe comme occupés.
+
+## 0.2.3 — 2026-09-03
+
+- Ajoute dans Réglages le changement du dossier du client après installation, avec nouvelle validation des données 3.3.5a et blocage pendant la partie.
+- Reconstruit atomiquement l’overlay de données OpenWoW ou met à jour `Wow.exe`, sans réinstallation du serveur ni modification de la base joueurs.
+- Sépare les sauvegardes de `realmlist.wtf` par copie du jeu afin de ne jamais écraser la configuration d’un autre client.
+- Rend les réponses aux joueurs déterministes dans les canaux pris en charge, avec une seule réponse par message et sans délai artificiel entre deux questions.
+- Demande explicitement au modèle de répondre dans la langue du dernier message et de traiter directement les questions.
+- Désactive le bavardage aléatoire et événementiel du preset joueur afin qu'il ne concurrence pas les conversations.
+
+## 0.2.2 — 2026-09-03
+
+- Corrige l’extraction de la configuration `mod-ollama-chat` depuis le chemin réellement présent dans l’image serveur immuable.
+
+## 0.2.1 — 2026-09-03
+
+- Remplacement complet du dashboard desktop par un launcher fixe 1024 × 640 : illustration ImageGen plein cadre, marque unique, état courant et action principale ; langue, compagnons, dialogues et diagnostic passent dans un panneau de réglages contextuel.
+- La progression n’apparaît que pendant une opération réellement en cours et les erreurs restent en une phrase d’action, avec les détails techniques réservés au diagnostic.
+- L’ouverture du lanceur ne démarre plus automatiquement le monde : le joueur peut préparer les dialogues avant de jouer.
+- L’écran Dialogues explique le blocage quand le monde tourne et permet de l’arrêter explicitement.
+- Une installation 0.2.0 sans module Ollama passe par un runtime serveur précompilé préparé en staging, après sauvegarde SQL complète vérifiée et sans changer le projet Docker `realmbox-v3`.
+- L’ancien serveur est conservé hors du runtime actif pour rollback ; le modèle reste téléchargé uniquement après confirmation.
+
 ## 0.2.0 — 2026-09-02
 
-- Nouvelle interface joueur sans texte décoratif, avec vues Monde, Compagnons et Diagnostic.
+- Nouvelle interface joueur avec panorama raster ImageGen original, cadre acier/laiton, plaques de navigation, bouton Jouer dominant et vues Monde, Compagnons, Dialogues et Diagnostic.
 - Interface complète en français et en anglais, choix de langue conservé localement.
 - Modification de la population Playerbots à chaud via les commandes console upstream, sans redémarrer le client.
 - Erreurs joueur courtes avec cause et récupération ; détails techniques et logs filtrés réservés au diagnostic copiable.
 - Site GitHub Pages bilingue avec tutoriel macOS/Windows, limites de preuve et vérification SHA-256.
 - Workflow de prerelease macOS arm64 et Windows x64 avec fichier `SHA256SUMS.txt`.
+- Nouvelle icône portail R/B générée dans tous les formats Tauri, design system commun et provenance complète des assets.
 
 ## 0.1.0-dev
 

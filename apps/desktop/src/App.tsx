@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { messages, preferredLanguage, type Copy, type Language } from "./i18n";
+import realmIcon from "./assets/realmbox-icon.svg";
 import {
   bootstrapLauncher,
+  changeGameDataPath,
   chooseGameData,
+  configureLocalDialogue,
   getRealmDiagnostics,
   inspectAiCapability,
   inspectGameData,
@@ -13,9 +16,9 @@ import {
   subscribeLauncherStatus,
   updatePlayerbotPopulation,
 } from "./runtime";
-import type { AiCapability, ClientChoice, GameDataInspection, LauncherComponent, LauncherStatus, RealmDiagnostics } from "./types";
+import type { AiCapability, ClientChoice, GameDataInspection, LauncherStatus, RealmDiagnostics } from "./types";
 
-type View = "world" | "companions" | "diagnostics";
+type Panel = "settings" | "companions" | "dialogues" | "diagnostics";
 
 const initialStatus: LauncherStatus = {
   phase: "checking", message: "Vérification de l’installation…", detail: null, progress: 0,
@@ -27,6 +30,8 @@ const initialStatus: LauncherStatus = {
 const checkingAi: AiCapability = {
   state: "checking", deviceName: null, ramGb: null, modelId: null, modelName: null,
   ollamaModel: null, grade: null, estimatedTokensPerSecond: null,
+  downloadSizeGb: null,
+  modelLicense: null,
   detail: "CanIRun évalue la mémoire disponible.", sourceUrl: "https://www.canirun.ai/",
 };
 
@@ -42,29 +47,6 @@ function populationName(count: number, copy: Copy) {
   if (count <= 50) return copy.balanced;
   if (count <= 100) return copy.dense;
   return copy.veryDense;
-}
-
-function componentLabel(id: LauncherComponent["id"], copy: Copy) {
-  return {
-    client: copy.componentClient, database: copy.componentDatabase, server: copy.componentServer,
-    bots: copy.componentBots, ai: copy.componentAi,
-  }[id];
-}
-
-function componentDetail(component: LauncherComponent, status: LauncherStatus, copy: Copy) {
-  if (component.id === "client") return status.clientChoice === "managedOpenWow" ? "OpenWoW 0.1.2" : copy.originalClient;
-  if (component.id === "database") return copy.localOnly;
-  if (component.id === "server") return "127.0.0.1";
-  if (component.id === "bots") return status.botsEnabled ? `${status.botCount} · ${copy.team}` : copy.off;
-  return status.aiEnabled ? (status.aiModel ?? copy.ai) : copy.off;
-}
-
-function stateLabel(component: LauncherComponent, copy: Copy) {
-  if (component.state === "running") return copy.active;
-  if (component.state === "ready") return copy.ready;
-  if (component.state === "stopped") return copy.off;
-  if (component.state === "missing") return copy.selected;
-  return component.state === "error" ? "!" : "…";
 }
 
 function phaseCopy(status: LauncherStatus, copy: Copy) {
@@ -109,22 +91,23 @@ function localizedOperation(message: string, copy: Copy) {
 
 function errorCopy(detail: string | null, copy: Copy) {
   const value = (detail ?? "").toLowerCase();
-  if (value.includes("docker")) return { cause: copy.dockerError, recovery: copy.dockerRecovery };
-  if (value.includes("data") || value.includes("mpq") || value.includes("archive")) return { cause: copy.dataError, recovery: copy.dataRecovery };
+  if (value.includes("docker desktop")) return { cause: copy.dockerError, recovery: copy.dockerRecovery };
+  if (value.includes("données de jeu") || value.includes("game data") || value.includes("mpq") || value.includes("archive wotlk") || value.includes("archive de locale")) return { cause: copy.dataError, recovery: copy.dataRecovery };
   if (value.includes("curl") || value.includes("télécharg") || value.includes("download")) return { cause: copy.downloadError, recovery: copy.downloadRecovery };
   if (value.includes("client") || value.includes("openwow") || value.includes("wow.exe")) return { cause: copy.clientError, recovery: copy.clientRecovery };
-  if (value.includes("server") || value.includes("serveur") || value.includes("port")) return { cause: copy.serverError, recovery: copy.serverRecovery };
+  if (value.includes("server") || value.includes("serveur") || value.includes("compose") || value.includes("database") || value.includes("base locale") || value.includes("port")) return { cause: copy.serverError, recovery: copy.serverRecovery };
   return { cause: copy.genericError, recovery: copy.genericRecovery };
 }
 
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => preferredLanguage());
   const copy = messages[language];
-  const [view, setView] = useState<View>("world");
+  const [panel, setPanel] = useState<Panel | null>(null);
   const [status, setStatus] = useState(initialStatus);
   const [gameDataPath, setGameDataPath] = useState<string | null>(null);
   const [gameDataInspection, setGameDataInspection] = useState<GameDataInspection | null>(null);
   const [gameDataError, setGameDataError] = useState<string | null>(null);
+  const [gameDataFeedback, setGameDataFeedback] = useState<string | null>(null);
   const [botsEnabled, setBotsEnabled] = useState(true);
   const [botCount, setBotCount] = useState(50);
   const [clientChoice, setClientChoice] = useState<ClientChoice>("managedOpenWow");
@@ -132,13 +115,13 @@ export default function App() {
   const [aiCapability, setAiCapability] = useState<AiCapability>(checkingAi);
   const [requestPending, setRequestPending] = useState(false);
   const [populationFeedback, setPopulationFeedback] = useState<string | null>(null);
+  const [dialogueFeedback, setDialogueFeedback] = useState<string | null>(null);
+  const [dialogueError, setDialogueError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<RealmDiagnostics | null>(null);
   const [diagnosticPending, setDiagnosticPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const bootstrapRequest = useRef<Promise<LauncherStatus> | null>(null);
   const aiRequest = useRef<Promise<AiCapability> | null>(null);
-  const aiChoiceTouched = useRef(false);
-  const installationKnown = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -149,12 +132,12 @@ export default function App() {
     void subscribeLauncherStatus((next) => {
       if (!active) return;
       setStatus(next); setBotsEnabled(next.botsEnabled); setBotCount(next.botCount);
-      setAiEnabled(next.aiEnabled); setClientChoice(next.clientChoice);
+      setAiEnabled(next.aiEnabled); setClientChoice(next.clientChoice); setGameDataPath(next.gameDataPath);
     }).then((unlisten) => { unlistenStatus = unlisten; });
     bootstrapRequest.current ??= bootstrapLauncher();
     void bootstrapRequest.current.then((next) => {
       if (!active) return;
-      setStatus(next); installationKnown.current = next.installed; setGameDataPath(next.gameDataPath);
+      setStatus(next); setGameDataPath(next.gameDataPath);
       setBotsEnabled(next.botsEnabled); setBotCount(next.botCount); setAiEnabled(next.aiEnabled); setClientChoice(next.clientChoice);
       if (next.aiModel) setAiCapability({ ...checkingAi, state: "recommended", modelName: next.aiModel, ollamaModel: next.aiModel });
     }).catch((error: unknown) => active && setStatus({ ...initialStatus, phase: "error", detail: String(error) }));
@@ -162,7 +145,6 @@ export default function App() {
     void aiRequest.current.then((capability) => {
       if (!active) return;
       setAiCapability(capability);
-      if (capability.state === "recommended" && !aiChoiceTouched.current && !installationKnown.current) setAiEnabled(true);
     });
     return () => { active = false; unlistenProgress(); unlistenStatus(); };
   }, []);
@@ -171,6 +153,13 @@ export default function App() {
     localStorage.setItem("realmbox-language", language);
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (!panel) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setPanel(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [panel]);
 
   const phase = useMemo(() => phaseCopy(status, copy), [status, copy]);
   const presentedError = errorCopy(status.detail, copy);
@@ -191,9 +180,23 @@ export default function App() {
   async function install() {
     if (!gameDataPath) return;
     setRequestPending(true);
-    try { setStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, botCount, aiEnabled, aiCapability.ollamaModel)); }
+    try { setStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, botCount, aiEnabled, aiEnabled ? aiCapability.ollamaModel : null)); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", detail: String(error) })); }
     finally { setRequestPending(false); }
+  }
+
+  async function changeInstalledGameData() {
+    setRequestPending(true); setGameDataError(null); setGameDataFeedback(null);
+    try {
+      const selected = await chooseGameData();
+      if (!selected) return;
+      const inspection = await inspectGameData(selected);
+      const next = await changeGameDataPath(inspection.path);
+      setStatus(next); setGameDataPath(next.gameDataPath); setGameDataInspection(inspection);
+      setGameDataFeedback(copy.gameFolderUpdated);
+    } catch (error) {
+      setGameDataFeedback(null); setGameDataError(String(error));
+    } finally { setRequestPending(false); }
   }
 
   async function start() {
@@ -210,13 +213,41 @@ export default function App() {
     finally { setRequestPending(false); }
   }
 
+  async function retry() {
+    setRequestPending(true);
+    setStatus((current) => ({
+      ...current,
+      phase: "checking",
+      message: copy.checkingBody,
+      detail: null,
+      progress: 0,
+    }));
+    try { setStatus(await bootstrapLauncher()); }
+    catch (error) { setStatus((current) => ({ ...current, phase: "error", detail: String(error) })); }
+    finally { setRequestPending(false); }
+  }
+
   async function applyPopulation() {
     setRequestPending(true); setPopulationFeedback(null);
     try {
       const next = await updatePlayerbotPopulation(botsEnabled, botCount);
       setStatus(next); setBotCount(next.botCount); setPopulationFeedback(copy.applied);
     } catch (error) {
-      setStatus((current) => ({ ...current, phase: "error", detail: String(error) })); setView("world");
+      setStatus((current) => ({ ...current, phase: "error", detail: String(error) })); setPanel(null);
+    } finally { setRequestPending(false); }
+  }
+
+  async function configureDialogue(enabled: boolean) {
+    if (enabled && !aiCapability.ollamaModel) return;
+    const previousPhase = status.phase;
+    setRequestPending(true); setDialogueFeedback(null); setDialogueError(null);
+    try {
+      const next = await configureLocalDialogue(enabled, enabled ? aiCapability.ollamaModel : status.aiModel);
+      setStatus(next); setAiEnabled(next.aiEnabled);
+      setDialogueFeedback(enabled ? copy.dialogueReady : copy.off);
+    } catch (error) {
+      setDialogueError(`${copy.dialogueFailed} ${String(error)}`);
+      setStatus((current) => ({ ...current, phase: previousPhase, progress: previousPhase === "ready" || previousPhase === "running" ? 100 : current.progress }));
     } finally { setRequestPending(false); }
   }
 
@@ -227,8 +258,8 @@ export default function App() {
     finally { setDiagnosticPending(false); }
   }
 
-  function selectView(next: View) {
-    setView(next);
+  function openPanel(next: Panel) {
+    setPanel(next);
     if (next === "diagnostics") void refreshDiagnostics();
   }
 
@@ -245,97 +276,135 @@ export default function App() {
     </select>
   );
 
+  const panelTitle = panel === "companions" ? copy.companionsTitle : panel === "dialogues" ? copy.dialoguesTitle : panel === "diagnostics" ? copy.diagnosticsTitle : copy.settings;
+  const showProgress = ["installing", "starting", "stopping"].includes(status.phase) && status.progress > 0 && status.progress < 100;
+
   return (
     <main className="app-shell">
-      <section className="app-window">
-        <header className="topbar">
-          <div className="brand"><span className="brand-glyph" aria-hidden="true">R</span><strong>RealmBox</strong><small>3.3.5a</small></div>
-          <div className="local-status"><span className={`status-dot ${status.phase}`} />{copy.localOnly}</div>
-          <div className="language-switch" aria-label={copy.language}>
-            <button className={language === "fr" ? "active" : ""} onClick={() => setLanguage("fr")}>FR</button>
-            <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>EN</button>
+      <section className={`app-window phase-${status.phase}`} aria-busy={isBusy(status)}>
+        <div className="scene-shade" aria-hidden="true" />
+
+        <div className="launcher-brand" aria-label="RealmBox">
+          <img src={realmIcon} alt="" />
+          <span>RealmBox</span>
+        </div>
+
+        <button className="settings-button" onClick={() => openPanel("settings")}>{copy.settings}</button>
+
+        <section className="status-card" aria-live="polite">
+          <div className={`status-marker ${status.phase}`} aria-hidden="true" />
+          <h1>{status.phase === "error" ? presentedError.cause : phase.title}</h1>
+          <p>{status.phase === "error" ? presentedError.recovery : phase.body}</p>
+
+          {status.phase === "needsGameData" && gameDataPath && <div className="selected-data">
+            <strong>{gameDataInspection ? `Data ${gameDataInspection.locale} · build 12340` : copy.dataReady}</strong>
+            <span>{gameDataPath}</span>
+          </div>}
+          {status.phase === "needsGameData" && gameDataError && <p className="inline-error">{gameDataError}</p>}
+
+          {showProgress && <div className="active-progress" role="progressbar" aria-label={copy.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={status.progress}>
+            <span style={{ width: `${status.progress}%` }} />
+          </div>}
+
+          <div className="primary-zone">
+            {status.phase === "needsGameData" && !gameDataPath && <button className="primary-action" onClick={selectData} disabled={requestPending}>{copy.chooseData}</button>}
+            {status.phase === "needsGameData" && gameDataPath && <button className="primary-action" onClick={install} disabled={requestPending}>{copy.install}</button>}
+            {status.phase === "ready" && <button className="primary-action" onClick={start} disabled={requestPending}>{copy.play}</button>}
+            {status.phase === "running" && <button className="primary-action stop-action" onClick={stop} disabled={requestPending}>{copy.stop}</button>}
+            {isBusy(status) && <button className="primary-action" disabled>{copy.wait}</button>}
+            {status.phase === "error" && <button className="primary-action" onClick={() => void retry()} disabled={requestPending}>{copy.checkAgain}</button>}
           </div>
-        </header>
 
-        <div className="workspace">
-          <aside className="sidebar">
-            <nav aria-label="RealmBox">
-              <button className={view === "world" ? "active" : ""} onClick={() => selectView("world")}><span>◆</span>{copy.world}</button>
-              <button className={view === "companions" ? "active" : ""} onClick={() => selectView("companions")} disabled={!status.installed}><span>♟</span>{copy.companions}</button>
-              <button className={view === "diagnostics" ? "active" : ""} onClick={() => selectView("diagnostics")}><span>⋯</span>{copy.diagnostics}</button>
-            </nav>
-            <div className="sidebar-art" aria-hidden="true" />
-            <p>{displayedPlatform}</p>
-          </aside>
+          {status.phase === "needsGameData" && <button className="context-link" onClick={() => openPanel("settings")}>{gameDataPath ? copy.changeFolder : copy.installationOptions}</button>}
+          {status.phase === "error" && <button className="context-link" onClick={() => openPanel("diagnostics")}>{copy.openDiagnostics}</button>}
+        </section>
 
-          <section className="content" aria-live="polite">
-            {view === "world" && <>
-              <header className="page-heading">
-                <div><span className="eyebrow">{status.phase === "running" ? copy.active : status.phase === "ready" ? copy.ready : copy.progress}</span><h1>{phase.title}</h1><p>{phase.body}</p></div>
-                <div className={`phase-orb ${status.phase}`} aria-hidden="true" />
-              </header>
+        {panel && <div className="panel-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) setPanel(null); }}>
+          <section className="side-panel" role="dialog" aria-modal="true" aria-labelledby="panel-title">
+            <header className="panel-header">
+              {panel !== "settings" ? <button className="back-button" onClick={() => setPanel("settings")}>{copy.back}</button> : <span />}
+              <h2 id="panel-title">{panelTitle}</h2>
+              <button className="close-button" onClick={() => setPanel(null)} aria-label={copy.close}>×</button>
+            </header>
 
-              {status.phase === "needsGameData" && <section className="card setup-flow">
-                <fieldset><legend>1 · {copy.gameClient}</legend>
-                  <label className="choice"><input type="radio" name="client" checked={clientChoice === "managedOpenWow"} onChange={() => setClientChoice("managedOpenWow")} /><span><strong>{copy.managedClient}</strong><small>{copy.managedClientHelp}</small></span></label>
-                  <label className={`choice ${!status.originalClientSupported ? "muted" : ""}`}><input type="radio" name="client" checked={clientChoice === "originalWindows"} disabled={!status.originalClientSupported} onChange={() => setClientChoice("originalWindows")} /><span><strong>{copy.originalClient}</strong><small>{status.originalClientSupported ? copy.originalClientHelp : copy.originalUnavailable}</small></span></label>
-                </fieldset>
-                <fieldset><legend>2 · {copy.gameData}</legend>
-                  <button className="folder-button" onClick={selectData} disabled={requestPending}><span>{gameDataPath ?? copy.chooseData}</span><b>{copy.browse}</b></button>
+            <div className="panel-content">
+              {panel === "settings" && <>
+                <section className="settings-section">
+                  <h3>{copy.language}</h3>
+                  <div className="language-switch" aria-label={copy.language}>
+                    <button aria-pressed={language === "fr"} className={language === "fr" ? "active" : ""} onClick={() => setLanguage("fr")}>Français</button>
+                    <button aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>English</button>
+                  </div>
+                </section>
+
+                {status.phase === "needsGameData" && <section className="settings-section install-settings">
+                  <h3>{copy.installationOptions}</h3>
+                  <label className="option-row"><input type="radio" name="client" checked={clientChoice === "managedOpenWow"} onChange={() => setClientChoice("managedOpenWow")} /><span><strong>{copy.managedClient}</strong><small>{copy.managedClientHelp}</small></span></label>
+                  <label className={`option-row ${!status.originalClientSupported ? "muted" : ""}`}><input type="radio" name="client" checked={clientChoice === "originalWindows"} disabled={!status.originalClientSupported} onChange={() => setClientChoice("originalWindows")} /><span><strong>{copy.originalClient}</strong><small>{status.originalClientSupported ? copy.originalClientHelp : copy.originalUnavailable}</small></span></label>
+                  <button className="secondary-action full" onClick={selectData} disabled={requestPending}>{gameDataPath ? copy.changeFolder : copy.chooseData}</button>
                   <p className={`helper ${gameDataError ? "error" : gameDataInspection ? "success" : ""}`}>{gameDataError ?? (gameDataInspection ? `Data ${gameDataInspection.locale} · build 12340` : copy.dataRequirement)}</p>
-                </fieldset>
-                <fieldset><legend>3 · {copy.companions}</legend>
-                  <label className="choice"><input type="checkbox" checked={botsEnabled} onChange={(event) => { setBotsEnabled(event.target.checked); if (!event.target.checked) setAiEnabled(false); }} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
-                  {botsEnabled && <label className="inline-field"><span><strong>{copy.population}</strong><small>{copy.populationHelp}</small></span>{populationSelect}</label>}
-                  <label className={`choice ${aiCapability.state !== "recommended" ? "muted" : ""}`}><input type="checkbox" checked={aiEnabled} disabled={!botsEnabled || aiCapability.state !== "recommended"} onChange={(event) => { aiChoiceTouched.current = true; setAiEnabled(event.target.checked); }} /><span><strong>{copy.ai}</strong><small>{aiCapability.state === "checking" ? copy.aiChecking : aiCapability.state === "recommended" ? `${aiCapability.modelName} · ${aiCapability.grade ?? ""} · ~${aiCapability.estimatedTokensPerSecond ?? "?"} tok/s` : copy.aiUnavailable}</small></span></label>
-                  <p className="helper">{copy.aiPrivacy}</p>
-                </fieldset>
-              </section>}
+                  <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => { setBotsEnabled(event.target.checked); if (!event.target.checked) setAiEnabled(false); }} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
+                  {botsEnabled && <label className="select-row"><span>{copy.population}</span>{populationSelect}</label>}
+                  <label className={`option-row ${aiCapability.state !== "recommended" ? "muted" : ""}`}><input type="checkbox" checked={aiEnabled} disabled={!botsEnabled || aiCapability.state !== "recommended"} onChange={(event) => setAiEnabled(event.target.checked)} /><span><strong>{copy.ai}</strong><small>{aiCapability.state === "checking" ? copy.aiChecking : aiCapability.state === "recommended" ? `${aiCapability.modelName} · ${aiCapability.downloadSizeGb ?? "?"} GB · ~${aiCapability.estimatedTokensPerSecond ?? "?"} tok/s` : copy.aiUnavailable}</small></span></label>
+                </section>}
 
-              {status.phase === "error" && <section className="recovery-card"><div><span>{copy.cause}</span><strong>{presentedError.cause}</strong></div><div><span>{copy.recovery}</span><strong>{presentedError.recovery}</strong></div><button onClick={() => void bootstrapLauncher().then(setStatus)}>{copy.checkAgain}</button></section>}
+                {gameDataPath && status.phase !== "needsGameData" && <section className="settings-section game-folder-settings">
+                  <h3>{copy.gameClient}</h3>
+                  <div className="game-folder-path"><span>{copy.gameFolder}</span><code>{gameDataPath}</code></div>
+                  <p className="helper">{status.clientChoice === "managedOpenWow" ? copy.managedPathHelp : copy.originalPathHelp}</p>
+                  <button className="secondary-action full" onClick={changeInstalledGameData} disabled={requestPending || status.phase === "running"}>{copy.changeGameFolder}</button>
+                  {(status.phase === "running" || gameDataError || gameDataFeedback) && <p className={`helper ${gameDataError ? "error" : gameDataFeedback ? "success" : ""}`}>{status.phase === "running" ? copy.stopToChangeGameFolder : gameDataError ?? gameDataFeedback}</p>}
+                </section>}
 
-              {status.components.length > 0 && status.phase !== "needsGameData" && <section className="component-grid">
-                {status.components.map((component) => <article key={component.id}><span className={`component-icon ${component.state}`} aria-hidden="true" /><div><strong>{componentLabel(component.id, copy)}</strong><small>{componentDetail(component, status, copy)}</small></div><em>{stateLabel(component, copy)}</em></article>)}
-              </section>}
+                <nav className="settings-nav" aria-label={copy.settings}>
+                  <button onClick={() => openPanel("companions")} disabled={!status.installed}><span><strong>{copy.companions}</strong><small>{copy.companionsBodyReady}</small></span></button>
+                  <button onClick={() => openPanel("dialogues")} disabled={!status.installed}><span><strong>{copy.dialogues}</strong><small>{copy.dialoguesBody}</small></span></button>
+                  <button onClick={() => openPanel("diagnostics")}><span><strong>{copy.diagnostics}</strong><small>{copy.diagnosticsBody}</small></span></button>
+                </nav>
 
-              {status.installed && status.accountName && <section className="account-strip"><div><span>{copy.account}</span><strong>{status.accountName} / {status.accountPassword}</strong></div><small>{copy.accountHelp}</small></section>}
-            </>}
+                {status.installed && status.accountName && <section className="account-details"><span>{copy.account}</span><strong>{status.accountName} / {status.accountPassword}</strong><small>{copy.accountHelp}</small></section>}
+                <p className="build-info">{displayedPlatform}</p>
+              </>}
 
-            {view === "companions" && <>
-              <header className="page-heading"><div><span className="eyebrow">{copy.companions}</span><h1>{copy.companionsTitle}</h1><p>{status.phase === "running" ? copy.companionsBodyRunning : copy.companionsBodyReady}</p></div></header>
-              <section className="card population-card">
-                <label className="choice"><input type="checkbox" checked={botsEnabled} onChange={(event) => setBotsEnabled(event.target.checked)} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
-                {botsEnabled && <label className="inline-field large"><span><strong>{copy.requestedPopulation}</strong><small>{copy.populationHelp}</small></span>{populationSelect}</label>}
-                <div className="team-note"><span aria-hidden="true">♟</span><div><strong>{copy.team}</strong><p>{copy.teamHelp}</p></div></div>
-                {status.phase === "running" ? <button className="secondary-action" onClick={applyPopulation} disabled={requestPending}>{copy.applyNow}</button> : <p className="helper">{copy.startToApply}</p>}
-                {populationFeedback && <p className="success-message">✓ {populationFeedback}</p>}
-              </section>
-            </>}
+              {panel === "companions" && <>
+                <p className="panel-intro">{status.phase === "running" ? copy.companionsBodyRunning : copy.companionsBodyReady}</p>
+                <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => setBotsEnabled(event.target.checked)} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
+                {botsEnabled && <label className="select-row"><span>{copy.requestedPopulation}</span>{populationSelect}</label>}
+                <p className="helper">{copy.teamHelp}</p>
+                {status.phase === "running" ? <button className="secondary-action full" onClick={applyPopulation} disabled={requestPending}>{copy.applyNow}</button> : <p className="helper">{copy.startToApply}</p>}
+                {populationFeedback && <p className="success-message">{populationFeedback}</p>}
+              </>}
 
-            {view === "diagnostics" && <>
-              <header className="page-heading"><div><span className="eyebrow">{copy.localOnly}</span><h1>{copy.diagnosticsTitle}</h1><p>{copy.diagnosticsBody}</p></div><button className="quiet-button" onClick={refreshDiagnostics} disabled={diagnosticPending}>{copy.refresh}</button></header>
-              <section className="card diagnostic-card">
+              {panel === "dialogues" && <>
+                <p className="panel-intro">{copy.dialoguesBody}</p>
+                <div className="model-summary"><strong>{status.aiModel ?? aiCapability.modelName ?? (aiCapability.state === "checking" ? copy.aiChecking : copy.aiUnavailable)}</strong><p>{aiCapability.detail}</p></div>
+                {(status.aiModel || aiCapability.state === "recommended") && <dl className="facts-list">
+                  <div><dt>{copy.downloadSize}</dt><dd>{aiCapability.downloadSizeGb ? `${aiCapability.downloadSizeGb.toLocaleString(language, { maximumFractionDigits: 1 })} GB` : "—"}</dd></div>
+                  <div><dt>{copy.estimatedSpeed}</dt><dd>{aiCapability.estimatedTokensPerSecond ? `~${aiCapability.estimatedTokensPerSecond} tok/s` : "—"}</dd></div>
+                  <div><dt>{copy.modelLicense}</dt><dd>{aiCapability.modelLicense ?? "—"}</dd></div>
+                </dl>}
+                <p className="helper">{copy.dialogueLocalProof}</p>
+                {status.phase === "running" ? <><p className="helper">{copy.closeToChange}</p><button className="secondary-action full" onClick={stop} disabled={requestPending}>{copy.stopForDialogues}</button></> : status.aiEnabled ?
+                  <button className="secondary-action full" onClick={() => void configureDialogue(false)} disabled={requestPending}>{copy.deactivateDialogues}</button> :
+                  <button className="secondary-action full" onClick={() => void configureDialogue(true)} disabled={requestPending || aiCapability.state !== "recommended" || !botsEnabled}>{copy.activateDialogues}</button>}
+                {dialogueFeedback && <p className="success-message">{dialogueFeedback}</p>}
+                {dialogueError && <p className="error-message">{dialogueError}</p>}
+              </>}
+
+              {panel === "diagnostics" && <>
+                <div className="diagnostic-actions"><p>{copy.diagnosticsBody}</p><button className="text-button" onClick={refreshDiagnostics} disabled={diagnosticPending}>{copy.refresh}</button></div>
                 {diagnostics ? <>
-                  <dl><div><dt>{copy.affectedComponent}</dt><dd>{({ client: copy.componentClient, database: copy.componentDatabase, server: copy.componentServer, bots: copy.componentBots, ai: copy.componentAi, launcher: copy.componentLauncher })[diagnostics.component]}</dd></div><div><dt>{copy.logsFolder}</dt><dd>{diagnostics.logsPath}</dd></div></dl>
+                  <dl className="facts-list diagnostics-list"><div><dt>{copy.affectedComponent}</dt><dd>{({ client: copy.componentClient, database: copy.componentDatabase, server: copy.componentServer, bots: copy.componentBots, ai: copy.componentAi, launcher: copy.componentLauncher })[diagnostics.component]}</dd></div><div><dt>{copy.logsFolder}</dt><dd>{diagnostics.logsPath}</dd></div></dl>
                   <p className="diagnostic-summary">{diagnostics.summary}</p>
                   <div className="log-list">{diagnostics.recentEntries.length ? diagnostics.recentEntries.map((entry, index) => <code key={`${index}-${entry}`}>{entry}</code>) : <span>{copy.noRecentErrors}</span>}</div>
                   {status.phase === "error" && status.detail && <details><summary>{copy.cause}</summary><code>{status.detail}</code></details>}
-                  <button className="secondary-action" onClick={copyDiagnostics}>{copied ? copy.copied : copy.copy}</button>
-                </> : <p>{copy.noDiagnostic}</p>}
-              </section>
-            </>}
+                  <button className="secondary-action full" onClick={copyDiagnostics}>{copied ? copy.copied : copy.copy}</button>
+                </> : <p className="helper">{copy.noDiagnostic}</p>}
+              </>}
+            </div>
           </section>
-        </div>
-
-        <footer className="actionbar">
-          <div className="progress-block"><div><span style={{ width: `${status.progress}%` }} /></div><small>{copy.progress} · {status.progress}%</small></div>
-          {view === "world" && status.phase === "needsGameData" && <button className="primary-action" onClick={install} disabled={!gameDataPath || requestPending}>{copy.install}</button>}
-          {view === "world" && status.phase === "ready" && <button className="primary-action" onClick={start} disabled={requestPending}>{copy.play}</button>}
-          {view === "world" && status.phase === "running" && <button className="primary-action stop" onClick={stop} disabled={requestPending}>{copy.stop}</button>}
-          {view === "world" && isBusy(status) && <button className="primary-action" disabled>{copy.wait}</button>}
-        </footer>
+        </div>}
       </section>
-      <p className="version-line">RealmBox 0.2.0 · {displayedPlatform} · {copy.versionSuffix}</p>
     </main>
   );
 }

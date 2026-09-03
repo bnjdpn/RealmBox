@@ -8,7 +8,11 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 - [x] Entrer en jeu avec OpenWoW, créer un personnage et prendre la quête de départ.
 - [x] Adapter automatiquement la population Playerbots à la mémoire allouée à Docker.
 - [x] Former depuis l’addon une équipe visible de quatre compagnons au niveau du joueur.
+- [x] Réduire l’addon dans une icône de minimap, conserver son état, afficher la composition du groupe et proposer ses contrôles en français et en anglais.
 - [x] Gérer la population Playerbots à chaud depuis RealmBox, sans redémarrer le client.
+- [x] Protéger les personnages contre les mises à jour : réinstallation refusée, suppression de volume interdite et sauvegarde SQL vérifiée avant migration.
+- [x] Préparer et publier atomiquement le serveur compatible dialogues en conservant l’ancien runtime hors du dossier actif.
+- [ ] Ajouter la restauration automatique depuis le rollback conservé.
 - [x] Afficher une erreur courte, sa cause concrète et l’action de récupération ; réserver les détails techniques au diagnostic.
 - [ ] Afficher une progression d’installation par composant avec débit, volume restant et durée estimée quand ces valeurs sont mesurables.
 - [ ] Publier les images serveur multiarchitecture épinglées pour supprimer la compilation C++ du parcours joueur.
@@ -33,10 +37,12 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 ## P3 — Dialogues locaux
 
 - [x] Intégrer Ollama et `mod-ollama-chat` derrière une liste de modèles autorisés et une écoute locale.
-- [ ] Télécharger un petit modèle sur demande, avec taille et espace disque annoncés avant le téléchargement.
+- [x] Faire décider RealmBox depuis CanIRun, puis télécharger le modèle sur demande avec sa taille annoncée avant confirmation et son manifeste vérifié par digest.
+- [ ] Afficher l’espace disque disponible et refuser le téléchargement si la marge est insuffisante.
 - [ ] Tester en jeu une conversation complète avec un bot et mesurer RAM, latence et débit.
-- [ ] Permettre d’activer, désactiver et changer le niveau de bavardage sans réinstaller le royaume.
-- [ ] Garantir un mode sans réseau pendant le jeu et rendre ce statut visible.
+- [x] Permettre d’activer et désactiver les dialogues sans réinstaller le royaume, monde fermé pour recharger le module.
+- [ ] Permettre de changer le niveau de bavardage.
+- [x] Configurer un mode sans réseau pendant le jeu et rendre ce statut visible.
 
 ## Choix du client
 

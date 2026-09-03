@@ -10,5 +10,6 @@ Identified so far:
 - mod-ollama-chat: GNU AGPL version 3 only.
 - Ollama: MIT.
 
-This inventory is not yet a complete redistribution audit.
+Les modèles Qwen 3, Gemma 3 et Llama 3.2 ne sont pas redistribués par RealmBox. Leur nom de licence et leur taille sont affichés avant le téléchargement local facultatif ; leurs manifestes autorisés sont épinglés dans `runtime/model-catalog.toml`.
 
+This inventory is not yet a complete redistribution audit.

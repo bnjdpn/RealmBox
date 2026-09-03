@@ -11,6 +11,11 @@ un paquet RealmBox.
 | mod-playerbots | `2f7d9f774987d0157c6a0d0cc08c40bec3db3945` | GPL-2.0-only | source non vendored; build de compatibilité uniquement |
 | mod-ollama-chat | `a9d14b0b8955be136e657ac168dd255f5281a535` | AGPL-3.0-only | source non vendored; build de compatibilité uniquement |
 | Ollama | `e5e437711540eb4becb393c2847fed6cae6e5cd5` | MIT | non intégré et non redistribué |
+| Qwen 3 8B | manifeste `500a1f06…b2b8b41` | Apache-2.0 | téléchargement local facultatif ; non redistribué |
+| Gemma 3 4B | manifeste `a2af6cc3…41195f5a` | Gemma Terms of Use | téléchargement local facultatif ; non redistribué |
+| Llama 3.2 3B | manifeste `a80c4f17…cb5b8b72` | Llama 3.2 Community License | téléchargement local facultatif ; non redistribué |
+| Llama 3.2 1B | manifeste `baf6a787…af552878` | Llama 3.2 Community License | repli local facultatif ; non redistribué |
+| Fengari | `0.1.5` | MIT | dépendance de développement pour exécuter les tests Lua ; absente du paquet joueur |
 
 Les textes de licence conservés dans `LICENSES/` proviennent des révisions
 épinglées correspondantes. Les bibliothèques Rust et npm sont résolues dans
