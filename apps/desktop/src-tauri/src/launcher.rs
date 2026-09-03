@@ -1025,6 +1025,7 @@ impl CommandRunner for SystemCommandRunner {
 
         #[cfg(windows)]
         {
+            let _ = child;
             let running = self.windows_job_is_running(process_id)?;
             if !running {
                 self.close_windows_job(process_id)?;
