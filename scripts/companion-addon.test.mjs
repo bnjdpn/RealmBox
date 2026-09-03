@@ -73,6 +73,7 @@ RealmBoxCompanionsFrameFollow = NewWidget("follow")
 RealmBoxCompanionsFrameAttack = NewWidget("attack")
 RealmBoxCompanionsFrameStay = NewWidget("stay")
 RealmBoxCompanionsFrameRegroup = NewWidget("regroup")
+RealmBoxCompanionsFrameBehavior = NewWidget("behavior")
 RealmBoxCompanionsFrameBoost = NewWidget("boost")
 RealmBoxCompanionsFrameLeave = NewWidget("leave")
 RealmBoxCompanionsMinimapButton = NewWidget("minimapButton")
@@ -148,7 +149,7 @@ test("declares a native minimap control, close button, persistence, and 3.3.5a m
   assert.match(xml, /RealmBoxCompanions_Minimap_OnDragStart/);
   assert.match(toc, /## Interface: 30300/);
   assert.match(toc, /## SavedVariables: RealmBoxCompanionsDB/);
-  assert.match(toc, /## Version: 0\.2\.0-dev/);
+  assert.match(toc, /## Version: 0\.3\.2-dev/);
 });
 
 test("opens only on first run, toggles from slash commands, and persists positions", () => {
@@ -160,6 +161,8 @@ test("opens only on first run, toggles from slash commands, and persists positio
     assert(RealmBoxCompanionsFrame:IsShown() == true)
     assert(RealmBoxCompanionsFrameFollow.enabled == false)
     assert(RealmBoxCompanionsFrameAttack.enabled == false)
+    assert(RealmBoxCompanionsFrameBehavior.enabled == false)
+    assert(RealmBoxCompanionsFrameBehavior.text == "Comportement : escorte")
     assert(RealmBoxCompanionsFrameBoost.text == "Capacités fortes : serveur")
     assert(RealmBoxCompanionsDB.boostPreference == nil)
     assert(SLASH_REALMBOXCOMPANIONS1 == "/realmbox")
@@ -231,6 +234,7 @@ test("tracks the live party, localizes classes, and gates attack on an enemy tar
     targetAttackable = true
     RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PLAYER_TARGET_CHANGED")
     assert(RealmBoxCompanionsFrameAttack.enabled == true)
+    assert(RealmBoxCompanionsFrameBehavior.enabled == true)
 
     RealmBoxCompanions_ToggleLanguage()
     assert(RealmBoxCompanionsDB.language == "en")
@@ -279,5 +283,38 @@ test("runs only bounded commands and uses the pinned Playerbots boost strategy",
     RealmBoxCompanions_Run("not-allowed")
     assert(#sentMessages == 6)
     assert(#DEFAULT_CHAT_FRAME.messages == 1)
+  `);
+});
+
+test("changes party behavior live and releases bots back to autonomous activity", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    party = {
+      { name = "Kayarid", connected = true, classToken = "PALADIN" },
+      { name = "Manuela", connected = true, classToken = "MAGE" },
+    }
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PARTY_MEMBERS_CHANGED")
+
+    RealmBoxCompanions_CycleBehavior()
+    assert(sentMessages[1].message == "nc +stay,-follow,-new rpg,-grind")
+    assert(sentMessages[1].channel == "PARTY")
+    assert(RealmBoxCompanionsDB.behaviorPreference == "guard")
+    assert(RealmBoxCompanionsFrameBehavior.text == "Comportement : garde")
+
+    RealmBoxCompanions_CycleBehavior()
+    assert(sentMessages[2].message == "nc +new rpg,+grind,-follow,-stay")
+    assert(RealmBoxCompanionsDB.behaviorPreference == "autonomous")
+    assert(RealmBoxCompanionsFrameBehavior.text == "Comportement : autonomes")
+
+    RealmBoxCompanions_Run("follow")
+    assert(sentMessages[3].message == "follow")
+    assert(RealmBoxCompanionsDB.behaviorPreference == "escort")
+
+    RealmBoxCompanions_Run("leave")
+    assert(sentMessages[4].message == "nc +new rpg,+grind,-follow,-stay")
+    assert(sentMessages[5].message == "leave")
+    assert(RealmBoxCompanionsDB.behaviorPreference == "autonomous")
+    assert(RealmBoxCompanionsFrameStatus.text == "Équipe libérée · les bots reprennent leurs activités")
   `);
 });

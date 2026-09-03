@@ -2,7 +2,7 @@
 
 ## Principes de marque
 
-RealmBox représente un monde fantasy gelé contenu dans une machine locale. Le launcher doit donner trois informations immédiates : l’univers, l’état courant et l’action suivante. Il occupe une fenêtre fixe de 1024 × 640 et se lit comme un launcher PC, jamais comme un site, un tableau de bord ou un back-office. Le site reste responsive et éditorial ; il ne dicte pas la composition de l’application desktop.
+RealmBox représente Azeroth en local dans une machine personnelle. Le launcher doit donner trois informations immédiates : l’univers, l’état courant et l’action suivante. Il occupe une fenêtre fixe de 1024 × 640 et se lit comme un launcher PC, jamais comme un site, un tableau de bord ou un back-office. Le site adopte une mise en scène MMO-fantasy immersive et responsive ; il ne dicte pas la composition de l’application desktop.
 
 Le produit reste indépendant. L’identité évite le globe, le W, les armes, les casques, les crânes, les blasons de faction et toute rune provenant d’une franchise existante.
 
@@ -26,7 +26,7 @@ Le produit reste indépendant. L’identité évite le globe, le W, les armes, l
 | `--success` | `#7fa46b` | état prêt/running, avec forme ou libellé |
 | `--error` | `#8e3037` | erreur, toujours accompagnée de texte et d’un cadre |
 
-Les tokens essentiels sont dupliqués explicitement dans `apps/desktop/src/styles.css` et `site/assets/site.css`. Cette duplication évite de créer un pipeline partagé entre Vite et le site statique ; toute modification de palette doit mettre les deux listes à jour.
+Le launcher conserve cette base froide. Le site l’étend avec une variante obsidienne, ivoire, or ancien et parchemin ponctuel afin de produire une atmosphère d’aventure MMO sans imiter une interface ou une marque existante. Les deux surfaces restent construites et validées indépendamment.
 
 ## Composition du launcher
 
@@ -87,4 +87,4 @@ Le médaillon associe un portail cyan, une coque acier/laiton et un monogramme R
 
 ## Launcher et site
 
-Le launcher concentre l’action dans une scène fixe et relègue les fonctions avancées dans un panneau contextuel. Le site déploie la même identité dans une composition éditoriale responsive. Les deux surfaces partagent la palette, l’icône et les panoramas originaux, mais pas leur structure d’information.
+Le launcher concentre l’action dans une scène fixe et relègue les fonctions avancées dans un panneau contextuel. Le site déploie une aventure de groupe : panorama peint, cadres de pierre et de bronze, tutoriel présenté comme une chaîne de quête et schéma technique arcanique. Le portail glacé demeure dans le launcher réel ; le hero du site montre un joueur accompagné de quatre aventuriers se dirigeant vers une cité originale. Les deux surfaces partagent l’icône, des couleurs froides et des touches d’or, mais pas leur structure d’information.

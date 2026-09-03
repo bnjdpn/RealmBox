@@ -296,7 +296,32 @@ describe("RealmBox launcher", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: /niveau de bavardage/i }), "lively");
 
     expect(runtime.configureDialogueChattiness).toHaveBeenCalledWith("lively");
-    expect(await screen.findByText(/niveau de bavardage enregistré/i)).toBeVisible();
+    expect(await screen.findByText(/niveau de bavardage appliqué/i)).toBeVisible();
+  });
+
+  it("applies dialogue chattiness live when the local model is running", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({
+      ...running,
+      aiEnabled: true,
+      aiModel: "llama3.2:3b",
+      dialogueChattiness: "balanced",
+    });
+    runtime.configureDialogueChattiness.mockResolvedValue({
+      ...running,
+      aiEnabled: true,
+      aiModel: "llama3.2:3b",
+      dialogueChattiness: "lively",
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /arrêter le monde/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^dialogues/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /niveau de bavardage/i }), "lively");
+
+    expect(runtime.configureDialogueChattiness).toHaveBeenCalledWith("lively");
+    expect(await screen.findByText(/niveau de bavardage appliqué/i)).toBeVisible();
   });
 
   it("changes the installed game folder without reinstalling the realm", async () => {
@@ -345,8 +370,8 @@ describe("RealmBox launcher", () => {
     await user.click(screen.getByRole("button", { name: /réglages/i }));
     await user.click(screen.getByRole("button", { name: /^dialogues/i }));
 
-    expect(screen.getByText(/monde doit être arrêté/i)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /arrêter le monde pour continuer/i }));
+    expect(screen.getByText(/arrêtez le monde uniquement pour activer ou désactiver/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /arrêter le monde pour modifier/i }));
     expect(runtime.stopRealm).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("button", { name: /télécharger et activer/i })).toBeEnabled();
   });

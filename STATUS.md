@@ -2,7 +2,20 @@
 
 Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO pour le parcours local macOS déjà observé avec OpenWoW, AzerothCore et Playerbots, ainsi que pour les dialogues joueur-bot locaux observés en français et en anglais. GO automatisé pour les sources RealmBox 0.3.0, son site FR/EN et ses images serveur multiarchitecture. Le bundle installé et la preuve réelle restent en 0.2.4 ; le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée, et pour affirmer que toutes les fonctions OpenWoW sont équivalentes au client original.**
+Décision actuelle : **GO automatisé pour les sources RealmBox 0.3.2 : concentration progressive des bots autonomes, comportements de l’addon, dialogues bot-à-bot bornés et site Astro FR/EN. Le bundle macOS 0.3.1 est installé et ouvert, mais les comportements 0.3.1–0.3.2 n’ont pas encore été rejoués dans le vrai monde ; la dernière preuve de gameplay reste en 0.2.4. Le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
+
+## Évolution bots 0.3.1–0.3.2
+
+| Fonction | Niveau de preuve | Résultat |
+|---|---|---|
+| Population proche | test Rust de configuration | bots inactifs sans joueur réel ; priorité au rayon de 300 mètres et à la zone active ; poids upstream 15 sur la tranche de niveau des joueurs, recalculé chaque minute ; téléportation de niveau active et téléportation aléatoire réévaluée entre 2 et 5 minutes |
+| Présence progressive | test C++ de politique + tests Rust d’intégration | le module RealmBox vise au plus 60 % des bots autonomes en ligne près des joueurs réels, sans déplacer les bots groupés, en combat, en instance ou visibles par un autre joueur ; parcours réel à effectuer |
+| Comportement de groupe | 6 tests Fengari sur le vrai Lua | modes escorte, garde et autonomie bornés ; dissolution qui restaure l’autonomie avant `leave` ; interface réelle OpenWoW à requalifier |
+| Dialogues bot-à-bot | tests de patch, tests Rust et 24 tests UI | profils silencieux, équilibré et vivant ; exactement un rebond au plus, groupes pris en charge, files et workers bornés, cooldowns et plafonds par portée/globaux ; changement à chaud par `ollama reload` |
+| Réglages à chaud | tests Rust | la configuration AzerothCore est rechargée avant Playerbots/Ollama ; la population peut être changée après redémarrage du launcher tant que le worldserver continue de tourner |
+| Bundle macOS local | build + installation + inspection fraîche | RealmBox 0.3.1 arm64 installé dans `/Users/benjamin/Applications/RealmBox.app`, signature ad hoc stricte valide, exécutable SHA-256 `ca0fbea2…84fadab`, application ouverte ; ancien bundle 0.3.0 conservé en sauvegarde |
+| Addon embarqué | comparaison SHA-256 | source et ressource du bundle 0.3.1 identiques (`15322fe9…9607ba`) ; le client géré contient encore 0.2.0-dev et sera remplacé atomiquement au prochain démarrage du monde |
+| Vérification globale 0.3.2 | automatisée | typecheck, lint, 24 tests UI, 12 tests de scripts, builds Vite et Astro (3 pages), Clippy strict et 51 tests Rust réussis ; contrôle de cohérence de release relancé après la mise à jour du présent statut |
 
 ## Durcissement automatisé 0.3.0
 
@@ -79,22 +92,24 @@ La preuve visuelle reste locale et n’est pas ajoutée au dépôt, car elle con
 | Population réglable | sélecteur 5, 25, 50, 100 ou 150 ; valeur limitée selon la mémoire Docker ; tests Rust sur les paliers et le mode désactivé |
 | OpenWoW local sans modifier la copie joueur | overlay `Data` sur macOS/Linux avec `realmlist.wtf` local ; test vérifiant que le fichier source reste intact |
 | Réparation du compte local | l’installation met à jour le sel et le vérificateur à chaque passage ; test SQL idempotent |
-| Addon Compagnons | bouton d’équipe équilibrée, commandes suivre/attaquer/attendre/regrouper/libérer ; parcours réel validé dans la session en cours |
+| Addon Compagnons | le bundle 0.3.1 embarque l'addon 0.3.1-dev ; copie atomique dans le client au prochain démarrage géré, avant l'ouverture de WoW ; gameplay réel encore prouvé avec l'ancienne version |
 | Limite Playerbots | guildes aléatoires désactivées pour réduire la mémoire ; capacité recalculée à chaque démarrage |
 | Supervision du client | le processus enfant est réclamé par un thread d’attente ; test de régression réel Unix contre l’état zombie |
-| Vérification locale du bundle installé | preuve antérieure : typecheck, lint, 7 tests UI, build Vite, clippy strict, 24 tests desktop Rust et tous les tests/doc-tests du workspace |
+| Vérification locale du bundle installé | typecheck, lint, 24 tests UI, 10 tests de scripts, build Vite, Clippy strict et 50 tests Rust ; bundle 0.3.1 arm64 inspecté après copie |
 
-Le bundle 0.2.4 est installé dans `/Users/benjamin/Applications/RealmBox.app`, signé localement ad hoc, et son exécutable a le SHA-256 `e136e64c6587a4ef1c58fbef56fae8c2faed6eb92f3bd323982d65e384d2c308`. Le processus du lanceur déjà ouvert reste celui de la session précédente jusqu'à sa fermeture, mais la configuration bilingue 0.2.4 a été rechargée à chaud dans le worldserver actif. Le modèle n'est pas dans Docker : Ollama et ses modèles sont publiés sous `~/Library/Application Support/org.realmbox.desktop/runtime-v3/ai`, tandis que le projet Compose reste `realmbox-v3` et conserve ses deux volumes nommés.
+Le bundle 0.3.1 est installé et ouvert depuis `/Users/benjamin/Applications/RealmBox.app`, signé localement ad hoc, et son exécutable a le SHA-256 `ca0fbea27a43f2d8c75aac0ca40108f39775039a126393bfc2cafddd184fadab`. Le bundle précédent reste récupérable dans `/Users/benjamin/Applications/RealmBox-0.3.0-backup-20260903-134404.app`. Les volumes `realmbox-v3_realmbox-database` et `realmbox-v3_realmbox-server-data` ont été relus après l'installation. Le modèle n'est pas dans Docker : Ollama et ses modèles sont publiés sous `~/Library/Application Support/org.realmbox.desktop/runtime-v3/ai`.
 
 ## Défauts et travaux ouverts
 
 - OpenWoW a affiché une alerte macOS de restauration après une fermeture inattendue. Le lanceur ne doit pas laisser cette alerte produire une instance non supervisée ; la récupération automatique reste à durcir.
-- Les 50 bots autonomes sont répartis dans Azeroth. Seuls les quatre bots d’équipe sont garantis près du joueur.
+- La configuration 0.3.1 favorise désormais fortement la tranche de niveau du joueur, sa zone et son voisinage, mais ce résultat n'a pas encore été mesuré dans le vrai monde et ne constitue pas une garantie de position pour chaque bot.
+- Les modes escorte, garde et autonomie ainsi que la dissolution qui rend les bots autonomes passent le harnais Lua simulé, mais doivent encore être observés dans OpenWoW.
+- Les échanges bot-à-bot et leur rechargement à chaud passent les tests UI/Rust ; leur cadence et l'absence de flood doivent encore être qualifiées avec le vrai worldserver et le modèle local.
 - La nouvelle ergonomie 0.2.0-dev de l’addon Compagnons passe son harnais Lua simulé, mais l’icône de minimap, la persistance, le bilingue et les commandes `co +boost` / `co -boost` doivent encore être observés dans OpenWoW.
 - Le contrôle à chaud est implémenté dans 0.2.0 et prouvé avec fakes plus un conteneur Docker isolé. Il reste à le rejouer sur le vrai worldserver après le prochain démarrage géré, sans interrompre la session actuellement ouverte.
 - Le contrat de mise à jour protège désormais le volume et impose une sauvegarde avant migration. Trois dumps réels présents ont une empreinte SHA-256 valide, dont ceux créés pendant le parcours 0.2.2 ; la restauration complète passe avec fakes, y compris le retour après import défaillant, mais n’a pas encore été exécutée puis vérifiée en jeu sur les données réelles.
 - L'activation Ollama après une installation antérieure est prouvée sur ce Mac avec staging, sauvegarde, rollback du runtime, téléchargement et inférence. Le correctif 0.2.4 a été rechargé par la commande upstream `ollama reload` et les réponses FR puis EN ont été observées dans le canal de groupe. La qualité factuelle reste celle d'un modèle local 3B et n'est pas garantie.
-- Les fichiers du nouvel addon 0.2.4 sont identiques à la source dans le runtime actif, mais son interface enrichie n'a pas été confirmée visuellement après `/reload` dans OpenWoW ; le prochain démarrage géré le réinstallera avant d'ouvrir le client.
+- Le bundle 0.3.1 contient l'addon 0.3.1-dev vérifié, mais le client géré conserve encore l'addon 0.2.0-dev tant qu'un nouveau démarrage du monde n'a pas déclenché sa copie atomique. Son interface et ses nouveaux comportements doivent ensuite être confirmés dans OpenWoW.
 - Les images serveur RealmBox sont publiées et épinglées par digest. Le prochain parcours réel doit confirmer qu’une installation neuve les télécharge sans recompiler AzerothCore et Playerbots.
 - Windows x64 compile en CI mais n’a pas de parcours réel Windows 11. `Wow.exe` doit devenir le choix recommandé quand une copie compatible est présente ; OpenWoW doit rester optionnel.
 - Linux et Mac Intel ne sont pas pris en charge par le produit actuel.

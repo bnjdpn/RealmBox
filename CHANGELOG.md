@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2 — 2026-09-03
+
+- Ajoute un module serveur RealmBox qui rassemble progressivement jusqu’à 60 % des bots autonomes en ligne près des joueurs réels, sans déplacer les bots groupés, en combat, en instance ou visibles par un autre joueur.
+- Empêche le planificateur Playerbots d’annuler le placement, conserve une activité autonome en arrière-plan et accorde cinq minutes de grâce après la libération d’un bot pour qu’il reprenne sa vie propre.
+- Corrige le mode bavardage : une origine peut recevoir exactement un rebond bot-à-bot, les groupes sont pris en charge, les files et workers LLM sont bornés, et le plafond d’initiateurs par groupe/zone est désormais réellement appliqué.
+- Recharge d’abord la configuration AzerothCore avant les commandes Playerbots/Ollama et permet les changements de population après le redémarrage du launcher tant que le worldserver tourne.
+
+## 0.3.1 — 2026-09-03
+
+- Concentre la population autonome sur la tranche de niveau du joueur et donne la priorité aux bots proches ou présents dans sa zone, avec réévaluation périodique upstream.
+- Ajoute à l’addon les modes escorte, garde et autonomie ; libérer le groupe rétablit désormais l’autonomie avant de faire quitter les bots.
+- Permet de régler le bavardage à chaud quand le LLM local est actif et autorise, selon le profil, des échanges bot-à-bot à profondeur, concurrence, cooldown et débits strictement bornés.
+
 ## 0.3.0 — 2026-09-03
 
 - Ajout de `cargo xtask release check` et d’un manifeste partagé par le site pour bloquer les versions ou statuts de plateforme incohérents.

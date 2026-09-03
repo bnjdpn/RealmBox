@@ -1,0 +1,91 @@
+name: Test report
+description: Qualifier un parcours RealmBox sans joindre de données propriétaires ni personnelles
+title: "[Test] "
+body:
+  - type: markdown
+    attributes:
+      value: "Merci de tester RealmBox. N’attachez aucun MPQ, dump SQL, client WoW, secret ou chemin privé non expurgé. / Thank you for testing RealmBox. Do not attach MPQs, SQL dumps, a WoW client, secrets, or unredacted private paths."
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Plateforme / Platform
+      options: [macOS Apple Silicon, Windows x64]
+    validations: { required: true }
+  - type: input
+    id: realmbox_version
+    attributes:
+      label: Version RealmBox et SHA-256 / RealmBox version and SHA-256
+      placeholder: "0.3.0 · sha256:…"
+    validations: { required: true }
+  - type: input
+    id: os_version
+    attributes:
+      label: Version macOS ou Windows / macOS or Windows version
+    validations: { required: true }
+  - type: input
+    id: hardware
+    attributes:
+      label: Processeur et RAM / Processor and RAM
+    validations: { required: true }
+  - type: input
+    id: docker
+    attributes:
+      label: Version Docker Desktop et mémoire allouée / Docker Desktop version and allocated memory
+    validations: { required: true }
+  - type: dropdown
+    id: locale
+    attributes:
+      label: Locale des données / Data locale
+      options: [frFR, enUS, enGB, deDE, esES, esMX, ruRU, koKR, zhCN, zhTW]
+    validations: { required: true }
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client utilisé / Client used
+      options: [OpenWoW, Wow.exe]
+    validations: { required: true }
+  - type: input
+    id: population
+    attributes:
+      label: Population demandée et appliquée / Requested and applied population
+      placeholder: "50 / 50"
+    validations: { required: true }
+  - type: dropdown
+    id: dialogue
+    attributes:
+      label: Dialogues locaux / Local dialogue
+      options: [Activés / Enabled, Désactivés / Disabled, Non disponibles / Unavailable]
+    validations: { required: true }
+  - type: checkboxes
+    id: successful_steps
+    attributes:
+      label: Étapes réussies / Successful steps
+      options:
+        - label: Installation neuve / Clean installation
+        - label: Entrée dans le monde / Entered the world
+        - label: Trois démarrages successifs / Three consecutive starts
+        - label: Compagnons visibles et équipe formée / Companions visible and party formed
+        - label: Fermeture automatique du monde / Automatic world shutdown
+        - label: Personnage retrouvé après redémarrage / Character recovered after restart
+        - label: Dialogues locaux testés / Local dialogue tested
+  - type: textarea
+    id: failure
+    attributes:
+      label: Étape d’échec et résultat observé / Failure step and observed result
+      description: Laissez vide si tout a réussi. / Leave empty if everything succeeded.
+  - type: input
+    id: duration
+    attributes:
+      label: Durée approximative de l’installation / Approximate installation time
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic partageable expurgé / Redacted shareable diagnostic
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Confirmation de confidentialité / Privacy confirmation
+      options:
+        - label: Je confirme n’avoir joint aucun MPQ, dump SQL, secret, base utilisateur ou chemin privé non expurgé. / I attached no MPQ, SQL dump, secret, user database, or unredacted private path.
+          required: true

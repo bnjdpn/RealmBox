@@ -20,16 +20,19 @@ Les autres boutons n’acceptent aucune saisie joueur et envoient uniquement les
 | Attaquer | `attack` |
 | Attendre ici | `stay` |
 | Se regrouper | `summon` |
+| Comportement : escorte | `nc +follow,-stay,-new rpg,-grind` |
+| Comportement : garde | `nc +stay,-follow,-new rpg,-grind` |
+| Comportement : autonomie | `nc +new rpg,+grind,-follow,-stay` |
 | Capacités fortes activées | `co +boost` |
 | Capacités fortes limitées | `co -boost` |
-| Libérer l’équipe | `leave` |
+| Libérer l’équipe | autonomie, puis `leave` |
 
-Avant toute action, le bouton des capacités affiche `serveur` plutôt que d’inventer l’état initial de Playerbots. Il conserve ensuite la dernière préférence demandée. Playerbots ne renvoie pas à l’addon un état structuré permettant d’en faire un accusé de réception ; l’interface ne présente donc jamais cette valeur comme une confirmation serveur. Les commandes `co +boost` et `co -boost` correspondent au mécanisme de stratégie de combat présent dans le commit Playerbots épinglé par RealmBox. L’ancienne valeur `cooldowns on` n’était pas une commande prise en charge par ce commit.
+Le bouton de comportement fait défiler escorte, garde et autonomie et applique la stratégie immédiatement au groupe. `Libérer l'équipe` envoie d'abord la stratégie autonome, puis `leave` : les bots arrêtent donc de suivre le joueur avant de quitter le groupe. Avant toute action, le bouton des capacités affiche `serveur` plutôt que d’inventer l’état initial de Playerbots. Il conserve ensuite la dernière préférence demandée. Playerbots ne renvoie pas à l’addon un état structuré permettant d’en faire un accusé de réception ; l’interface ne présente donc jamais cette valeur comme une confirmation serveur. Les commandes `co +boost` et `co -boost` correspondent au mécanisme de stratégie de combat présent dans le commit Playerbots épinglé par RealmBox. L’ancienne valeur `cooldowns on` n’était pas une commande prise en charge par ce commit.
 
 ## Preuves et limites
 
-Le harnais Node exécute le vrai Lua avec Fengari et une API WoW simulée. Cinq tests couvrent les états du panneau, les positions, les langues, la composition, les prérequis et les commandes bornées. Le XML est analysé séparément et le manifeste cible toujours l’interface `30300`.
+Le harnais Node exécute le vrai Lua avec Fengari et une API WoW simulée. Six tests couvrent les états du panneau, les positions, les langues, la composition, les prérequis, les commandes bornées, les trois comportements et la dissolution autonome. Le XML est analysé séparément et le manifeste cible toujours l’interface `30300`.
 
 Preuve réelle antérieure du 2 septembre 2026 : OpenWoW a chargé l’addon, les quatre commandes `addclass` ont créé un groupe complet autour du joueur, les cadres de groupe étaient visibles et la base locale a confirmé les cinq membres. La nouvelle icône, la persistance, le bilingue, les contrôles contextuels et `co ±boost` restent à requalifier visuellement dans OpenWoW.
 
-Le dialogue `mod-ollama-chat` n’est pas géré par ce panneau. Il reste désactivable depuis RealmBox et doit être prouvé avec un modèle local avant d’ajouter un contrôle en jeu.
+Le dialogue `mod-ollama-chat` n’est pas piloté par l’addon en jeu : son activation et son niveau de bavardage restent dans l’interface RealmBox. Le niveau peut être changé à chaud lorsque le modèle local est actif.

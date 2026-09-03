@@ -92,8 +92,26 @@ jobs:
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
 
+  launcher-screenshots:
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 10.33.0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm capture:launcher
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: RealmBox-launcher-screenshots
+          path: site/public/assets/launcher-*.webp
+          if-no-files-found: error
+
   github-release:
-    needs: [macos-arm64, windows-x64]
+    needs: [macos-arm64, windows-x64, launcher-screenshots]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -127,9 +145,9 @@ jobs:
           - Artefacts sans signature de distribution et non notariés : vérifiez \`SHA256SUMS.txt\` avant ouverture.
           - Aucune donnée de jeu propriétaire n’est incluse. Une copie compatible build 12340 appartenant au joueur est requise.
 
-          FR : https://bnjdpn.github.io/RealmBox/?lang=fr
-          EN: https://bnjdpn.github.io/RealmBox/?lang=en
+          FR : https://bnjdpn.github.io/RealmBox/fr/
+          EN: https://bnjdpn.github.io/RealmBox/en/
           EOF
             gh release create "$tag" --draft --prerelease --notes-file release-notes.md --title "RealmBox $tag"
           fi
-          gh release upload "$tag" dist/RealmBox-macOS-arm64-unsigned/*.dmg dist/RealmBox-Windows-x64-unsigned/*.exe SHA256SUMS.txt --clobber
+          gh release upload "$tag" dist/RealmBox-macOS-arm64-unsigned/*.dmg dist/RealmBox-Windows-x64-unsigned/*.exe dist/RealmBox-launcher-screenshots/*.webp SHA256SUMS.txt --clobber

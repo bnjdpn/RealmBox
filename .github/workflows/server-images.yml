@@ -48,6 +48,11 @@ jobs:
           repository: DustinHendrickson/mod-ollama-chat
           ref: ${{ env.OLLAMA_CHAT_COMMIT }}
           path: upstream/server/modules/mod-ollama-chat
+      - name: Ajouter les extensions RealmBox épinglées
+        shell: bash
+        run: |
+          cp -R server-modules/mod-realmbox-presence upstream/server/modules/
+          node scripts/apply-pinned-mod-ollama-patch.mjs upstream/server/modules/mod-ollama-chat
       - name: Appliquer le correctif de build borné
         run: node scripts/prepare-server-dockerfile.mjs upstream/server/apps/docker/Dockerfile
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3

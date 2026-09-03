@@ -1,0 +1,26 @@
+---
+import type { SiteCopy } from "../content/types";
+
+interface Props { copy: SiteCopy }
+const { copy } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const downloadUrl = "https://github.com/bnjdpn/RealmBox/releases";
+---
+
+<section class="hero">
+  <img class="hero-art" src={`${base}assets/hero-azeroth-companions.webp`} width="1672" height="941" alt="" fetchpriority="high" aria-hidden="true" />
+  <div class="shell hero-grid">
+    <div class="hero-copy">
+      <p class="kicker"><i></i>{copy.hero.eyebrow}</p>
+      <h1>{copy.hero.title}<strong>{copy.hero.accent}</strong></h1>
+      <p class="hero-lead">{copy.hero.body}</p>
+      <div class="actions">
+        <a class="button primary" href={downloadUrl}>{copy.hero.download}<span aria-hidden="true">↓</span></a>
+        <a class="button ghost" href="#install">{copy.hero.install}<span aria-hidden="true">↘</span></a>
+      </div>
+      <ul class="hero-tech" aria-label="Technologies">
+        <li>AzerothCore</li><li>Playerbots</li><li>OpenWoW</li><li>Docker</li>
+      </ul>
+    </div>
+  </div>
+</section>

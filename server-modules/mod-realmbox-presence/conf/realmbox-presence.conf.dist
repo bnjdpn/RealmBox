@@ -1,0 +1,37 @@
+[worldserver]
+
+# Enable gradual placement of autonomous random bots around real players.
+RealmBoxPresence.Enabled = 1
+
+# Re-evaluate presence every three seconds and move at most one bot per pass.
+# This avoids a visible burst of teleports and bounds work on the world thread.
+RealmBoxPresence.ScanIntervalMs = 3000
+RealmBoxPresence.MaxMovesPerScan = 1
+RealmBoxPresence.PlayerCooldownSeconds = 2
+
+# Target a majority of every autonomous bot online, split across real players,
+# then cap the result to the friendly population. With one Alliance player and
+# 50 autonomous bots (27 Alliance), 0.60 asks for 30 and safely converges toward
+# all 27 friendly bots instead of bringing hostile Horde bots into Stormwind.
+RealmBoxPresence.TargetFraction = 0.60
+RealmBoxPresence.MinBotsPerPlayer = 4
+RealmBoxPresence.MaxBotsPerPlayer = 30
+RealmBoxPresence.NearbyRadius = 260.0
+
+# Place newcomers on reachable ground in the player's current zone. The inner
+# radius reduces obvious pop-in while remaining close enough to become visible.
+RealmBoxPresence.SpawnMinRadius = 110.0
+RealmBoxPresence.SpawnMaxRadius = 220.0
+RealmBoxPresence.SameZoneOnly = 1
+RealmBoxPresence.PointAttempts = 12
+
+# Do not make a bot disappear in front of another player, and do not repeatedly
+# shuttle the same bot between players. A bot released by a disband receives an
+# additional grace period and immediately resumes its autonomous strategies.
+RealmBoxPresence.DisappearanceGuardRadius = 150.0
+RealmBoxPresence.BotCooldownSeconds = 120
+RealmBoxPresence.ReleasedBotGraceSeconds = 300
+
+# 0 disables level filtering. Set a positive value to keep ambience bots within
+# that many levels of the player.
+RealmBoxPresence.MaxLevelDelta = 0

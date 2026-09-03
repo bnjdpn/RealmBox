@@ -1,0 +1,127 @@
+import type { SiteCopy } from "./types";
+
+export const fr: SiteCopy = {
+  lang: "fr",
+  alternateLang: "en",
+  alternateLabel: "EN",
+  title: "RealmBox — World of Warcraft en local avec AzerothCore et des bots",
+  description: "Lancez votre propre Azeroth sur votre ordinateur. RealmBox installe AzerothCore, peuple le monde avec Playerbots et ouvre WoW depuis une seule application.",
+  nav: { features: "RealmBox", install: "Installation", technology: "Technologie", faq: "FAQ", github: "GitHub" },
+  hero: {
+    eyebrow: "World of Warcraft · entièrement en local",
+    title: "Azeroth chez vous.",
+    accent: "Des bots à vos côtés.",
+    body: "RealmBox transforme votre copie compatible de World of Warcraft en une aventure solo locale : AzerothCore fait tourner le monde, Playerbots le peuple et le launcher s’occupe de toute l’installation.",
+    download: "Télécharger RealmBox",
+    install: "Voir l’installation",
+    screenshotAsset: "launcher-ready-fr.webp",
+    screenshotAlt: "Le launcher RealmBox prêt à lancer World of Warcraft en local",
+    screenshotCaption: "Le vrai launcher RealmBox · aucune ressource du jeu n’est distribuée",
+  },
+  promise: {
+    eyebrow: "WoW, sans serveur à administrer",
+    title: "Vous jouez. RealmBox gère le reste.",
+    body: "Pas de ligne de commande, pas de configuration de base de données et pas de serveur public à maintenir.",
+    items: [
+      { number: "01", title: "Azeroth tourne sur votre machine", body: "AzerothCore, MySQL et les services du jeu sont installés dans un environnement Docker local." },
+      { number: "02", title: "Le monde est peuplé", body: "Playerbots ajoute des aventuriers autonomes et vous permet de former une équipe équilibrée de compagnons." },
+      { number: "03", title: "Un seul bouton pour jouer", body: "RealmBox démarre WoW et tous les services dans le bon ordre, puis les arrête à la fermeture du client." },
+    ],
+  },
+  companions: {
+    eyebrow: "Playerbots intégrés",
+    title: "Azeroth n’est plus vide quand vous jouez seul.",
+    body: "Croisez des bots dans le monde, formez un groupe de quatre compagnons et donnez-leur des ordres depuis l’addon RealmBox directement dans WoW.",
+    points: ["Population adaptée à la mémoire de votre machine", "Équipe équilibrée : tank, soin et dégâts", "Suivre, attaquer, attendre, regrouper ou libérer", "Dialogues locaux facultatifs avec Ollama"],
+    screenshotAsset: "launcher-companions-fr.webp",
+    screenshotAlt: "Réglage de la population Playerbots dans RealmBox",
+  },
+  install: {
+    eyebrow: "Installation guidée",
+    title: "De zéro à Azeroth en cinq étapes.",
+    intro: "RealmBox a besoin de Docker Desktop et des fichiers d’une copie compatible de WoW. Il ne fournit ni ne téléverse les données du jeu.",
+    steps: [
+      {
+        title: "Installez Docker Desktop",
+        body: "Démarrez Docker Desktop et laissez-le actif. RealmBox y installe AzerothCore, la base locale et Playerbots.",
+        links: [{ href: "https://www.docker.com/products/docker-desktop/", label: "Télécharger Docker Desktop" }],
+      },
+      {
+        title: "Téléchargez les données WoW en français ou en anglais",
+        body: "RealmBox a besoin du dossier Data d’un client compatible. Ouvrez la page ChromieCraft dans la langue de votre choix, puis prenez le client ou le pack de langue correspondant proposé sur cette page.",
+        links: [
+          { href: "https://chromiecraft.com/fr/telechargements/", label: "Client et téléchargements en français" },
+          { href: "https://chromiecraft.com/en/downloads/", label: "English client and downloads" },
+        ],
+      },
+      {
+        title: "Téléchargez RealmBox",
+        body: "Prenez le DMG pour Mac Apple Silicon ou l’installateur Windows x64 depuis les releases GitHub, puis vérifiez le SHA-256 fourni.",
+        links: [{ href: "https://github.com/bnjdpn/RealmBox/releases", label: "Ouvrir les releases RealmBox" }],
+      },
+      { title: "Choisissez le dossier WoW", body: "Dans RealmBox, sélectionnez le dossier qui contient Data. Le launcher vérifie les fichiers sans modifier votre copie source." },
+      { title: "Installez, puis jouez", body: "Choisissez la population de bots, lancez l’installation et cliquez sur Jouer lorsque RealmBox affiche que tout est prêt." },
+    ],
+    requirementsTitle: "Configuration requise",
+    requirements: [
+      { label: "Système", value: "Mac Apple Silicon ou PC Windows x64" },
+      {
+        label: "Conteneurs",
+        value: "Docker Desktop installé, démarré et doté de mémoire",
+        links: [{ href: "https://www.docker.com/products/docker-desktop/", label: "Docker Desktop" }],
+      },
+      { label: "Stockage", value: "24 Gio libres minimum, plus le modèle local facultatif" },
+      { label: "Jeu", value: "Un dossier Data WoW complet et compatible" },
+      { label: "Réseau", value: "Connexion Internet requise pour la première installation" },
+    ],
+    capacityTitle: "Mémoire attribuée à Docker",
+    capacities: [
+      { memory: "moins de 12 Gio", bots: "5 bots max." },
+      { memory: "12 à 19 Gio", bots: "50 bots max." },
+      { memory: "20 à 27 Gio", bots: "100 bots max." },
+      { memory: "28 Gio et plus", bots: "150 bots max." },
+    ],
+    note: "Le premier démarrage prépare les données locales et peut prendre du temps. Les lancements suivants sont beaucoup plus rapides.",
+  },
+  technology: {
+    eyebrow: "Sous le capot",
+    title: "Une pile locale complète, pilotée par le launcher.",
+    body: "RealmBox est une application desktop Tauri et React. Elle orchestre des composants libres épinglés à des versions immuables et conserve les détails serveur hors du parcours joueur.",
+    nodes: [
+      { label: "Votre client WoW", detail: "Data en lecture seule" },
+      { label: "RealmBox", detail: "Installation et supervision" },
+      { label: "AzerothCore", detail: "Authserver + worldserver" },
+      { label: "Playerbots", detail: "Population et compagnons" },
+      { label: "WoW", detail: "OpenWoW ou Wow.exe" },
+    ],
+    facts: [
+      { title: "Données extraites localement", body: "maps, vmaps, mmaps et dbc sont produits depuis votre propre dossier Data." },
+      { title: "Services isolés", body: "Les ports de jeu restent liés à 127.0.0.1 et MySQL n’est pas exposé sur l’hôte." },
+      { title: "Mises à jour protégées", body: "Une sauvegarde complète et vérifiée des personnages est obligatoire avant toute migration." },
+      { title: "Dialogues facultatifs", body: "Ollama et un petit modèle local peuvent alimenter les réponses des bots sans cloud pendant le jeu." },
+    ],
+  },
+  local: {
+    eyebrow: "Vos données restent chez vous",
+    title: "Un Azeroth personnel, pas un serveur public.",
+    body: "RealmBox ne crée aucun compte distant et n’envoie pas vos fichiers de jeu. Votre monde, vos personnages, vos sauvegardes et vos journaux restent sur votre ordinateur.",
+    points: ["Aucune télémétrie automatique", "Aucun MPQ téléversé", "Ports limités à localhost", "Diagnostics partageables expurgés", "Sauvegardes hors du runtime remplaçable", "Aucune donnée propriétaire dans RealmBox"],
+  },
+  faq: {
+    eyebrow: "Questions fréquentes",
+    title: "L’essentiel avant de lancer l’installation.",
+    items: [
+      { question: "Est-ce vraiment World of Warcraft ?", answer: "RealmBox utilise les fichiers d’une copie compatible de World of Warcraft: Wrath of the Lich King et lance un Azeroth local avec AzerothCore. RealmBox ne contient et ne distribue aucun fichier propriétaire du jeu." },
+      { question: "Ai-je besoin d’un abonnement ou d’un serveur en ligne ?", answer: "RealmBox ne se connecte pas aux serveurs officiels et ne demande aucun abonnement pour son fonctionnement local. Vous devez toutefois utiliser une copie du jeu que vous êtes autorisé à posséder." },
+      { question: "À quoi servent les bots ?", answer: "Playerbots peuple Azeroth avec des personnages autonomes. L’addon RealmBox peut aussi réunir quatre bots près de vous pour créer une équipe jouable." },
+      { question: "Quel téléchargement ChromieCraft choisir ?", answer: "Utilisez la page française ou anglaise selon la langue souhaitée. RealmBox détecte ensuite la locale réellement présente dans le dossier Data sélectionné. Sur Mac Apple Silicon, il réutilise ces données avec OpenWoW au lieu de lancer le Wow.exe Windows." },
+      { question: "Est-ce que RealmBox modifie mon dossier WoW ?", answer: "Non. Le dossier choisi est vérifié et utilisé en lecture seule pendant l’extraction. Les fichiers gérés par RealmBox sont placés dans son propre répertoire local." },
+    ],
+  },
+  footer: {
+    independent: "Projet libre et indépendant, non affilié à Blizzard Entertainment ni à ChromieCraft.",
+    license: "AGPL-3.0",
+    documentation: "Documentation",
+    source: "Code source",
+  },
+};

@@ -1,0 +1,141 @@
+---
+import Faq from "./Faq.astro";
+import Header from "./Header.astro";
+import Hero from "./Hero.astro";
+import PageLayout from "../layouts/PageLayout.astro";
+import type { SiteCopy } from "../content/types";
+
+interface Props { copy: SiteCopy }
+const { copy } = Astro.props;
+const base = import.meta.env.BASE_URL;
+---
+
+<PageLayout lang={copy.lang} title={copy.title} description={copy.description}>
+  <Header copy={copy} />
+  <main id="content">
+    <Hero copy={copy} />
+
+    <section class="launcher-showcase" aria-labelledby="launcher-showcase-title">
+      <div class="shell">
+        <h2 class="sr-only" id="launcher-showcase-title">{copy.hero.screenshotAlt}</h2>
+        <figure class="showcase-frame">
+          <div class="frame-heading"><i aria-hidden="true"></i><span>RealmBox</span><i aria-hidden="true"></i></div>
+          <img src={`${base}assets/${copy.hero.screenshotAsset}`} width="1024" height="640" alt={copy.hero.screenshotAlt} loading="lazy" />
+          <figcaption>{copy.hero.screenshotCaption}</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section promise" id="realmbox" aria-labelledby="promise-title">
+      <div class="shell">
+        <div class="section-intro wide-intro">
+          <p class="kicker">{copy.promise.eyebrow}</p>
+          <h2 id="promise-title">{copy.promise.title}</h2>
+          <p>{copy.promise.body}</p>
+        </div>
+        <div class="promise-grid">
+          {copy.promise.items.map((item) => (
+            <article><span>{item.number}</span><h3>{item.title}</h3><p>{item.body}</p></article>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="section companions" aria-labelledby="companions-title">
+      <div class="shell feature-layout">
+        <figure class="feature-shot">
+          <img src={`${base}assets/${copy.companions.screenshotAsset}`} width="1024" height="640" alt={copy.companions.screenshotAlt} loading="lazy" />
+        </figure>
+        <div class="feature-copy">
+          <p class="kicker">{copy.companions.eyebrow}</p>
+          <h2 id="companions-title">{copy.companions.title}</h2>
+          <p class="lead">{copy.companions.body}</p>
+          <ul>{copy.companions.points.map((point) => <li><i aria-hidden="true">✓</i>{point}</li>)}</ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section install" id="install" aria-labelledby="install-title">
+      <div class="shell">
+        <div class="section-intro install-heading">
+          <p class="kicker">{copy.install.eyebrow}</p>
+          <h2 id="install-title">{copy.install.title}</h2>
+          <p>{copy.install.intro}</p>
+        </div>
+        <div class="install-layout">
+          <ol class="install-steps">
+            {copy.install.steps.map((step, index) => (
+              <li>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{step.title}</h3>
+                  <p>{step.body}</p>
+                  {step.links && <div class="step-links">{step.links.map((link) => <a href={link.href}>{link.label}<b aria-hidden="true">↗</b></a>)}</div>}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <aside class="requirements">
+            <p>{copy.install.requirementsTitle}</p>
+            <ul class="requirement-list">
+              {copy.install.requirements.map((item) => (
+                <li>
+                  <strong>{item.label}</strong>
+                  <span>{item.value}</span>
+                  {item.links?.map((link) => <a href={link.href}>{link.label}<b aria-hidden="true">↗</b></a>)}
+                </li>
+              ))}
+            </ul>
+            <p class="capacity-title">{copy.install.capacityTitle}</p>
+            <dl class="capacity-grid">
+              {copy.install.capacities.map((item) => <div><dt>{item.memory}</dt><dd>{item.bots}</dd></div>)}
+            </dl>
+            <div class="install-note"><i aria-hidden="true">i</i><span>{copy.install.note}</span></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section technology" id="technology" aria-labelledby="technology-title">
+      <div class="shell">
+        <div class="section-intro tech-heading">
+          <div><p class="kicker">{copy.technology.eyebrow}</p><h2 id="technology-title">{copy.technology.title}</h2></div>
+          <p>{copy.technology.body}</p>
+        </div>
+        <div class="runtime-flow" aria-label={copy.technology.title}>
+          {copy.technology.nodes.map((node, index) => (
+            <><div class="runtime-node"><strong>{node.label}</strong><span>{node.detail}</span></div>{index < copy.technology.nodes.length - 1 && <i aria-hidden="true">→</i>}</>
+          ))}
+        </div>
+        <div class="fact-grid">
+          {copy.technology.facts.map((fact) => <article><h3>{fact.title}</h3><p>{fact.body}</p></article>)}
+        </div>
+      </div>
+    </section>
+
+    <section class="section local-data" aria-labelledby="local-title">
+      <div class="shell local-layout">
+        <div>
+          <p class="kicker">{copy.local.eyebrow}</p>
+          <h2 id="local-title">{copy.local.title}</h2>
+          <p class="lead">{copy.local.body}</p>
+        </div>
+        <ul>{copy.local.points.map((point) => <li><i aria-hidden="true"></i>{point}</li>)}</ul>
+      </div>
+    </section>
+
+    <Faq copy={copy} />
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <a class="brand" href="#content"><img src={`${base}assets/icon.svg`} width="36" height="36" alt="" /><span>RealmBox</span></a>
+      <p>{copy.footer.independent}</p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/bnjdpn/RealmBox/blob/main/LICENSE">{copy.footer.license}</a>
+        <a href="https://github.com/bnjdpn/RealmBox/tree/main/docs">{copy.footer.documentation}</a>
+        <a href="https://github.com/bnjdpn/RealmBox">{copy.footer.source}</a>
+      </nav>
+    </div>
+  </footer>
+</PageLayout>

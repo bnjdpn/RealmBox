@@ -67,6 +67,11 @@ jobs:
         with: { repository: mod-playerbots/mod-playerbots, ref: 2f7d9f774987d0157c6a0d0cc08c40bec3db3945, path: upstream/server/modules/mod-playerbots }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { repository: DustinHendrickson/mod-ollama-chat, ref: a9d14b0b8955be136e657ac168dd255f5281a535, path: upstream/server/modules/mod-ollama-chat }
+      - name: Ajouter les extensions RealmBox épinglées
+        shell: bash
+        run: |
+          cp -R server-modules/mod-realmbox-presence upstream/server/modules/
+          node scripts/apply-pinned-mod-ollama-patch.mjs upstream/server/modules/mod-ollama-chat
       - name: Install macOS server dependencies
         if: runner.os == 'macOS'
         run: brew install cmake boost openssl@3 readline mysql-client fmt

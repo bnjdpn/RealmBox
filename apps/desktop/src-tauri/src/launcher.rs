@@ -30,6 +30,8 @@ const PLAYERBOTS_REPOSITORY: &str = "https://github.com/mod-playerbots/mod-playe
 const PLAYERBOTS_COMMIT: &str = "2f7d9f774987d0157c6a0d0cc08c40bec3db3945";
 const OLLAMA_CHAT_REPOSITORY: &str = "https://github.com/DustinHendrickson/mod-ollama-chat.git";
 const OLLAMA_CHAT_COMMIT: &str = "a9d14b0b8955be136e657ac168dd255f5281a535";
+const REALMBOX_PRESENCE_MODULE: &str = "mod-realmbox-presence";
+const REALMBOX_OLLAMA_PATCH: &str = "mod-ollama-chat-realmbox.patch";
 const OLLAMA_PORT: u16 = 11435;
 const OLLAMA_DIALOGUE_SYSTEM_PROMPT: &str = r#""Reply directly in exactly the language of the quoted player message. An English message requires an English answer. A French message requires a French answer. Never use another language. Keep names and World of Warcraft terms unchanged. If unsure, say so briefly in the same language. Output only the answer.""#;
 const OLLAMA_DIALOGUE_CHAT_PROMPT: &str = r#""You are {bot_name}, a World of Warcraft {bot_class}. Player message: <player_message>{player_message}</player_message>. Reply directly to that message in the same language in under 20 words. Output only the answer, with no name, prefix, narration, classification, or meta-comment.""#;
@@ -1139,8 +1141,9 @@ impl<R: CommandRunner> LauncherService<R> {
         let record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
-        if self.client_process_id.is_some() || self.worldserver_is_running(&record)? {
-            return Err("arrêtez le monde avant de modifier le niveau de bavardage".into());
+        let running = self.client_process_id.is_some() || self.worldserver_is_running(&record)?;
+        if running && (!record.ai_enabled || record.ai_model.is_none()) {
+            return Err("les dialogues locaux ne sont pas actifs dans ce monde".into());
         }
         write_atomic(
             &self.app_data.join("dialogue-preferences.json"),
@@ -1156,11 +1159,37 @@ impl<R: CommandRunner> LauncherService<R> {
             record.ai_model.as_deref(),
             chattiness,
         )?;
+        if running {
+            self.runner.run_long(
+                "docker",
+                &compose_args(
+                    &record.compose_file,
+                    &[
+                        "exec",
+                        "-T",
+                        "worldserver",
+                        "sh",
+                        "-lc",
+                        "printf 'reload config\\nollama reload\\n' > /proc/1/fd/0",
+                    ],
+                ),
+                Some(server_root),
+                &record.runtime_root.join("logs/dialogue-live-update.log"),
+            )?;
+        }
         Ok(self.installed_status(
             &record,
-            LauncherPhase::Ready,
-            "Niveau de bavardage enregistré",
-            false,
+            if running {
+                LauncherPhase::Running
+            } else {
+                LauncherPhase::Ready
+            },
+            if running {
+                "Niveau de bavardage appliqué"
+            } else {
+                "Niveau de bavardage enregistré"
+            },
+            running,
         ))
     }
 
@@ -1604,6 +1633,12 @@ impl<R: CommandRunner> LauncherService<R> {
                         &server_root.join("modules/mod-ollama-chat"),
                     )?;
                 }
+                install_realmbox_server_extensions(
+                    &self.runner,
+                    &self.addon_source,
+                    &server_root,
+                    ai_enabled,
+                )?;
                 write_realmbox_dockerfile(&server_root)?;
             }
 
@@ -1763,6 +1798,8 @@ impl<R: CommandRunner> LauncherService<R> {
                 &logs.join("database-import.log"),
             )?;
             write_playerbots_config(&server_root, bots_enabled, bot_count)?;
+            install_realmbox_presence_config(&self.addon_source, &server_root)?;
+            write_realmbox_presence_config(&server_root, bots_enabled)?;
             self.emit_component(
                 &mut progress,
                 OperationComponent::Bots,
@@ -1974,6 +2011,8 @@ impl<R: CommandRunner> LauncherService<R> {
         );
         self.save_record(&record)?;
         write_playerbots_config(server_root, record.bots_enabled, record.bot_count)?;
+        install_realmbox_presence_config(&self.addon_source, server_root)?;
+        write_realmbox_presence_config(server_root, record.bots_enabled)?;
 
         self.emit(
             &mut progress,
@@ -2480,6 +2519,8 @@ impl<R: CommandRunner> LauncherService<R> {
             &record.runtime_root.join("logs/dialogue-module-extract.log"),
         )?;
         write_playerbots_config(&staged_server, record.bots_enabled, record.bot_count)?;
+        install_realmbox_presence_config(&self.addon_source, &staged_server)?;
+        write_realmbox_presence_config(&staged_server, record.bots_enabled)?;
         write_ollama_chat_config(&staged_server, false, None, self.dialogue_chattiness())?;
 
         self.emit(
@@ -2851,12 +2892,6 @@ impl<R: CommandRunner> LauncherService<R> {
         let mut record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas installé".to_string())?;
-        let process_id = self.client_process_id.ok_or_else(|| {
-            "le monde doit être lancé pour modifier la population à chaud".to_string()
-        })?;
-        if !self.runner.is_process_running(process_id)? {
-            return Err("le client n’est plus en cours d’exécution".into());
-        }
         let server_root = record
             .compose_file
             .parent()
@@ -2896,6 +2931,8 @@ impl<R: CommandRunner> LauncherService<R> {
         let effective_count =
             effective_playerbot_count(&docker_memory, bots_enabled, requested_count);
         write_playerbots_config(server_root, bots_enabled, effective_count)?;
+        install_realmbox_presence_config(&self.addon_source, server_root)?;
+        write_realmbox_presence_config(server_root, bots_enabled)?;
         self.runner.run_long(
             "docker",
             &compose_args(
@@ -2906,7 +2943,7 @@ impl<R: CommandRunner> LauncherService<R> {
                     "worldserver",
                     "sh",
                     "-lc",
-                    "printf 'playerbot rndbot reload\\nplayerbot rndbot update\\n' > /proc/1/fd/0",
+                    "printf 'reload config\\nplayerbots rndbot reload\\nplayerbots rndbot update\\n' > /proc/1/fd/0",
                 ],
             ),
             Some(server_root),
@@ -3778,6 +3815,74 @@ fn clone_pinned<R: CommandRunner>(
     Ok(())
 }
 
+fn install_realmbox_server_extensions<R: CommandRunner>(
+    runner: &R,
+    addon_source: &Path,
+    server_root: &Path,
+    ai_enabled: bool,
+) -> Result<(), String> {
+    let resource_root = realmbox_resource_root(addon_source)?;
+    let presence_source = resource_root
+        .join("server-modules")
+        .join(REALMBOX_PRESENCE_MODULE);
+    let presence_destination = server_root.join("modules").join(REALMBOX_PRESENCE_MODULE);
+    copy_directory(&presence_source, &presence_destination)?;
+
+    if !ai_enabled {
+        return Ok(());
+    }
+
+    let patch = resource_root.join("patches").join(REALMBOX_OLLAMA_PATCH);
+    let patch_contents = fs::read_to_string(&patch).map_err(|error| {
+        format!(
+            "correctif des dialogues RealmBox absent ({}): {error}",
+            patch.display()
+        )
+    })?;
+    let expected_metadata = format!("Upstream-Commit: {OLLAMA_CHAT_COMMIT}");
+    if !patch_contents.lines().any(|line| line == expected_metadata) {
+        return Err("le correctif des dialogues ne correspond pas au commit épinglé".into());
+    }
+
+    let ollama_root = server_root.join("modules/mod-ollama-chat");
+    for action in [["apply", "--check"], ["apply", ""]] {
+        let mut args = vec![
+            "-C".into(),
+            ollama_root.as_os_str().into(),
+            action[0].into(),
+        ];
+        if !action[1].is_empty() {
+            args.push(action[1].into());
+        }
+        args.push(patch.as_os_str().into());
+        runner.run("git", &args, None)?;
+    }
+    Ok(())
+}
+
+fn realmbox_resource_root(addon_source: &Path) -> Result<PathBuf, String> {
+    let bundled = addon_source.parent().and_then(Path::parent);
+    if let Some(root) = bundled
+        && root
+            .join("server-modules")
+            .join(REALMBOX_PRESENCE_MODULE)
+            .is_dir()
+    {
+        return Ok(root.to_path_buf());
+    }
+
+    let development = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    if development
+        .join("server-modules")
+        .join(REALMBOX_PRESENCE_MODULE)
+        .is_dir()
+    {
+        return Ok(development);
+    }
+
+    Err("racine des ressources RealmBox introuvable".into())
+}
+
 fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -4046,6 +4151,38 @@ fn refresh_companion_addon(addon_source: &Path, record: &InstallationRecord) -> 
     install_companion_addon(addon_source, &game_root)
 }
 
+fn install_realmbox_presence_config(addon_source: &Path, server_root: &Path) -> Result<(), String> {
+    let resource_root = realmbox_resource_root(addon_source)?;
+    copy_file_preserving(
+        &resource_root
+            .join("server-modules")
+            .join(REALMBOX_PRESENCE_MODULE)
+            .join("conf/realmbox-presence.conf.dist"),
+        &server_root.join("env/dist/etc/modules/realmbox-presence.conf.dist"),
+    )
+}
+
+fn write_realmbox_presence_config(server_root: &Path, enabled: bool) -> Result<(), String> {
+    write_module_config(
+        server_root,
+        REALMBOX_PRESENCE_MODULE,
+        "realmbox-presence.conf",
+        &[
+            ("RealmBoxPresence.Enabled", u8::from(enabled).to_string()),
+            ("RealmBoxPresence.ScanIntervalMs", "3000".into()),
+            ("RealmBoxPresence.TargetFraction", "0.60".into()),
+            ("RealmBoxPresence.MinBotsPerPlayer", "4".into()),
+            ("RealmBoxPresence.MaxBotsPerPlayer", "30".into()),
+            ("RealmBoxPresence.NearbyRadius", "260.0".into()),
+            ("RealmBoxPresence.SpawnMinRadius", "110.0".into()),
+            ("RealmBoxPresence.SpawnMaxRadius", "220.0".into()),
+            ("RealmBoxPresence.MaxMovesPerScan", "1".into()),
+            ("RealmBoxPresence.BotCooldownSeconds", "120".into()),
+            ("RealmBoxPresence.ReleasedBotGraceSeconds", "300".into()),
+        ],
+    )
+}
+
 fn write_playerbots_config(
     server_root: &Path,
     enabled: bool,
@@ -4063,6 +4200,48 @@ fn write_playerbots_config(
             ("AiPlayerbot.MinRandomBots", count.to_string()),
             ("AiPlayerbot.MaxRandomBots", count.to_string()),
             ("AiPlayerbot.RandomBotGuildCount", "0".to_string()),
+            ("AiPlayerbot.DisabledWithoutRealPlayer", value.to_string()),
+            (
+                "AiPlayerbot.DisabledWithoutRealPlayerLoginDelay",
+                "5".to_string(),
+            ),
+            (
+                "AiPlayerbot.DisabledWithoutRealPlayerLogoutDelay",
+                "60".to_string(),
+            ),
+            ("AiPlayerbot.BotActiveAlone", "10".to_string()),
+            (
+                "AiPlayerbot.BotActiveAloneForceWhenInRadius",
+                "300".to_string(),
+            ),
+            ("AiPlayerbot.BotActiveAloneForceWhenInZone", "1".to_string()),
+            ("AiPlayerbot.BotActiveAloneForceWhenInMap", "0".to_string()),
+            ("AiPlayerbot.LevelBrackets.Enabled", value.to_string()),
+            ("AiPlayerbot.LevelBrackets.CheckFrequency", "60".to_string()),
+            (
+                "AiPlayerbot.LevelBrackets.Dynamic.UseDynamicDistribution",
+                value.to_string(),
+            ),
+            (
+                "AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight",
+                "15.0".to_string(),
+            ),
+            (
+                "AiPlayerbot.LevelBrackets.Dynamic.SyncFactions",
+                value.to_string(),
+            ),
+            ("AiPlayerbot.AutoTeleportForLevel", value.to_string()),
+            ("AiPlayerbot.RandomBotTeleLowerLevel", "1".to_string()),
+            ("AiPlayerbot.RandomBotTeleHigherLevel", "3".to_string()),
+            (
+                "AiPlayerbot.MinRandomBotTeleportInterval",
+                "600".to_string(),
+            ),
+            (
+                "AiPlayerbot.MaxRandomBotTeleportInterval",
+                "1800".to_string(),
+            ),
+            ("AiPlayerbot.ProbTeleToBankers", "0.25".to_string()),
         ],
     )
 }
@@ -4261,12 +4440,34 @@ fn write_ollama_chat_config(
     }
     let enabled = u8::from(enabled).to_string();
     let model = model.unwrap_or("llama3.2:1b");
-    let (automatic_chatter, random_chance, event_chance, event_self_chance, reply_chance, cooldown) =
-        match chattiness {
-            DialogueChattiness::Quiet => ("0", "1", "4", "1", "35", "30"),
-            DialogueChattiness::Balanced => ("0", "2", "10", "2", "100", "0"),
-            DialogueChattiness::Lively => ("1", "5", "20", "5", "100", "0"),
-        };
+    let chatter = match chattiness {
+        DialogueChattiness::Quiet => (
+            "0", "1", "4", "1", "35", "0", "0", "60", "30", "2", "4", "180", "360", "1", "25",
+        ),
+        DialogueChattiness::Balanced => (
+            "1", "20", "8", "1", "100", "20", "50", "90", "0", "2", "4", "90", "180", "2", "100",
+        ),
+        DialogueChattiness::Lively => (
+            "1", "50", "15", "3", "100", "50", "100", "60", "0", "4", "6", "20", "60", "2", "100",
+        ),
+    };
+    let (
+        automatic_chatter,
+        random_chance,
+        event_chance,
+        event_self_chance,
+        player_reply_chance,
+        bot_say_reply_chance,
+        bot_party_reply_chance,
+        per_bot_cooldown,
+        per_scope_cooldown,
+        scope_rate_limit,
+        global_rate_limit,
+        min_random_interval,
+        max_random_interval,
+        max_chain_depth,
+        chain_chance_decay,
+    ) = chatter;
     write_module_config(
         server_root,
         "mod-ollama-chat",
@@ -4292,25 +4493,63 @@ fn write_ollama_chat_config(
                 OLLAMA_DIALOGUE_CHAT_PROMPT.into(),
             ),
             ("OllamaChat.MaxConcurrentQueries", "1".into()),
+            ("OllamaChat.WorkerThreads", "1".into()),
+            ("OllamaChat.MaxQueueDepth", "4".into()),
             ("OllamaChat.ThinkMode", r#""off""#.into()),
             ("OllamaChat.ThinkModeEnableForModule", "0".into()),
             ("OllamaChat.DebugEnabled", "0".into()),
             ("OllamaChat.DebugShowFullPrompt", "0".into()),
-            ("OllamaChat.PlayerReplyChance.Say", reply_chance.into()),
-            ("OllamaChat.PlayerReplyChance.Channel", reply_chance.into()),
-            ("OllamaChat.PlayerReplyChance.Party", reply_chance.into()),
-            ("OllamaChat.PlayerReplyChance.Guild", reply_chance.into()),
-            ("OllamaChat.BotReplyChance.Say", "0".into()),
+            (
+                "OllamaChat.PlayerReplyChance.Say",
+                player_reply_chance.into(),
+            ),
+            (
+                "OllamaChat.PlayerReplyChance.Channel",
+                player_reply_chance.into(),
+            ),
+            (
+                "OllamaChat.PlayerReplyChance.Party",
+                player_reply_chance.into(),
+            ),
+            (
+                "OllamaChat.PlayerReplyChance.Guild",
+                player_reply_chance.into(),
+            ),
+            ("OllamaChat.BotReplyChance.Say", bot_say_reply_chance.into()),
             ("OllamaChat.BotReplyChance.Channel", "0".into()),
-            ("OllamaChat.BotReplyChance.Party", "0".into()),
+            (
+                "OllamaChat.BotReplyChance.Party",
+                bot_party_reply_chance.into(),
+            ),
             ("OllamaChat.BotReplyChance.Guild", "0".into()),
             ("OllamaChat.EnableWhisperReplies", enabled.clone()),
             ("OllamaChat.MaxBotsToPick", "1".into()),
-            ("OllamaChat.Cooldown.PerBotSeconds", cooldown.into()),
-            ("OllamaChat.Cooldown.PerScopeSeconds", "0".into()),
-            ("OllamaChat.RateLimit.ScopePerMinute", "30".into()),
-            ("OllamaChat.RateLimit.GlobalPerMinute", "120".into()),
+            (
+                "OllamaChat.BotConversation.MaxChainDepth",
+                max_chain_depth.into(),
+            ),
+            (
+                "OllamaChat.BotConversation.ChanceDecayPct",
+                chain_chance_decay.into(),
+            ),
+            ("OllamaChat.BotConversation.RequireRecentHuman", "0".into()),
+            ("OllamaChat.Cooldown.PerBotSeconds", per_bot_cooldown.into()),
+            (
+                "OllamaChat.Cooldown.PerScopeSeconds",
+                per_scope_cooldown.into(),
+            ),
+            (
+                "OllamaChat.RateLimit.ScopePerMinute",
+                scope_rate_limit.into(),
+            ),
+            (
+                "OllamaChat.RateLimit.GlobalPerMinute",
+                global_rate_limit.into(),
+            ),
             ("OllamaChat.EnableRandomChatter", automatic_chatter.into()),
+            ("OllamaChat.MinRandomInterval", min_random_interval.into()),
+            ("OllamaChat.MaxRandomInterval", max_random_interval.into()),
+            ("OllamaChat.RandomChatterRealPlayerDistance", "120.0".into()),
             (
                 "OllamaChat.RandomChatterBotCommentChance",
                 random_chance.into(),
@@ -4326,6 +4565,10 @@ fn write_ollama_chat_config(
                 event_self_chance.into(),
             ),
             ("OllamaChat.EventChatterMaxBotsPerPlayer", "1".into()),
+            ("OllamaChat.DisableRepliesInCombat", "1".into()),
+            ("OllamaChat.DisableForCustomChannels", "1".into()),
+            ("OllamaChat.DisableForGuild", "1".into()),
+            ("OllamaChat.DisableForParty", "0".into()),
             ("OllamaChat.EnableSentimentTracking", "0".into()),
         ],
     )
@@ -5134,9 +5377,16 @@ mod tests {
         }
         fs::write(
             path,
-            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableSentimentTracking = 1\n",
+            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.WorkerThreads = 4\nOllamaChat.MaxQueueDepth = 64\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.BotConversation.MaxChainDepth = 3\nOllamaChat.BotConversation.ChanceDecayPct = 50\nOllamaChat.BotConversation.RequireRecentHuman = 1\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.MinRandomInterval = 45\nOllamaChat.MaxRandomInterval = 180\nOllamaChat.RandomChatterRealPlayerDistance = 200.0\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.DisableRepliesInCombat = 0\nOllamaChat.DisableForCustomChannels = 0\nOllamaChat.DisableForGuild = 0\nOllamaChat.DisableForParty = 0\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
         )
         .expect("module config");
+    }
+
+    fn playerbots_fixture(enabled: bool, count: usize, extra: &str) -> String {
+        let value = u8::from(enabled);
+        format!(
+            "AiPlayerbot.Enabled = {value}\nAiPlayerbot.RandomBotAutologin = {value}\nAiPlayerbot.MinRandomBots = {count}\nAiPlayerbot.MaxRandomBots = {count}\nAiPlayerbot.RandomBotGuildCount = 20\nAiPlayerbot.DisabledWithoutRealPlayer = 0\nAiPlayerbot.DisabledWithoutRealPlayerLoginDelay = 30\nAiPlayerbot.DisabledWithoutRealPlayerLogoutDelay = 300\nAiPlayerbot.BotActiveAlone = 10\nAiPlayerbot.BotActiveAloneForceWhenInRadius = 150\nAiPlayerbot.BotActiveAloneForceWhenInZone = 1\nAiPlayerbot.BotActiveAloneForceWhenInMap = 0\nAiPlayerbot.LevelBrackets.Enabled = 0\nAiPlayerbot.LevelBrackets.CheckFrequency = 300\nAiPlayerbot.LevelBrackets.Dynamic.UseDynamicDistribution = 0\nAiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight = 1.0\nAiPlayerbot.LevelBrackets.Dynamic.SyncFactions = 0\nAiPlayerbot.AutoTeleportForLevel = 1\nAiPlayerbot.RandomBotTeleLowerLevel = 1\nAiPlayerbot.RandomBotTeleHigherLevel = 3\nAiPlayerbot.MinRandomBotTeleportInterval = 3600\nAiPlayerbot.MaxRandomBotTeleportInterval = 18000\nAiPlayerbot.ProbTeleToBankers = 0.25\n{extra}"
+        )
     }
 
     #[derive(Default)]
@@ -5854,7 +6104,7 @@ mod tests {
         fs::create_dir_all(&source).expect("source dir");
         fs::write(
             source.join("playerbots.conf.dist"),
-            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.RandomBotGuildCount = 20\nAiPlayerbot.UnmanagedDefault = 42\n",
+            playerbots_fixture(false, 0, "AiPlayerbot.UnmanagedDefault = 42\n"),
         )
         .expect("source config");
         write_playerbots_config(temporary.path(), true, 50).expect("playerbots config");
@@ -5867,6 +6117,14 @@ mod tests {
         assert!(config.contains("AiPlayerbot.Enabled = 1"));
         assert!(config.contains("AiPlayerbot.MaxRandomBots = 50"));
         assert!(config.contains("AiPlayerbot.RandomBotGuildCount = 0"));
+        assert!(config.contains("AiPlayerbot.DisabledWithoutRealPlayer = 1"));
+        assert!(config.contains("AiPlayerbot.BotActiveAlone = 10"));
+        assert!(config.contains("AiPlayerbot.BotActiveAloneForceWhenInZone = 1"));
+        assert!(config.contains("AiPlayerbot.LevelBrackets.Enabled = 1"));
+        assert!(config.contains("AiPlayerbot.LevelBrackets.CheckFrequency = 60"));
+        assert!(config.contains("AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight = 15.0"));
+        assert!(config.contains("AiPlayerbot.AutoTeleportForLevel = 1"));
+        assert!(config.contains("AiPlayerbot.MinRandomBotTeleportInterval = 600"));
         assert!(config.contains("AiPlayerbot.UnmanagedDefault = 42"));
         assert!(
             !temporary
@@ -5877,13 +6135,34 @@ mod tests {
     }
 
     #[test]
+    fn presence_configuration_targets_a_safe_same_faction_majority() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        install_realmbox_presence_config(&temporary.path().join("addon"), temporary.path())
+            .expect("presence dist");
+        write_realmbox_presence_config(temporary.path(), true).expect("presence config");
+
+        let config = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/realmbox-presence.conf"),
+        )
+        .expect("presence config");
+        assert!(config.contains("RealmBoxPresence.Enabled = 1"));
+        assert!(config.contains("RealmBoxPresence.TargetFraction = 0.60"));
+        assert!(config.contains("RealmBoxPresence.MaxBotsPerPlayer = 30"));
+        assert!(config.contains("RealmBoxPresence.MaxMovesPerScan = 1"));
+        assert!(config.contains("RealmBoxPresence.BotCooldownSeconds = 120"));
+        assert!(config.contains("RealmBoxPresence.ReleasedBotGraceSeconds = 300"));
+    }
+
+    #[test]
     fn prebuilt_module_configuration_uses_the_image_dist_file() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let modules = temporary.path().join("env/dist/etc/modules");
         fs::create_dir_all(&modules).expect("module dir");
         fs::write(
             modules.join("playerbots.conf.dist"),
-            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.RandomBotGuildCount = 20\nAiPlayerbot.ImageDefault = keep\n",
+            playerbots_fixture(false, 0, "AiPlayerbot.ImageDefault = keep\n"),
         )
         .expect("image dist config");
 
@@ -5899,11 +6178,7 @@ mod tests {
         let temporary = tempfile::tempdir().expect("tempdir");
         let source = temporary.path().join("modules/mod-ollama-chat/conf");
         fs::create_dir_all(&source).expect("source dir");
-        fs::write(
-            source.join("mod_ollama_chat.conf.dist"),
-            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
-        )
-        .expect("source config");
+        write_ollama_chat_fixture(&source.join("mod_ollama_chat.conf.dist"));
         write_ollama_chat_config(
             temporary.path(),
             true,
@@ -5919,9 +6194,19 @@ mod tests {
         .expect("config");
         assert!(config.contains("http://host.docker.internal:11435/api/generate"));
         assert!(config.contains("OllamaChat.MaxConcurrentQueries = 1"));
+        assert!(config.contains("OllamaChat.WorkerThreads = 1"));
+        assert!(config.contains("OllamaChat.MaxQueueDepth = 4"));
         assert!(config.contains("OllamaChat.PlayerReplyChance.Party = 100"));
+        assert!(config.contains("OllamaChat.BotReplyChance.Say = 20"));
+        assert!(config.contains("OllamaChat.BotReplyChance.Party = 50"));
+        assert!(config.contains("OllamaChat.BotConversation.MaxChainDepth = 2"));
+        assert!(config.contains("OllamaChat.BotConversation.ChanceDecayPct = 100"));
         assert!(config.contains("OllamaChat.Cooldown.PerScopeSeconds = 0"));
-        assert!(config.contains("OllamaChat.EnableRandomChatter = 0"));
+        assert!(config.contains("OllamaChat.RateLimit.GlobalPerMinute = 4"));
+        assert!(config.contains("OllamaChat.EnableRandomChatter = 1"));
+        assert!(config.contains("OllamaChat.MinRandomInterval = 90"));
+        assert!(config.contains("OllamaChat.DisableForParty = 0"));
+        assert!(config.contains("OllamaChat.DisableForCustomChannels = 1"));
         assert!(config.contains("exactly the language of the quoted player message"));
         assert!(config.contains("<player_message>{player_message}</player_message>"));
         assert!(config.contains("An English message requires an English answer"));
@@ -5931,7 +6216,7 @@ mod tests {
             .find(|line| line.starts_with("OllamaChat.ChatPromptTemplate ="))
             .expect("chat prompt");
         assert!(!chat_prompt.contains("{chat_history}"));
-        assert!(config.contains("OllamaChat.BotReplyChance.Say = 0"));
+        assert!(config.contains("OllamaChat.BotReplyChance.Channel = 0"));
         assert!(config.contains("OllamaChat.UnmanagedDefault = keep"));
         write_ollama_chat_config(
             temporary.path(),
@@ -5947,7 +6232,33 @@ mod tests {
         )
         .expect("lively config");
         assert!(lively.contains("OllamaChat.EnableRandomChatter = 1"));
-        assert!(lively.contains("OllamaChat.EventChatterBotCommentChance = 20"));
+        assert!(lively.contains("OllamaChat.EventChatterBotCommentChance = 15"));
+        assert!(lively.contains("OllamaChat.RandomChatterBotCommentChance = 50"));
+        assert!(lively.contains("OllamaChat.BotReplyChance.Say = 50"));
+        assert!(lively.contains("OllamaChat.BotReplyChance.Party = 100"));
+        assert!(lively.contains("OllamaChat.Cooldown.PerBotSeconds = 60"));
+        assert!(lively.contains("OllamaChat.Cooldown.PerScopeSeconds = 0"));
+        assert!(lively.contains("OllamaChat.RateLimit.ScopePerMinute = 4"));
+        assert!(lively.contains("OllamaChat.RateLimit.GlobalPerMinute = 6"));
+        assert!(lively.contains("OllamaChat.MinRandomInterval = 20"));
+        assert!(lively.contains("OllamaChat.MaxRandomInterval = 60"));
+        assert!(lively.contains("OllamaChat.BotConversation.MaxChainDepth = 2"));
+        write_ollama_chat_config(
+            temporary.path(),
+            true,
+            Some("qwen3:8b"),
+            DialogueChattiness::Quiet,
+        )
+        .expect("quiet dialogue");
+        let quiet = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/mod_ollama_chat.conf"),
+        )
+        .expect("quiet config");
+        assert!(quiet.contains("OllamaChat.EnableRandomChatter = 0"));
+        assert!(quiet.contains("OllamaChat.BotReplyChance.Say = 0"));
+        assert!(quiet.contains("OllamaChat.BotReplyChance.Party = 0"));
         let environment = ollama_environment(Path::new("/managed/ai/models"), true);
         assert!(environment.contains(&(OsString::from("OLLAMA_NO_CLOUD"), OsString::from("true"))));
         assert!(environment.contains(&(OsString::from("OLLAMA_MAX_QUEUE"), OsString::from("8"))));
@@ -5985,7 +6296,7 @@ mod tests {
         fs::write(server_root.join("keep-for-rollback"), "old server").expect("sentinel");
         fs::write(
             server_root.join("env/dist/etc/modules/playerbots.conf.dist"),
-            "AiPlayerbot.Enabled = 1\nAiPlayerbot.RandomBotAutologin = 1\nAiPlayerbot.MinRandomBots = 5\nAiPlayerbot.MaxRandomBots = 5\nAiPlayerbot.RandomBotGuildCount = 20\n",
+            playerbots_fixture(true, 5, ""),
         )
         .expect("playerbots config");
         let mut service = LauncherService::new(
@@ -6829,11 +7140,7 @@ mod tests {
         )
         .expect("compose");
         fs::write(&client_executable, "binary").expect("client");
-        fs::write(
-            playerbots_config,
-            "AiPlayerbot.Enabled = 0\nAiPlayerbot.RandomBotAutologin = 0\nAiPlayerbot.MinRandomBots = 0\nAiPlayerbot.MaxRandomBots = 0\nAiPlayerbot.RandomBotGuildCount = 20\n",
-        )
-        .expect("playerbots config");
+        fs::write(playerbots_config, playerbots_fixture(false, 0, "")).expect("playerbots config");
         let mut service = LauncherService::new(
             temporary.path().to_path_buf(),
             addon,
@@ -6912,7 +7219,7 @@ mod tests {
     }
 
     #[test]
-    fn running_playerbot_population_is_reloaded_without_restarting_the_client() {
+    fn running_playerbot_population_is_reloaded_after_launcher_restart() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
         let compose_file = runtime_root.join("server/compose.realmbox.yaml");
@@ -6923,11 +7230,7 @@ mod tests {
         fs::create_dir_all(module_config.parent().expect("module config")).expect("module config");
         fs::write(&compose_file, "services: {}").expect("compose");
         fs::write(&client_executable, "binary").expect("client");
-        fs::write(
-            &module_config,
-            "AiPlayerbot.Enabled = 1\nAiPlayerbot.RandomBotAutologin = 1\nAiPlayerbot.MinRandomBots = 5\nAiPlayerbot.MaxRandomBots = 5\nAiPlayerbot.RandomBotGuildCount = 20\n",
-        )
-        .expect("playerbots config");
+        fs::write(&module_config, playerbots_fixture(true, 5, "")).expect("playerbots config");
         let mut service = LauncherService::new(
             temporary.path().to_path_buf(),
             temporary.path().join("addon"),
@@ -6958,8 +7261,6 @@ mod tests {
                 runtime_release: Some(runtime_release_id()),
             })
             .expect("record");
-        service.client_process_id = Some(42);
-
         let status = service
             .update_playerbot_population(true, 150)
             .expect("hot update");
@@ -6974,8 +7275,71 @@ mod tests {
         let commands = service.runner.commands.lock().expect("commands");
         assert!(commands.iter().any(|command| {
             command.contains("exec -T worldserver sh -lc")
-                && command.contains("playerbot rndbot reload")
-                && command.contains("playerbot rndbot update")
+                && command.contains("reload config")
+                && command.contains("playerbots rndbot reload")
+                && command.contains("playerbots rndbot update")
+        }));
+    }
+
+    #[test]
+    fn running_dialogue_chattiness_is_reloaded_without_stopping_the_world() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        let dialogue_config =
+            runtime_root.join("server/env/dist/etc/modules/mod_ollama_chat.conf.dist");
+        fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
+        fs::write(&compose_file, "services: {}").expect("compose");
+        fs::write(&client_executable, "binary").expect("client");
+        write_ollama_chat_fixture(&dialogue_config);
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file,
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: true,
+                ai_model: Some("llama3.2:3b".into()),
+                ollama_executable: Some(runtime_root.join("ai/ollama")),
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: Some("test-ollama-sha256".into()),
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: Some(OLLAMA_CHAT_COMMIT.into()),
+                runtime_release: Some(runtime_release_id()),
+            })
+            .expect("record");
+        service.client_process_id = Some(42);
+
+        let status = service
+            .configure_dialogue_chattiness(DialogueChattiness::Lively)
+            .expect("live dialogue update");
+        assert_eq!(status.phase, LauncherPhase::Running);
+        assert_eq!(status.dialogue_chattiness, DialogueChattiness::Lively);
+        let config = fs::read_to_string(
+            runtime_root.join("server/env/dist/etc/modules/mod_ollama_chat.conf"),
+        )
+        .expect("updated config");
+        assert!(config.contains("OllamaChat.EnableRandomChatter = 1"));
+        assert!(config.contains("OllamaChat.BotReplyChance.Say = 50"));
+        assert!(config.contains("OllamaChat.RateLimit.GlobalPerMinute = 6"));
+        let commands = service.runner.commands.lock().expect("commands");
+        assert!(commands.iter().any(|command| {
+            command.contains("exec -T worldserver sh -lc")
+                && command.contains("reload config")
+                && command.contains("ollama reload")
         }));
         assert!(!commands.iter().any(|command| command == "terminate 42"));
     }

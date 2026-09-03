@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "channel": "technical-preview",
+  "productVersion": "0.3.2",
+  "updatedAt": "2026-09-03",
+  "publicRelease": null,
+  "latestPreview": {
+    "version": "0.2.0",
+    "visibility": "draft"
+  },
+  "platforms": {
+    "macosAppleSilicon": {
+      "status": "qualified",
+      "assetUrl": null,
+      "assetName": null,
+      "sha256": null
+    },
+    "windowsX64": {
+      "status": "experimental",
+      "assetUrl": null,
+      "assetName": null,
+      "sha256": null
+    },
+    "linux": {
+      "status": "unsupported",
+      "assetUrl": null,
+      "assetName": null,
+      "sha256": null
+    }
+  }
+}

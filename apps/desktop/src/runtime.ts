@@ -85,20 +85,21 @@ export async function chooseGameData(): Promise<string | null> {
 export async function inspectAiCapability(): Promise<AiCapability> {
   if (!window.__TAURI_INTERNALS__) {
     const visualPreview = import.meta.env.DEV && ["ready", "running", "error"].includes(new URLSearchParams(window.location.search).get("previewState") ?? "");
+    const previewEnglish = window.localStorage.getItem("realmbox-language") === "en";
     return visualPreview ? {
       state: "recommended",
-      deviceName: "Aperçu visuel",
+      deviceName: previewEnglish ? "Visual preview" : "Aperçu visuel",
       ramGb: 16,
       modelId: "preview-model",
-      modelName: "Modèle local recommandé",
+      modelName: previewEnglish ? "Recommended local model" : "Modèle local recommandé",
       ollamaModel: "preview:3b",
       grade: "A",
       estimatedTokensPerSecond: 42,
       downloadSizeGb: 2,
       diskAvailableGb: 80,
       diskSpaceSufficient: true,
-      modelLicense: "Licence du modèle affichée avant installation",
-      detail: "Exemple visuel local, sans téléchargement ni exécution.",
+      modelLicense: previewEnglish ? "Model license shown before installation" : "Licence du modèle affichée avant installation",
+      detail: previewEnglish ? "Local visual example without download or execution." : "Exemple visuel local, sans téléchargement ni exécution.",
       sourceUrl: "https://www.canirun.ai/",
     } : {
       state: "unavailable",

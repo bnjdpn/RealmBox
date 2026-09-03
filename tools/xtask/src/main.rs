@@ -64,7 +64,11 @@ fn release_check(args: Vec<String>) -> Result<()> {
         .context("workspace.package.version absent de Cargo.toml")?;
     ensure_semver(version)?;
 
-    for path in ["package.json", "apps/desktop/package.json"] {
+    for path in [
+        "package.json",
+        "apps/desktop/package.json",
+        "site/package.json",
+    ] {
         let document: serde_json::Value = read_json(&root.join(path))?;
         ensure!(
             document["version"].as_str() == Some(version),
@@ -80,7 +84,7 @@ fn release_check(args: Vec<String>) -> Result<()> {
         tauri["version"]
     );
 
-    let manifest: serde_json::Value = read_json(&root.join("site/release-manifest.json"))?;
+    let manifest: serde_json::Value = read_json(&root.join("site/public/release-manifest.json"))?;
     ensure!(
         manifest["schemaVersion"].as_u64() == Some(1),
         "release-manifest: schemaVersion doit valoir 1"
@@ -115,11 +119,11 @@ fn release_check(args: Vec<String>) -> Result<()> {
         status.contains(&format!("RealmBox {version}")),
         "STATUS.md ne mentionne pas RealmBox {version}"
     );
-    let site =
-        fs::read_to_string(root.join("site/index.html")).context("lecture de site/index.html")?;
+    let site = fs::read_to_string(root.join("site/src/components/Header.astro"))
+        .context("lecture de site/src/components/Header.astro")?;
     ensure!(
-        site.contains(&format!("<span id=\"product-version\">{version}</span>")),
-        "site/index.html ne contient pas la version de repli {version}"
+        site.contains("manifest.productVersion"),
+        "Header.astro n’affiche pas la version issue du manifeste"
     );
 
     if let Some(tag) = expected_tag {

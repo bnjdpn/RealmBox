@@ -1,0 +1,127 @@
+import type { SiteCopy } from "./types";
+
+export const en: SiteCopy = {
+  lang: "en",
+  alternateLang: "fr",
+  alternateLabel: "FR",
+  title: "RealmBox — World of Warcraft locally with AzerothCore and bots",
+  description: "Run your own Azeroth on your computer. RealmBox installs AzerothCore, populates the world with Playerbots, and opens WoW from one application.",
+  nav: { features: "RealmBox", install: "Install", technology: "Technology", faq: "FAQ", github: "GitHub" },
+  hero: {
+    eyebrow: "World of Warcraft · entirely local",
+    title: "Azeroth at home.",
+    accent: "Bots by your side.",
+    body: "RealmBox turns your compatible World of Warcraft copy into a local solo adventure: AzerothCore runs the world, Playerbots populate it, and the launcher handles the entire setup.",
+    download: "Download RealmBox",
+    install: "See how to install",
+    screenshotAsset: "launcher-ready-en.webp",
+    screenshotAlt: "The RealmBox launcher ready to start World of Warcraft locally",
+    screenshotCaption: "The real RealmBox launcher · no game resources are distributed",
+  },
+  promise: {
+    eyebrow: "WoW without server administration",
+    title: "You play. RealmBox handles the rest.",
+    body: "No command line, no database configuration, and no public server to maintain.",
+    items: [
+      { number: "01", title: "Azeroth runs on your computer", body: "AzerothCore, MySQL, and the game services are installed inside a local Docker environment." },
+      { number: "02", title: "The world is populated", body: "Playerbots adds autonomous adventurers and lets you form a balanced party of companions." },
+      { number: "03", title: "One button to play", body: "RealmBox starts WoW and every service in the right order, then stops them when the client closes." },
+    ],
+  },
+  companions: {
+    eyebrow: "Built-in Playerbots",
+    title: "Azeroth is no longer empty when you play alone.",
+    body: "Meet bots in the world, form a party of four companions, and direct them through the RealmBox addon inside WoW.",
+    points: ["Population matched to your computer’s memory", "Balanced tank, healer, and damage party", "Follow, attack, stay, regroup, or release", "Optional local dialogue through Ollama"],
+    screenshotAsset: "launcher-companions-en.webp",
+    screenshotAlt: "Playerbots population settings in RealmBox",
+  },
+  install: {
+    eyebrow: "Guided installation",
+    title: "From zero to Azeroth in five steps.",
+    intro: "RealmBox needs Docker Desktop and the files from a compatible WoW copy. It neither provides nor uploads game data.",
+    steps: [
+      {
+        title: "Install Docker Desktop",
+        body: "Start Docker Desktop and keep it running. RealmBox installs AzerothCore, the local database, and Playerbots inside it.",
+        links: [{ href: "https://www.docker.com/products/docker-desktop/", label: "Download Docker Desktop" }],
+      },
+      {
+        title: "Download French or English WoW data",
+        body: "RealmBox needs the Data folder from a compatible client. Open the ChromieCraft page in your preferred language, then choose the corresponding client or language pack offered there.",
+        links: [
+          { href: "https://chromiecraft.com/fr/telechargements/", label: "Client et téléchargements en français" },
+          { href: "https://chromiecraft.com/en/downloads/", label: "English client and downloads" },
+        ],
+      },
+      {
+        title: "Download RealmBox",
+        body: "Get the Apple Silicon Mac DMG or the Windows x64 installer from GitHub Releases, then verify the provided SHA-256.",
+        links: [{ href: "https://github.com/bnjdpn/RealmBox/releases", label: "Open RealmBox Releases" }],
+      },
+      { title: "Choose the WoW folder", body: "Select the folder containing Data in RealmBox. The launcher checks the files without modifying your source copy." },
+      { title: "Install, then play", body: "Choose the bot population, start installation, and click Play when RealmBox reports that everything is ready." },
+    ],
+    requirementsTitle: "System requirements",
+    requirements: [
+      { label: "System", value: "Apple Silicon Mac or Windows x64 PC" },
+      {
+        label: "Containers",
+        value: "Docker Desktop installed, running, and assigned memory",
+        links: [{ href: "https://www.docker.com/products/docker-desktop/", label: "Docker Desktop" }],
+      },
+      { label: "Storage", value: "At least 24 GiB free, plus the optional local model" },
+      { label: "Game", value: "A complete compatible WoW Data folder" },
+      { label: "Network", value: "Internet access for the first installation" },
+    ],
+    capacityTitle: "Memory assigned to Docker",
+    capacities: [
+      { memory: "under 12 GiB", bots: "5 bots max" },
+      { memory: "12–19 GiB", bots: "50 bots max" },
+      { memory: "20–27 GiB", bots: "100 bots max" },
+      { memory: "28 GiB or more", bots: "150 bots max" },
+    ],
+    note: "The first launch prepares local data and can take time. Later launches are much faster.",
+  },
+  technology: {
+    eyebrow: "Under the hood",
+    title: "A complete local stack controlled by the launcher.",
+    body: "RealmBox is a Tauri and React desktop application. It orchestrates free-software components pinned to immutable versions while keeping server details out of the player flow.",
+    nodes: [
+      { label: "Your WoW client", detail: "Read-only Data" },
+      { label: "RealmBox", detail: "Setup and supervision" },
+      { label: "AzerothCore", detail: "Authserver + worldserver" },
+      { label: "Playerbots", detail: "Population and companions" },
+      { label: "WoW", detail: "OpenWoW or Wow.exe" },
+    ],
+    facts: [
+      { title: "Locally extracted data", body: "maps, vmaps, mmaps, and dbc are produced from your own Data folder." },
+      { title: "Isolated services", body: "Game ports stay bound to 127.0.0.1 and MySQL is not exposed on the host." },
+      { title: "Protected updates", body: "A complete, verified character backup is mandatory before any migration." },
+      { title: "Optional dialogue", body: "Ollama and a small local model can power bot replies without cloud access during play." },
+    ],
+  },
+  local: {
+    eyebrow: "Your data stays with you",
+    title: "A personal Azeroth, not a public server.",
+    body: "RealmBox creates no remote account and sends no game files. Your world, characters, backups, and logs stay on your computer.",
+    points: ["No automatic telemetry", "No MPQ upload", "Ports restricted to localhost", "Redacted shareable diagnostics", "Backups outside the replaceable runtime", "No proprietary data inside RealmBox"],
+  },
+  faq: {
+    eyebrow: "Frequently asked questions",
+    title: "The essentials before starting setup.",
+    items: [
+      { question: "Is this actually World of Warcraft?", answer: "RealmBox uses the files from a compatible World of Warcraft: Wrath of the Lich King copy and starts a local Azeroth through AzerothCore. RealmBox contains and distributes no proprietary game files." },
+      { question: "Do I need a subscription or an online server?", answer: "RealmBox does not connect to official servers and needs no subscription for its local operation. You must still use a game copy you are authorized to own." },
+      { question: "What do the bots do?", answer: "Playerbots populates Azeroth with autonomous characters. The RealmBox addon can also gather four bots near you to form a playable party." },
+      { question: "Which ChromieCraft download should I choose?", answer: "Use the French or English page for your preferred language. RealmBox then detects the locale actually present in the selected Data folder. On Apple Silicon Macs, it reuses that data with OpenWoW instead of running the Windows Wow.exe." },
+      { question: "Does RealmBox modify my WoW folder?", answer: "No. The selected folder is checked and used read-only during extraction. RealmBox-managed files live in its own local directory." },
+    ],
+  },
+  footer: {
+    independent: "Independent free-software project, not affiliated with Blizzard Entertainment or ChromieCraft.",
+    license: "AGPL-3.0",
+    documentation: "Documentation",
+    source: "Source code",
+  },
+};

@@ -1,0 +1,95 @@
+From: RealmBox
+Subject: [PATCH] Bound ambient chatter and reset schedules on reload
+Upstream-Commit: a9d14b0b8955be136e657ac168dd255f5281a535
+
+diff --git a/src/mod-ollama-chat_command.cpp b/src/mod-ollama-chat_command.cpp
+index 22d03df..3157a3f 100644
+--- a/src/mod-ollama-chat_command.cpp
++++ b/src/mod-ollama-chat_command.cpp
+@@ -6,6 +6,7 @@
+ #include "mod-ollama-chat_capability.h"
+ #include "mod-ollama-chat_dispatch.h"
+ #include "mod-ollama-chat_governor.h"
++#include "mod-ollama-chat_random.h"
+ #include "mod-ollama-chat_response.h"
+ #include "mod-ollama-chat_roleplay.h"
+ #include "mod-ollama-chat-utilities.h"
+@@ -64,6 +65,7 @@ bool OllamaChatConfigCommand::HandleOllamaReloadCommand(ChatHandler* handler)
+     sConfigMgr->Reload();
+     LoadOllamaChatConfig();
+     Roleplay_Load();
++    OllamaRandomChatter_ResetSchedule();
+ 
+     // Re-probe: the operator may have just pointed the module at a different
+     // model, and think-mode support is per-model.
+diff --git a/src/mod-ollama-chat_random.cpp b/src/mod-ollama-chat_random.cpp
+index 710070b..9797b2c 100644
+--- a/src/mod-ollama-chat_random.cpp
++++ b/src/mod-ollama-chat_random.cpp
+@@ -201,6 +201,12 @@ void OllamaRandomChatter_ForgetBot(ObjectGuid botGuid)
+     g_nextRandomChatTime.erase(botGuid.GetRawValue());
+ }
+ 
++void OllamaRandomChatter_ResetSchedule()
++{
++    std::lock_guard<std::mutex> lock(g_scheduleMutex);
++    g_nextRandomChatTime.clear();
++}
++
+ OllamaBotRandomChatter::OllamaBotRandomChatter() : WorldScript("OllamaBotRandomChatter") { }
+ 
+ void OllamaBotRandomChatter::OnUpdate(uint32 diff)
+@@ -284,6 +290,12 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+ 
+     const time_t now = time(nullptr);
+ 
++    // This limit is deliberately local to one ambient-chatter pass and one
++    // destination scope. A busy party or city must not consume another
++    // audience's allowance, and a full dispatcher queue must not count as a
++    // submitted line.
++    std::unordered_map<std::string, uint32_t> successfulSubmissionsByScope;
++
+     for (auto const& itr : allPlayers)
+     {
+         Player* bot = itr.second;
+@@ -363,6 +375,16 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+             source == SRC_GUILD_LOCAL ? bot->GetGuildId() : 0,
+             bot->GetZoneId());
+ 
++        const auto submittedIt = successfulSubmissionsByScope.find(scopeKey);
++        const uint32_t submittedForScope = submittedIt == successfulSubmissionsByScope.end()
++            ? 0
++            : submittedIt->second;
++        if (submittedForScope >= g_RandomChatterMaxBotsPerPlayer)
++        {
++            reschedule();
++            continue;
++        }
++
+         if (!Governor_CanSend(bot->GetGUID(), scopeKey))
+         {
+             reschedule();
+@@ -390,7 +412,10 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+         request.triggerBotReplies = true;
+ 
+         if (OllamaDispatch_Submit(std::move(request)))
++        {
+             Topics_NoteUsed(bot->GetGUID(), topic.key);
++            ++successfulSubmissionsByScope[scopeKey];
++        }
+ 
+         reschedule();
+     }
+diff --git a/src/mod-ollama-chat_random.h b/src/mod-ollama-chat_random.h
+index c910af9..fa27e52 100644
+--- a/src/mod-ollama-chat_random.h
++++ b/src/mod-ollama-chat_random.h
+@@ -20,4 +20,8 @@ private:
+ // bot GUID the server had ever seen and never released one.
+ void OllamaRandomChatter_ForgetBot(ObjectGuid botGuid);
+ 
++// Clears every pending random-chatter deadline. Config hot reloads call this
++// after changing the min/max interval so bots do not keep stale deadlines.
++void OllamaRandomChatter_ResetSchedule();
++
+ #endif // MOD_OLLAMA_CHAT_RANDOM_H

@@ -1,0 +1,36 @@
+---
+import type { SiteCopy } from "../content/types";
+import manifest from "../../public/release-manifest.json";
+
+interface Props { copy: SiteCopy }
+const { copy } = Astro.props;
+const base = import.meta.env.BASE_URL;
+---
+
+<header class="site-header">
+  <div class="shell header-inner">
+    <a class="brand" href={`${base}${copy.lang}/`} aria-label="RealmBox">
+      <img src={`${base}assets/icon.svg`} width="36" height="36" alt="" />
+      <span>RealmBox</span>
+    </a>
+    <span class="version">v{manifest.productVersion}</span>
+    <nav class="desktop-nav" aria-label={copy.lang === "fr" ? "Navigation principale" : "Primary navigation"}>
+      <a href="#realmbox">{copy.nav.features}</a>
+      <a href="#install">{copy.nav.install}</a>
+      <a href="#technology">{copy.nav.technology}</a>
+      <a href="#faq">{copy.nav.faq}</a>
+      <a href="https://github.com/bnjdpn/RealmBox">{copy.nav.github}</a>
+    </nav>
+    <details class="mobile-menu">
+      <summary>Menu</summary>
+      <nav aria-label={copy.lang === "fr" ? "Navigation mobile" : "Mobile navigation"}>
+        <a href="#realmbox">{copy.nav.features}</a>
+        <a href="#install">{copy.nav.install}</a>
+        <a href="#technology">{copy.nav.technology}</a>
+        <a href="#faq">{copy.nav.faq}</a>
+        <a href="https://github.com/bnjdpn/RealmBox">{copy.nav.github}</a>
+      </nav>
+    </details>
+    <a class="language" href={`${base}${copy.alternateLang}/`} hreflang={copy.alternateLang}>{copy.alternateLabel}</a>
+  </div>
+</header>

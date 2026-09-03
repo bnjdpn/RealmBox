@@ -2,7 +2,7 @@
   <Script file="RealmBoxCompanions.lua"/>
 
   <Frame name="RealmBoxCompanionsFrame" parent="UIParent" hidden="true" movable="true" enableMouse="true">
-    <Size x="290" y="292"/>
+    <Size x="290" y="326"/>
     <Anchors><Anchor point="CENTER" relativePoint="CENTER" x="330" y="0"/></Anchors>
     <Backdrop bgFile="Interface/Tooltips/UI-Tooltip-Background" edgeFile="Interface/Tooltips/UI-Tooltip-Border" tile="true" tileSize="16" edgeSize="12"><BackgroundInsets left="3" right="3" top="3" bottom="3"/></Backdrop>
     <Scripts>
@@ -29,8 +29,9 @@
       <Button name="$parentAttack" inherits="UIPanelButtonTemplate" text="Attaquer"><Size x="115" y="24"/><Anchors><Anchor point="LEFT" relativeTo="$parentFollow" relativePoint="RIGHT" x="10"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("attack")</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "attack")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
       <Button name="$parentStay" inherits="UIPanelButtonTemplate" text="Attendre ici"><Size x="115" y="24"/><Anchors><Anchor point="TOPLEFT" x="25" y="-172"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("stay")</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "stay")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
       <Button name="$parentRegroup" inherits="UIPanelButtonTemplate" text="Se regrouper"><Size x="115" y="24"/><Anchors><Anchor point="LEFT" relativeTo="$parentStay" relativePoint="RIGHT" x="10"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("regroup")</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "regroup")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
-      <Button name="$parentBoost" inherits="UIPanelButtonTemplate" text="Capacités fortes : serveur"><Size x="240" y="24"/><Anchors><Anchor point="TOP" y="-206"/></Anchors><Scripts><OnClick>RealmBoxCompanions_ToggleBoost()</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "boost")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
-      <Button name="$parentLeave" inherits="UIPanelButtonTemplate" text="Libérer l'équipe"><Size x="240" y="24"/><Anchors><Anchor point="TOP" y="-240"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("leave")</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "leave")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
+      <Button name="$parentBehavior" inherits="UIPanelButtonTemplate" text="Comportement : escorte"><Size x="240" y="24"/><Anchors><Anchor point="TOP" y="-206"/></Anchors><Scripts><OnClick>RealmBoxCompanions_CycleBehavior()</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "behavior")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
+      <Button name="$parentBoost" inherits="UIPanelButtonTemplate" text="Capacités fortes : serveur"><Size x="240" y="24"/><Anchors><Anchor point="TOP" y="-240"/></Anchors><Scripts><OnClick>RealmBoxCompanions_ToggleBoost()</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "boost")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
+      <Button name="$parentLeave" inherits="UIPanelButtonTemplate" text="Libérer l'équipe"><Size x="240" y="24"/><Anchors><Anchor point="TOP" y="-274"/></Anchors><Scripts><OnClick>RealmBoxCompanions_Run("leave")</OnClick><OnEnter>RealmBoxCompanions_Action_OnEnter(self, "leave")</OnEnter><OnLeave>GameTooltip:Hide()</OnLeave></Scripts></Button>
     </Frames>
   </Frame>
 

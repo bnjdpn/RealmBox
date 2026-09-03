@@ -9,6 +9,12 @@ local COMMANDS = {
   leave = "leave",
 }
 
+local BEHAVIOR_COMMANDS = {
+  escort = "nc +follow,-stay,-new rpg,-grind",
+  guard = "nc +stay,-follow,-new rpg,-grind",
+  autonomous = "nc +new rpg,+grind,-follow,-stay",
+}
+
 local PARTY_TEMPLATE = {
   { classToken = "PALADIN", command = ".playerbots bot addclass paladin" },
   { classToken = "PRIEST", command = ".playerbots bot addclass priest" },
@@ -52,6 +58,11 @@ local STRINGS = {
     stay = "Attendre ici",
     regroup = "Se regrouper",
     leave = "Libérer l'équipe",
+    behaviorEscort = "Comportement : escorte",
+    behaviorGuard = "Comportement : garde",
+    behaviorAutonomous = "Comportement : autonomes",
+    behaviorHelp = "Change à la volée les stratégies non-combat de l'équipe. L'état affiché est la dernière préférence envoyée.",
+    released = "Équipe libérée · les bots reprennent leurs activités",
     boostDefault = "Capacités fortes : serveur",
     boostOn = "Capacités fortes : demandées",
     boostOff = "Capacités fortes : limitées",
@@ -86,6 +97,11 @@ local STRINGS = {
     stay = "Stay here",
     regroup = "Regroup",
     leave = "Release party",
+    behaviorEscort = "Behavior: escort",
+    behaviorGuard = "Behavior: guard",
+    behaviorAutonomous = "Behavior: autonomous",
+    behaviorHelp = "Changes the party's non-combat strategies live. The displayed state is the last preference sent.",
+    released = "Party released · bots resume their activities",
     boostDefault = "Strong abilities: server",
     boostOn = "Strong abilities: requested",
     boostOff = "Strong abilities: limited",
@@ -244,6 +260,17 @@ local function ApplyTranslations()
   RealmBoxCompanionsFrameLanguage:SetText(Text("language"))
 end
 
+local function BehaviorText()
+  local behavior = RealmBoxCompanionsDB.behaviorPreference
+  if behavior == "guard" then
+    return Text("behaviorGuard")
+  end
+  if behavior == "autonomous" then
+    return Text("behaviorAutonomous")
+  end
+  return Text("behaviorEscort")
+end
+
 local function UpdateGroupState()
   if not initialized then
     return
@@ -273,8 +300,10 @@ local function UpdateGroupState()
   SetButtonEnabled(RealmBoxCompanionsFrameAttack, hasParty and IsAttackableTarget())
   SetButtonEnabled(RealmBoxCompanionsFrameStay, hasParty)
   SetButtonEnabled(RealmBoxCompanionsFrameRegroup, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameBehavior, hasParty)
   SetButtonEnabled(RealmBoxCompanionsFrameBoost, hasParty)
   SetButtonEnabled(RealmBoxCompanionsFrameLeave, hasParty)
+  RealmBoxCompanionsFrameBehavior:SetText(BehaviorText())
 
   if RealmBoxCompanionsDB.boostPreference == true then
     RealmBoxCompanionsFrameBoost:SetText(Text("boostOn"))
@@ -467,8 +496,40 @@ function RealmBoxCompanions_Run(action)
     SetStatus(Text("noTarget"))
     return
   end
+  if action == "follow" then
+    RealmBoxCompanionsDB.behaviorPreference = "escort"
+  elseif action == "stay" then
+    RealmBoxCompanionsDB.behaviorPreference = "guard"
+  elseif action == "leave" then
+    RealmBoxCompanionsDB.behaviorPreference = "autonomous"
+    SendChatMessage(BEHAVIOR_COMMANDS.autonomous, "PARTY")
+    SendChatMessage(command, "PARTY")
+    SetStatus(Text("released"))
+    UpdateGroupState()
+    return
+  end
   SendChatMessage(command, "PARTY")
   SetStatus(string.format(Text("commandSent"), Text(action)))
+  UpdateGroupState()
+end
+
+function RealmBoxCompanions_CycleBehavior()
+  if GetNumPartyMembers() == 0 then
+    SetStatus(Text("noParty"))
+    return
+  end
+
+  local current = RealmBoxCompanionsDB.behaviorPreference
+  local nextBehavior = "escort"
+  if current == "escort" or current == nil then
+    nextBehavior = "guard"
+  elseif current == "guard" then
+    nextBehavior = "autonomous"
+  end
+  RealmBoxCompanionsDB.behaviorPreference = nextBehavior
+  SendChatMessage(BEHAVIOR_COMMANDS[nextBehavior], "PARTY")
+  SetStatus(string.format(Text("commandSent"), BehaviorText()))
+  UpdateGroupState()
 end
 
 function RealmBoxCompanions_ToggleBoost()
@@ -523,7 +584,9 @@ end
 
 function RealmBoxCompanions_Action_OnEnter(button, action)
   local title = Text(action)
-  if action == "boost" then
+  if action == "behavior" then
+    title = BehaviorText()
+  elseif action == "boost" then
     if RealmBoxCompanionsDB.boostPreference == true then
       title = Text("boostOn")
     elseif RealmBoxCompanionsDB.boostPreference == false then
@@ -538,6 +601,8 @@ function RealmBoxCompanions_Action_OnEnter(button, action)
     GameTooltip:AddLine(Text("noParty"), 1, 0.35, 0.35)
   elseif action == "attack" and not IsAttackableTarget() then
     GameTooltip:AddLine(Text("noTarget"), 1, 0.35, 0.35)
+  elseif action == "behavior" then
+    GameTooltip:AddLine(Text("behaviorHelp"), 0.8, 0.8, 0.8, true)
   elseif action == "boost" then
     GameTooltip:AddLine(Text("boostHelp"), 0.8, 0.8, 0.8, true)
   else
