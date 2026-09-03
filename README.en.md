@@ -10,7 +10,7 @@
 
 RealmBox is a Windows x64 and Apple Silicon macOS launcher for a fully local 3.3.5a world. On first launch, it asks for a compatible game-data folder owned by the player, then prepares the client, local database, AzerothCore server, and Playerbots. On capable machines it can also run Ollama and `mod-ollama-chat` for locally generated companion dialogue.
 
-The 0.2.4 interface is available in French and English. It separates **My world**, **Companions**, **Dialogue**, and **Diagnostics**, shows a short cause with a useful recovery action, and keeps server details out of the player flow.
+The 0.3.0 interface is available in French and English. It separates **My world**, **Companions**, **Dialogue**, and **Diagnostics**, shows a short cause with a useful recovery action, and keeps server details out of the player flow.
 
 The launcher and website share an original northern-fantasy portal identity: two distinct raster panoramas created for RealmBox with ImageGen and an R/B medallion. The launcher is a fixed 1024 × 640 scene centered on the current status and one primary action; language, companions, dialogue, and diagnostics stay in settings. No game asset or remote font is used. The repository documents the [design system](docs/DESIGN_SYSTEM.md), [historical reinterpretation audit](docs/WOTLK_ERA_VISUAL_AUDIT.md), and [provenance of every visual asset](docs/ASSET_PROVENANCE.md).
 
@@ -69,13 +69,14 @@ See [ROADMAP.md](ROADMAP.md) and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) 
 
 ## Development
 
-The currently observed development host is Apple Silicon macOS. Windows x64 has a dedicated CI build and still requires a full manual smoke test on Windows.
+The currently observed development host is Apple Silicon macOS. Windows x64 has a dedicated CI build and still requires a full manual smoke test on Windows. The player path currently needs Docker Desktop, but no longer needs Git or curl: RealmBox uses its integrated HTTP client and immutable server images. Node, pnpm, Git and Rust are developer-only requirements.
 
 ```sh
 pnpm install
 pnpm dev          # Tauri application with real commands
 pnpm dev:preview  # browser-only UI preview
 pnpm verify
+cargo xtask release check  # versions, manifest, and platform-status consistency
 python3 -m http.server 1421 --directory site  # Pages website preview
 ```
 

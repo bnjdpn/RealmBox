@@ -17,4 +17,25 @@ ChromieCraft décrit son téléchargement comme un client 3.3.5a propre avec leu
 
 OpenWoW annonce Windows, macOS et Linux, lit les données d’une copie existante et ne distribue aucun asset du jeu. Son README qualifie encore le projet d’expérimental ; la compatibilité doit rester prouvée fonction par fonction.
 
+## Matrice fonctionnelle OpenWoW 0.1.2
+
+`Observé` signifie vu sur le parcours réel macOS Apple Silicon décrit dans `STATUS.md`. `Non rejoué` et `Non testé` restent des absences de preuve, jamais des échecs supposés.
+
+| Fonction | macOS Apple Silicon | Windows x64 | Linux |
+|---|---|---|---|
+| Connexion au royaume local | Observé | Non testé | Non testé |
+| Création et sélection de personnage | Observé | Non testé | Non testé |
+| Déplacement | Observé | Non testé | Non testé |
+| Combat et sorts | Non rejoué dans la dernière qualification | Non testé | Non testé |
+| Inventaire | Non rejoué | Non testé | Non testé |
+| Quêtes | Quête de départ obtenue | Non testé | Non testé |
+| Chat FR/EN | Observé avec un bot | Non testé | Non testé |
+| Addon RealmBox | Équipe formée ; nouvelle UI à rejouer | Non testé | Non testé |
+| Son | Non testé | Non testé | Non testé |
+| Réglages graphiques | Non testé | Non testé | Non testé |
+| Fenêtré / plein écran | Non testé | Non testé | Non testé |
+| Fermeture et relance supervisées | Fermeture observée ; alerte de restauration à durcir | Non testé | Non testé |
+
+Le suivi de qualification restant est l’issue GitHub `Compléter la matrice de compatibilité OpenWoW` du jalon `0.4 — Public beta`.
+
 Sources : [téléchargements ChromieCraft](https://chromiecraft.com/en/downloads/) et [README OpenWoW](https://github.com/rkabachenko/OpenWow-snapshot).

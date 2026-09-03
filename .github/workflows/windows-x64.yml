@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   launcher:
+    name: Windows x64
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

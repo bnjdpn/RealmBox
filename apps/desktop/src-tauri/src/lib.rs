@@ -10,8 +10,9 @@ use std::{
 
 use ai::AiCapability;
 use launcher::{
-    ClientChoice, GameDataInspection, InstallationOptions, LauncherPhase, LauncherProgress,
-    LauncherService, LauncherStatus, RealmDiagnostics, SystemCommandRunner,
+    ClientChoice, DialogueChattiness, ErrorCode, GameDataInspection, InstallationOptions,
+    LauncherPhase, LauncherProgress, LauncherService, LauncherStatus, OperationComponent,
+    OperationStep, RealmDiagnostics, SystemCommandRunner,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -26,6 +27,46 @@ struct InstallRealmRequest {
     bot_count: usize,
     ai_enabled: bool,
     ai_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+enum RecoveryAction {
+    Retry,
+    ChooseGameData,
+    StartDocker,
+    OpenDiagnostics,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherCommandError {
+    code: ErrorCode,
+    component: &'static str,
+    technical_detail: Option<String>,
+    recovery_actions: Vec<RecoveryAction>,
+}
+
+impl LauncherCommandError {
+    fn new(detail: impl Into<String>, fallback: ErrorCode, component: &'static str) -> Self {
+        let detail = detail.into();
+        let code = ErrorCode::from_detail(&detail, fallback);
+        let recovery_actions = match code {
+            ErrorCode::DockerMissing | ErrorCode::DockerNotRunning => {
+                vec![RecoveryAction::StartDocker, RecoveryAction::Retry]
+            }
+            ErrorCode::GameDataIncomplete | ErrorCode::GameBuildUnsupported => {
+                vec![RecoveryAction::ChooseGameData, RecoveryAction::Retry]
+            }
+            _ => vec![RecoveryAction::Retry, RecoveryAction::OpenDiagnostics],
+        };
+        Self {
+            code,
+            component,
+            technical_detail: Some(detail),
+            recovery_actions,
+        }
+    }
 }
 
 fn emit_progress(app: &AppHandle, progress: LauncherProgress) {
@@ -67,10 +108,17 @@ fn monitor_client(app: AppHandle, service: Arc<Mutex<LauncherService<SystemComma
                             emit_progress(
                                 &app,
                                 LauncherProgress {
+                                    operation_id: format!("client-monitor-{process_id}"),
+                                    component: OperationComponent::Client,
+                                    step: OperationStep::Stop,
                                     phase: LauncherPhase::Error,
                                     message: "Arrêt automatique incomplet".into(),
                                     detail: Some(error),
+                                    error_code: Some(ErrorCode::OperationUnavailable),
                                     progress: 0,
+                                    completed_bytes: None,
+                                    total_bytes: None,
+                                    cancellable: false,
                                 },
                             );
                         }
@@ -81,10 +129,17 @@ fn monitor_client(app: AppHandle, service: Arc<Mutex<LauncherService<SystemComma
                     emit_progress(
                         &app,
                         LauncherProgress {
+                            operation_id: format!("client-monitor-{process_id}"),
+                            component: OperationComponent::Client,
+                            step: OperationStep::Validate,
                             phase: LauncherPhase::Error,
                             message: "Surveillance du client interrompue".into(),
                             detail: Some(error),
+                            error_code: Some(ErrorCode::OperationUnavailable),
                             progress: 0,
+                            completed_bytes: None,
+                            total_bytes: None,
+                            cancellable: false,
                         },
                     );
                     break;
@@ -98,7 +153,7 @@ fn monitor_client(app: AppHandle, service: Arc<Mutex<LauncherService<SystemComma
 async fn bootstrap_launcher(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<LauncherStatus, String> {
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
     let status = tauri::async_runtime::spawn_blocking(move || {
@@ -108,7 +163,16 @@ async fn bootstrap_launcher(
             .bootstrap(|progress| emit_progress(&app_handle, progress))
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        )
+    })?
+    .map_err(|error| {
+        LauncherCommandError::new(error, ErrorCode::InstallationStateUnreadable, "launcher")
+    })?;
     if status.phase == LauncherPhase::Running {
         monitor_client(app, Arc::clone(&state.0));
     }
@@ -120,7 +184,7 @@ async fn install_realm(
     app: AppHandle,
     state: State<'_, AppState>,
     request: InstallRealmRequest,
-) -> Result<LauncherStatus, String> {
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -140,7 +204,14 @@ async fn install_realm(
             )
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::InstallationIncomplete, "server"))
 }
 
 #[tauri::command]
@@ -150,7 +221,7 @@ async fn start_realm(
     bots_enabled: bool,
     bot_count: usize,
     ai_enabled: bool,
-) -> Result<LauncherStatus, String> {
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
     let status = tauri::async_runtime::spawn_blocking(move || {
@@ -165,7 +236,14 @@ async fn start_realm(
             )
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::ClientLaunchFailed, "client"))?;
     if status.phase == LauncherPhase::Running {
         monitor_client(app, Arc::clone(&state.0));
     }
@@ -173,16 +251,23 @@ async fn start_realm(
 }
 
 #[tauri::command]
-async fn inspect_ai_capability(state: State<'_, AppState>) -> Result<AiCapability, String> {
+async fn inspect_ai_capability(
+    state: State<'_, AppState>,
+) -> Result<AiCapability, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
-        Ok(service
-            .lock()
-            .map_err(|_| "état du lanceur indisponible".to_string())?
-            .inspect_ai_capability())
+        Ok::<AiCapability, String>(
+            service
+                .lock()
+                .map_err(|_| "état du lanceur indisponible".to_string())?
+                .inspect_ai_capability(),
+        )
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "ai")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "ai"))
 }
 
 #[tauri::command]
@@ -191,7 +276,7 @@ async fn configure_local_dialogue(
     state: State<'_, AppState>,
     enabled: bool,
     model: Option<String>,
-) -> Result<LauncherStatus, String> {
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -203,23 +288,50 @@ async fn configure_local_dialogue(
             })
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "ai")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "ai"))
 }
 
 #[tauri::command]
-async fn inspect_game_data(game_data_path: String) -> Result<GameDataInspection, String> {
+async fn configure_dialogue_chattiness(
+    state: State<'_, AppState>,
+    chattiness: DialogueChattiness,
+) -> Result<LauncherStatus, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .configure_dialogue_chattiness(chattiness)
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "ai")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "ai"))
+}
+
+#[tauri::command]
+async fn inspect_game_data(
+    game_data_path: String,
+) -> Result<GameDataInspection, LauncherCommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         launcher::inspect_game_data_root(Path::new(&game_data_path))
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "client")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::GameDataIncomplete, "client"))
 }
 
 #[tauri::command]
 async fn change_game_data_path(
     state: State<'_, AppState>,
     game_data_path: String,
-) -> Result<LauncherStatus, String> {
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
         service
@@ -228,11 +340,17 @@ async fn change_game_data_path(
             .change_game_data_path(Path::new(&game_data_path))
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "client")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::GameDataIncomplete, "client"))
 }
 
 #[tauri::command]
-async fn stop_realm(app: AppHandle, state: State<'_, AppState>) -> Result<LauncherStatus, String> {
+async fn stop_realm(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -242,7 +360,38 @@ async fn stop_realm(app: AppHandle, state: State<'_, AppState>) -> Result<Launch
             .stop(|progress| emit_progress(&app_handle, progress))
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "launcher"))
+}
+
+#[tauri::command]
+async fn restore_last_recovery(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LauncherStatus, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .restore_last_recovery(|progress| emit_progress(&app_handle, progress))
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::RecoveryFailed, "database"))
 }
 
 #[tauri::command]
@@ -250,7 +399,7 @@ async fn update_playerbot_population(
     state: State<'_, AppState>,
     bots_enabled: bool,
     bot_count: usize,
-) -> Result<LauncherStatus, String> {
+) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
         service
@@ -259,11 +408,16 @@ async fn update_playerbot_population(
             .update_playerbot_population(bots_enabled, bot_count)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "bots")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "bots"))
 }
 
 #[tauri::command]
-async fn get_realm_diagnostics(state: State<'_, AppState>) -> Result<RealmDiagnostics, String> {
+async fn get_realm_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<RealmDiagnostics, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
         service
@@ -272,7 +426,14 @@ async fn get_realm_diagnostics(state: State<'_, AppState>) -> Result<RealmDiagno
             .diagnostics()
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "launcher"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -290,7 +451,8 @@ pub fn run() {
             } else {
                 development_addon
             };
-            let service = LauncherService::new(app_data, addon_source, SystemCommandRunner)?;
+            let service =
+                LauncherService::new(app_data, addon_source, SystemCommandRunner::default())?;
             app.manage(AppState(Arc::new(Mutex::new(service))));
             Ok(())
         })
@@ -299,13 +461,33 @@ pub fn run() {
             install_realm,
             start_realm,
             stop_realm,
+            restore_last_recovery,
             update_playerbot_population,
             get_realm_diagnostics,
             inspect_ai_capability,
             configure_local_dialogue,
+            configure_dialogue_chattiness,
             inspect_game_data,
             change_game_data_path
         ])
         .run(tauri::generate_context!())
         .expect("RealmBox n'a pas pu initialiser sa boucle applicative");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_errors_expose_stable_codes_and_recovery_actions() {
+        let error = LauncherCommandError::new(
+            "Docker Desktop doit être démarré: moteur indisponible",
+            ErrorCode::OperationUnavailable,
+            "launcher",
+        );
+        let value = serde_json::to_value(error).expect("serialized error");
+        assert_eq!(value["code"], "dockerNotRunning");
+        assert_eq!(value["component"], "launcher");
+        assert_eq!(value["recoveryActions"][0], "startDocker");
+    }
 }

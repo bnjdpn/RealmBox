@@ -12,15 +12,15 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 - [x] Gérer la population Playerbots à chaud depuis RealmBox, sans redémarrer le client.
 - [x] Protéger les personnages contre les mises à jour : réinstallation refusée, suppression de volume interdite et sauvegarde SQL vérifiée avant migration.
 - [x] Préparer et publier atomiquement le serveur compatible dialogues en conservant l’ancien runtime hors du dossier actif.
-- [ ] Ajouter la restauration automatique depuis le rollback conservé.
+- [x] Ajouter la restauration automatique depuis le rollback conservé, avec sauvegarde de sécurité et retour automatique si l’import échoue.
 - [x] Afficher une erreur courte, sa cause concrète et l’action de récupération ; réserver les détails techniques au diagnostic.
 - [ ] Afficher une progression d’installation par composant avec débit, volume restant et durée estimée quand ces valeurs sont mesurables.
-- [ ] Publier les images serveur multiarchitecture épinglées pour supprimer la compilation C++ du parcours joueur.
+- [x] Publier les images serveur multiarchitecture épinglées pour supprimer la compilation C++ du parcours joueur.
 - [ ] Tester le parcours complet sur Windows 11 avec `Wow.exe` et OpenWoW.
 
 ## P1 — Interface du launcher
 
-- [ ] Refaire l’interface sur la composition du launcher Vanilla/Wrath : cadre, navigation, panneau d’actualité, progression et bouton principal.
+- [x] Refaire l’interface avec une identité fantasy originale : cadre, état courant, progression et action principale.
 - [x] Supprimer les slogans et les phrases décoratives. Chaque texte doit indiquer un état, une action, une capacité ou une erreur.
 - [x] Utiliser des ressources originales ou redistribuables ; ne pas intégrer d’illustration, logo, police ou texture Blizzard au dépôt.
 - [ ] Ajouter une vue Compagnons : population demandée, population réellement active, équipe, mémoire utilisée et actions sûres.
@@ -30,7 +30,7 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 ## P2 — Profils matériels
 
 - [ ] Profils `Petit`, `Équilibré`, `Dense` et `Personnalisé` couvrant bots, mémoire Docker, extraction et IA locale.
-- [ ] Refuser une configuration dangereuse et expliquer la limite détectée au lieu de l’appliquer silencieusement.
+- [x] Refuser une configuration dangereuse et montrer séparément la population souhaitée et la valeur sûre réellement appliquée.
 - [ ] Mesurer le démarrage réel et proposer un profil inférieur si le serveur dépasse son budget mémoire.
 - [ ] Conserver séparément le choix du joueur et la valeur effectivement appliquée.
 
@@ -38,10 +38,10 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 
 - [x] Intégrer Ollama et `mod-ollama-chat` derrière une liste de modèles autorisés et une écoute locale.
 - [x] Faire décider RealmBox depuis CanIRun, puis télécharger le modèle sur demande avec sa taille annoncée avant confirmation et son manifeste vérifié par digest.
-- [ ] Afficher l’espace disque disponible et refuser le téléchargement si la marge est insuffisante.
+- [x] Afficher l’espace disque disponible et refuser le téléchargement si la marge est insuffisante.
 - [ ] Tester en jeu une conversation complète avec un bot et mesurer RAM, latence et débit.
 - [x] Permettre d’activer et désactiver les dialogues sans réinstaller le royaume, monde fermé pour recharger le module.
-- [ ] Permettre de changer le niveau de bavardage.
+- [x] Permettre de changer le niveau de bavardage, monde arrêté, avec trois presets bornés.
 - [x] Configurer un mode sans réseau pendant le jeu et rendre ce statut visible.
 
 ## Choix du client

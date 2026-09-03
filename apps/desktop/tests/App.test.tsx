@@ -1,5 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
 import type { LauncherStatus } from "../src/types";
@@ -8,12 +9,17 @@ const missing: LauncherStatus = {
   phase: "needsGameData",
   message: "Données de jeu requises",
   detail: null,
+  errorCode: null,
   progress: 0,
   installed: false,
+  recoveryAvailable: false,
   botsEnabled: true,
   botCount: 50,
+  requestedBotCount: 50,
+  appliedBotCount: 50,
   aiEnabled: false,
   aiModel: null,
+  dialogueChattiness: "balanced",
   gameDataPath: null,
   accountName: null,
   accountPassword: null,
@@ -53,7 +59,9 @@ const runtime = vi.hoisted(() => ({
   changeGameDataPath: vi.fn(),
   chooseGameData: vi.fn(),
   configureLocalDialogue: vi.fn(),
+  configureDialogueChattiness: vi.fn(),
   installRealm: vi.fn(),
+  restoreLastRecovery: vi.fn(),
   startRealm: vi.fn(),
   stopRealm: vi.fn(),
   subscribeLauncherProgress: vi.fn(),
@@ -79,10 +87,12 @@ describe("RealmBox launcher", () => {
       detail: "Données WotLK frFR reconnues ; la build 12340 sera confirmée par les extracteurs locaux.",
     });
     runtime.installRealm.mockResolvedValue(ready);
+    runtime.restoreLastRecovery.mockResolvedValue(ready);
     runtime.startRealm.mockResolvedValue(running);
     runtime.stopRealm.mockResolvedValue(ready);
     runtime.configureLocalDialogue.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b" });
-    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...running, botCount: 100 });
+    runtime.configureDialogueChattiness.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b", dialogueChattiness: "lively" });
+    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...running, botCount: 100, requestedBotCount: 100, appliedBotCount: 100 });
     runtime.getRealmDiagnostics.mockResolvedValue({
       summary: "Aucune erreur récente détectée dans les journaux gérés.",
       component: "launcher",
@@ -101,6 +111,8 @@ describe("RealmBox launcher", () => {
       grade: "S",
       estimatedTokensPerSecond: 177,
       downloadSizeGb: 2,
+      diskAvailableGb: 80,
+      diskSpaceSufficient: true,
       modelLicense: "Llama 3.2 Community License",
       detail: "CanIRun le classe confortable.",
       sourceUrl: "https://www.canirun.ai/",
@@ -242,7 +254,7 @@ describe("RealmBox launcher", () => {
     await user.click(screen.getByRole("button", { name: /réglages/i }));
     await user.click(screen.getByRole("button", { name: /compagnons/i }));
     expect(screen.getByRole("heading", { name: /population du monde/i })).toBeVisible();
-    await user.selectOptions(screen.getByRole("combobox"), "100");
+    await user.selectOptions(screen.getByRole("combobox", { name: /profil du monde/i }), "dense");
     await user.click(screen.getByRole("button", { name: /appliquer maintenant/i }));
 
     expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(true, 100);
@@ -266,6 +278,25 @@ describe("RealmBox launcher", () => {
     await user.click(screen.getByRole("button", { name: /télécharger et activer/i }));
     expect(runtime.configureLocalDialogue).toHaveBeenCalledWith(true, "llama3.2:3b");
     expect(await screen.findByText(/prochain lancement du monde/i)).toBeVisible();
+  });
+
+  it("saves a bounded dialogue chattiness while the world is stopped", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({
+      ...ready,
+      aiEnabled: true,
+      aiModel: "llama3.2:3b",
+      dialogueChattiness: "balanced",
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /^jouer$/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /dialogues/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /niveau de bavardage/i }), "lively");
+
+    expect(runtime.configureDialogueChattiness).toHaveBeenCalledWith("lively");
+    expect(await screen.findByText(/niveau de bavardage enregistré/i)).toBeVisible();
   });
 
   it("changes the installed game folder without reinstalling the realm", async () => {
@@ -322,7 +353,7 @@ describe("RealmBox launcher", () => {
 
   it("keeps technical details in the separate diagnostics view", async () => {
     const user = userEvent.setup();
-    runtime.bootstrapLauncher.mockResolvedValue({ ...missing, phase: "error", detail: "Docker Desktop doit être démarré: secret detail" });
+    runtime.bootstrapLauncher.mockResolvedValue({ ...missing, phase: "error", errorCode: "dockerNotRunning", detail: "Docker Desktop doit être démarré: secret detail" });
     render(<App />);
     expect(await screen.findByText(/Docker Desktop n’est pas prêt/i)).toBeVisible();
     expect(screen.queryByText(/secret detail/i)).not.toBeInTheDocument();
@@ -332,11 +363,29 @@ describe("RealmBox launcher", () => {
     expect(screen.getByText(/secret detail/i)).toBeVisible();
   });
 
+  it("offers and runs the verified recovery point without opening diagnostics", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({
+      ...ready,
+      phase: "error",
+      errorCode: "migrationFailed",
+      recoveryAvailable: true,
+      detail: "migration interrompue",
+    });
+    render(<App />);
+
+    const restore = await screen.findByRole("button", { name: /restaurer la dernière version fonctionnelle/i });
+    await user.click(restore);
+
+    expect(runtime.restoreLastRecovery).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
   it("shows immediate feedback while retrying and handles another failure", async () => {
     const user = userEvent.setup();
-    let rejectRetry: (reason: string) => void = () => undefined;
+    let rejectRetry: (reason: unknown) => void = () => undefined;
     runtime.bootstrapLauncher
-      .mockResolvedValueOnce({ ...missing, phase: "error", detail: "Docker Desktop doit être démarré" })
+      .mockResolvedValueOnce({ ...missing, phase: "error", errorCode: "dockerNotRunning", detail: "Docker Desktop doit être démarré" })
       .mockImplementationOnce(() => new Promise((_, reject) => { rejectRetry = reject; }));
     render(<App />);
 
@@ -346,7 +395,7 @@ describe("RealmBox launcher", () => {
     expect(screen.getByRole("heading", { name: /vérification en cours/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /patientez/i })).toBeDisabled();
 
-    rejectRetry("Docker Desktop doit être démarré: moteur indisponible");
+    rejectRetry({ code: "dockerNotRunning", component: "launcher", technicalDetail: "moteur indisponible", recoveryActions: ["startDocker", "retry"] });
     expect(await screen.findByRole("button", { name: /réessayer/i })).toBeEnabled();
     expect(screen.getByText(/Docker Desktop n’est pas prêt/i)).toBeVisible();
   });
@@ -355,6 +404,7 @@ describe("RealmBox launcher", () => {
     runtime.bootstrapLauncher.mockResolvedValue({
       ...ready,
       phase: "error",
+      errorCode: "worldServerTimeout",
       detail: "docker a échoué; voir /runtime/server/logs/start-database.log",
     });
     render(<App />);
@@ -383,5 +433,48 @@ describe("RealmBox launcher", () => {
 
     const progress = await screen.findByRole("progressbar", { name: /progression/i });
     expect(progress).toHaveAttribute("aria-valuenow", "42");
+  });
+
+  it("traps focus in the settings dialog and restores the trigger", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    render(<App />);
+
+    const trigger = await screen.findByRole("button", { name: /réglages/i });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("omits the local logs path from copied diagnostics", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^diagnostic/i }));
+    await user.click(await screen.findByRole("button", { name: /copier le diagnostic/i }));
+
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("logs=[local path omitted]"));
+    expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining("/RealmBox/logs"));
+  });
+
+  it("has no automatically detectable accessibility violation in the main flow and dialog", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    await screen.findByRole("heading", { name: /préparer mon monde/i });
+    const options = { rules: { "color-contrast": { enabled: false } } };
+    expect((await axe.run(container, options)).violations).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    expect((await axe.run(container, options)).violations).toEqual([]);
   });
 });

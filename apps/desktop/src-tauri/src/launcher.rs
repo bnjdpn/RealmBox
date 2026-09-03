@@ -1,11 +1,13 @@
 use std::{
+    collections::HashMap,
     env,
     ffi::{OsStr, OsString},
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
+    sync::Mutex,
     thread,
     time::{Duration, Instant},
 };
@@ -38,6 +40,8 @@ const WORLD_SERVER_IMAGE: Option<&str> = option_env!("REALMBOX_WORLD_SERVER_IMAG
 const DB_IMPORT_IMAGE: Option<&str> = option_env!("REALMBOX_DB_IMPORT_IMAGE");
 const TOOLS_IMAGE: Option<&str> = option_env!("REALMBOX_TOOLS_IMAGE");
 const DEFAULT_DOCKER_BUILD_JOBS: usize = 2;
+const BASE_INSTALLATION_DISK_BYTES: u64 = 24 * 1024 * 1024 * 1024;
+const DISK_SAFETY_MARGIN_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const PLAYER_ACCOUNT_NAME: &str = "REALMBOX";
 const PLAYER_ACCOUNT_PASSWORD: &str = "REALMBOX";
 const SRP6_MODULUS: &str = "894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7";
@@ -59,6 +63,15 @@ pub enum ClientChoice {
     #[default]
     ManagedOpenWow,
     OriginalWindows,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DialogueChattiness {
+    Quiet,
+    #[default]
+    Balanced,
+    Lively,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -124,6 +137,7 @@ pub enum LauncherPhase {
     Starting,
     Running,
     Stopping,
+    Recovering,
     Error,
 }
 
@@ -135,6 +149,101 @@ pub enum ComponentState {
     Running,
     Stopped,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationComponent {
+    Launcher,
+    GameData,
+    Client,
+    Server,
+    Database,
+    Bots,
+    Ai,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationStep {
+    Validate,
+    Download,
+    Verify,
+    Extract,
+    Configure,
+    Start,
+    Stop,
+    Restore,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ErrorCode {
+    DockerMissing,
+    DockerNotRunning,
+    PortUnavailable,
+    GameDataIncomplete,
+    GameBuildUnsupported,
+    DownloadInterrupted,
+    ChecksumMismatch,
+    BackupFailed,
+    MigrationFailed,
+    RecoveryFailed,
+    ClientLaunchFailed,
+    WorldServerTimeout,
+    InstallationIncomplete,
+    InstallationStateUnreadable,
+    OperationUnavailable,
+}
+
+impl ErrorCode {
+    pub fn from_detail(detail: &str, fallback: Self) -> Self {
+        let detail = detail.to_lowercase();
+        if detail.contains("docker desktop doit être installé") {
+            Self::DockerMissing
+        } else if detail.contains("docker desktop doit être démarré")
+            || detail.contains("docker desktop doit être installé et démarré")
+        {
+            Self::DockerNotRunning
+        } else if detail.contains("port")
+            && (detail.contains("occup") || detail.contains("indisponible"))
+        {
+            Self::PortUnavailable
+        } else if detail.contains("mpq")
+            || detail.contains("archive wotlk")
+            || detail.contains("archive de locale")
+        {
+            Self::GameDataIncomplete
+        } else if detail.contains("build 12340") || detail.contains("version du client") {
+            Self::GameBuildUnsupported
+        } else if detail.contains("sha-256")
+            || detail.contains("checksum")
+            || detail.contains("empreinte")
+        {
+            Self::ChecksumMismatch
+        } else if detail.contains("sauvegarde") || detail.contains("dump") {
+            Self::BackupFailed
+        } else if detail.contains("migration") || detail.contains("db-import") {
+            Self::MigrationFailed
+        } else if detail.contains("restaur") || detail.contains("récupération") {
+            Self::RecoveryFailed
+        } else if detail.contains("télécharg")
+            || detail.contains("curl")
+            || detail.contains("download")
+        {
+            Self::DownloadInterrupted
+        } else if detail.contains("openwow")
+            || detail.contains("wow.exe")
+            || detail.contains("client")
+        {
+            Self::ClientLaunchFailed
+        } else if detail.contains("worldserver") || detail.contains("serveur") {
+            Self::WorldServerTimeout
+        } else {
+            fallback
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -152,12 +261,17 @@ pub struct LauncherStatus {
     pub phase: LauncherPhase,
     pub message: String,
     pub detail: Option<String>,
+    pub error_code: Option<ErrorCode>,
     pub progress: u8,
     pub installed: bool,
+    pub recovery_available: bool,
     pub bots_enabled: bool,
     pub bot_count: usize,
+    pub requested_bot_count: usize,
+    pub applied_bot_count: usize,
     pub ai_enabled: bool,
     pub ai_model: Option<String>,
+    pub dialogue_chattiness: DialogueChattiness,
     pub game_data_path: Option<String>,
     pub account_name: Option<&'static str>,
     pub account_password: Option<&'static str>,
@@ -170,10 +284,17 @@ pub struct LauncherStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LauncherProgress {
+    pub operation_id: String,
+    pub component: OperationComponent,
+    pub step: OperationStep,
     pub phase: LauncherPhase,
     pub message: String,
     pub detail: Option<String>,
+    pub error_code: Option<ErrorCode>,
     pub progress: u8,
+    pub completed_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub cancellable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -202,6 +323,13 @@ pub struct InstallationOptions {
     pub ai_model: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldPreferences {
+    bots_enabled: bool,
+    requested_bot_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InstallationRecord {
@@ -224,6 +352,27 @@ struct InstallationRecord {
     ollama_chat_commit: Option<String>,
     #[serde(default)]
     runtime_release: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecoveryPoint {
+    stem: String,
+    backup: PathBuf,
+    rollback_root: PathBuf,
+    rollback_server: PathBuf,
+    metadata: Option<RecoveryMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryMetadata {
+    schema_version: u32,
+    stem: String,
+    source_runtime_release: Option<String>,
+    target_runtime_release: String,
+    ai_enabled: bool,
+    ai_model: Option<String>,
+    ollama_chat_commit: Option<String>,
 }
 
 pub trait CommandRunner: Send + Sync + 'static {
@@ -249,6 +398,64 @@ pub trait CommandRunner: Send + Sync + 'static {
         _error_path: &Path,
     ) -> Result<(), String> {
         self.run_long(program, args, current_dir, output_path)
+    }
+    fn run_with_input(
+        &self,
+        program: &str,
+        args: &[OsString],
+        current_dir: Option<&Path>,
+        input_path: &Path,
+        log_path: &Path,
+    ) -> Result<(), String> {
+        let _ = input_path;
+        self.run_long(program, args, current_dir, log_path)
+    }
+    fn download_verified(
+        &self,
+        url: &str,
+        expected_sha256: &str,
+        destination: &Path,
+        log_path: &Path,
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<(), String> {
+        self.run_long(
+            "curl",
+            &[
+                "-L".into(),
+                "--fail".into(),
+                "--show-error".into(),
+                "--output".into(),
+                destination.as_os_str().into(),
+                url.into(),
+            ],
+            None,
+            log_path,
+        )?;
+        let total = fs::metadata(destination)
+            .map(|metadata| metadata.len())
+            .ok();
+        progress(total.unwrap_or(0), total);
+        verify_sha256(destination, expected_sha256)
+    }
+    fn post_json(&self, url: &str, body: &str, timeout: Duration) -> Result<String, String> {
+        self.run(
+            "curl",
+            &[
+                "--silent".into(),
+                "--show-error".into(),
+                "--fail".into(),
+                "--max-time".into(),
+                timeout.as_secs().to_string().into(),
+                "--request".into(),
+                "POST".into(),
+                url.into(),
+                "--header".into(),
+                "content-type: application/json".into(),
+                "--data".into(),
+                body.into(),
+            ],
+            None,
+        )
     }
     fn run_long_with_env(
         &self,
@@ -279,7 +486,144 @@ pub trait CommandRunner: Send + Sync + 'static {
 }
 
 #[derive(Debug, Default)]
-pub struct SystemCommandRunner;
+pub struct SystemCommandRunner {
+    owned_processes: Mutex<HashMap<u32, Child>>,
+    #[cfg(windows)]
+    job_handles: Mutex<HashMap<u32, isize>>,
+}
+
+impl SystemCommandRunner {
+    #[cfg(windows)]
+    fn assign_job_object(
+        &self,
+        process_id: u32,
+        child: &std::process::Child,
+    ) -> Result<(), String> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::JobObjects::{
+                AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+                SetInformationJobObject,
+            },
+        };
+
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job.is_null() {
+            return Err(format!(
+                "création du Job Object Windows impossible: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if configured == 0 {
+            unsafe { CloseHandle(job) };
+            return Err(format!(
+                "configuration du Job Object Windows impossible: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let assigned = unsafe { AssignProcessToJobObject(job, child.as_raw_handle().cast()) };
+        if assigned == 0 {
+            unsafe { CloseHandle(job) };
+            return Err(format!(
+                "association du processus au Job Object Windows impossible: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        self.job_handles
+            .lock()
+            .map_err(|_| "registre des Job Objects indisponible".to_string())?
+            .insert(process_id, job as isize);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn windows_job_is_running(&self, process_id: u32) -> Result<bool, String> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
+            QueryInformationJobObject,
+        };
+        let handle = self
+            .job_handles
+            .lock()
+            .map_err(|_| "registre des Job Objects indisponible".to_string())?
+            .get(&process_id)
+            .copied()
+            .ok_or_else(|| "processus non possédé par RealmBox".to_string())?;
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        let queried = unsafe {
+            QueryInformationJobObject(
+                handle as _,
+                JobObjectBasicAccountingInformation,
+                (&raw mut accounting).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if queried == 0 {
+            return Err(format!(
+                "inspection du Job Object Windows impossible: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(accounting.ActiveProcesses > 0)
+    }
+
+    #[cfg(windows)]
+    fn close_windows_job(&self, process_id: u32) -> Result<(), String> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        let handle = self
+            .job_handles
+            .lock()
+            .map_err(|_| "registre des Job Objects indisponible".to_string())?
+            .remove(&process_id)
+            .ok_or_else(|| "Job Object du processus introuvable".to_string())?;
+        if unsafe { CloseHandle(handle as _) } == 0 {
+            return Err(format!(
+                "fermeture du Job Object Windows impossible: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl Drop for SystemCommandRunner {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        if let Ok(handles) = self.job_handles.get_mut() {
+            for (_, handle) in handles.drain() {
+                unsafe { CloseHandle(handle as _) };
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SystemCommandRunner {
+    fn drop(&mut self) {
+        if let Ok(processes) = self.owned_processes.get_mut() {
+            for (process_id, mut child) in processes.drain() {
+                let _ = Command::new("kill")
+                    .args(["-TERM", &format!("-{process_id}")])
+                    .output();
+                let _ = child.wait();
+            }
+        }
+    }
+}
 
 fn resolve_program(program: &str) -> PathBuf {
     resolve_program_with(
@@ -454,6 +798,72 @@ impl CommandRunner for SystemCommandRunner {
         }
     }
 
+    fn run_with_input(
+        &self,
+        program: &str,
+        args: &[OsString],
+        current_dir: Option<&Path>,
+        input_path: &Path,
+        log_path: &Path,
+    ) -> Result<(), String> {
+        if let Some(parent) = log_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let input = File::open(input_path).map_err(|error| error.to_string())?;
+        let log = File::create(log_path).map_err(|error| error.to_string())?;
+        let errors = log.try_clone().map_err(|error| error.to_string())?;
+        let mut command = Command::new(resolve_program(program));
+        command
+            .args(args)
+            .stdin(Stdio::from(input))
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(errors));
+        if let Some(directory) = current_dir {
+            command.current_dir(directory);
+        }
+        let status = command
+            .status()
+            .map_err(|error| format!("impossible de lancer {program}: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{program} a échoué ({status}); voir {}",
+                log_path.display()
+            ))
+        }
+    }
+
+    fn download_verified(
+        &self,
+        url: &str,
+        expected_sha256: &str,
+        destination: &Path,
+        log_path: &Path,
+        progress: &mut dyn FnMut(u64, Option<u64>),
+    ) -> Result<(), String> {
+        download_verified_http(url, expected_sha256, destination, log_path, progress)
+    }
+
+    fn post_json(&self, url: &str, body: &str, timeout: Duration) -> Result<String, String> {
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(timeout.min(Duration::from_secs(5)))
+            .timeout(timeout)
+            .build()
+            .map_err(|error| format!("initialisation HTTP impossible: {error}"))?;
+        let response = client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_owned())
+            .send()
+            .map_err(|error| format!("requête HTTP impossible: {error}"))?
+            .error_for_status()
+            .map_err(|error| format!("réponse HTTP refusée: {error}"))?;
+        response
+            .text()
+            .map_err(|error| format!("réponse HTTP illisible: {error}"))
+    }
+
     fn run_long_with_env(
         &self,
         program: &Path,
@@ -503,82 +913,124 @@ impl CommandRunner for SystemCommandRunner {
         }
         let log = File::create(log_path).map_err(|error| error.to_string())?;
         let errors = log.try_clone().map_err(|error| error.to_string())?;
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(args)
             .envs(environment.iter().cloned())
             .current_dir(current_dir.unwrap_or_else(|| Path::new(".")))
             .stdout(Stdio::from(log))
-            .stderr(Stdio::from(errors))
+            .stderr(Stdio::from(errors));
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("impossible de lancer {}: {error}", program.display()))?;
         let process_id = child.id();
-        thread::spawn(move || {
+        #[cfg(windows)]
+        if let Err(error) = self.assign_job_object(process_id, &child) {
+            let _ = child.kill();
             let _ = child.wait();
-        });
+            return Err(error);
+        }
+        let mut owned_processes = self
+            .owned_processes
+            .lock()
+            .map_err(|_| "registre des processus possédés indisponible".to_string())?;
+        if owned_processes.contains_key(&process_id) {
+            let _ = child.kill();
+            let _ = child.wait();
+            #[cfg(windows)]
+            let _ = self.close_windows_job(process_id);
+            return Err("collision d’identifiant de processus possédé".into());
+        }
+        owned_processes.insert(process_id, child);
         Ok(process_id)
     }
 
     fn terminate(&self, process_id: u32) -> Result<(), String> {
+        let mut child = self
+            .owned_processes
+            .lock()
+            .map_err(|_| "registre des processus possédés indisponible".to_string())?
+            .remove(&process_id)
+            .ok_or_else(|| {
+                "RealmBox refuse d’arrêter un processus qu’il n’a pas créé".to_string()
+            })?;
+
         #[cfg(unix)]
-        return self
-            .run(
-                "kill",
-                &[
-                    OsString::from("-TERM"),
-                    OsString::from(process_id.to_string()),
-                ],
-                None,
-            )
-            .map(|_| ());
+        {
+            let already_exited = child
+                .try_wait()
+                .map_err(|error| format!("inspection du processus impossible: {error}"))?
+                .is_some();
+            let result = Command::new("kill")
+                .args(["-TERM", &format!("-{process_id}")])
+                .output()
+                .map_err(|error| format!("arrêt du groupe de processus impossible: {error}"));
+            if let Ok(output) = &result
+                && !output.status.success()
+                && !already_exited
+            {
+                return Err(format!(
+                    "arrêt du groupe de processus impossible: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            result?;
+            if !already_exited {
+                child
+                    .wait()
+                    .map_err(|error| format!("attente du processus impossible: {error}"))?;
+            }
+            return Ok(());
+        }
 
         #[cfg(windows)]
-        return self
-            .run(
-                "taskkill",
-                &[
-                    OsString::from("/PID"),
-                    OsString::from(process_id.to_string()),
-                    OsString::from("/T"),
-                ],
-                None,
-            )
-            .map(|_| ());
+        {
+            let result = self.close_windows_job(process_id);
+            let _ = child.wait();
+            return result;
+        }
 
         #[allow(unreachable_code)]
         Err("arrêt de processus non pris en charge sur cette plateforme".into())
     }
 
     fn is_process_running(&self, process_id: u32) -> Result<bool, String> {
+        let mut owned_processes = self
+            .owned_processes
+            .lock()
+            .map_err(|_| "registre des processus possédés indisponible".to_string())?;
+        let Some(child) = owned_processes.get_mut(&process_id) else {
+            return Ok(false);
+        };
         #[cfg(unix)]
         {
-            let status = Command::new("kill")
-                .args(["-0", &process_id.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map_err(|error| {
-                    format!("impossible d’inspecter le processus {process_id}: {error}")
-                })?;
-            Ok(status.success())
+            let running = child
+                .try_wait()
+                .map_err(|error| format!("inspection du processus impossible: {error}"))?
+                .is_none();
+            if running {
+                return Ok(true);
+            }
+            let _ = Command::new("kill")
+                .args(["-TERM", &format!("-{process_id}")])
+                .output();
+            owned_processes.remove(&process_id);
+            Ok(false)
         }
 
         #[cfg(windows)]
         {
-            let output = Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {process_id}"), "/FO", "CSV", "/NH"])
-                .output()
-                .map_err(|error| {
-                    format!("impossible d’inspecter le processus {process_id}: {error}")
-                })?;
-            if !output.status.success() {
-                return Err(format!(
-                    "tasklist a échoué pendant l’inspection du processus {process_id}"
-                ));
+            let running = self.windows_job_is_running(process_id)?;
+            if !running {
+                self.close_windows_job(process_id)?;
+                owned_processes.remove(&process_id);
             }
-            let expected = format!("\"{process_id}\"");
-            Ok(String::from_utf8_lossy(&output.stdout)
-                .split(',')
-                .any(|field| field.trim() == expected))
+            Ok(running)
         }
     }
 
@@ -629,6 +1081,8 @@ pub struct LauncherService<R: CommandRunner> {
     runner: R,
     client_process_id: Option<u32>,
     ai_process_id: Option<u32>,
+    operation_sequence: u64,
+    active_operation_id: String,
 }
 
 impl<R: CommandRunner> LauncherService<R> {
@@ -640,11 +1094,86 @@ impl<R: CommandRunner> LauncherService<R> {
             runner,
             client_process_id: None,
             ai_process_id: None,
+            operation_sequence: 0,
+            active_operation_id: "launcher-0".into(),
         })
     }
 
+    fn begin_operation(&mut self, name: &str) {
+        self.operation_sequence = self.operation_sequence.saturating_add(1);
+        self.active_operation_id = format!("{name}-{}", self.operation_sequence);
+    }
+
+    fn dialogue_chattiness(&self) -> DialogueChattiness {
+        fs::read(self.app_data.join("dialogue-preferences.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn world_preferences(&self, record: Option<&InstallationRecord>) -> WorldPreferences {
+        fs::read(self.app_data.join("world-preferences.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_else(|| WorldPreferences {
+                bots_enabled: record.is_none_or(|record| record.bots_enabled),
+                requested_bot_count: record.map_or_else(default_bot_count, |record| {
+                    normalize_bot_count(record.bot_count)
+                }),
+            })
+    }
+
+    fn save_world_preferences(&self, preferences: WorldPreferences) -> Result<(), String> {
+        write_atomic(
+            &self.app_data.join("world-preferences.json"),
+            &serde_json::to_vec_pretty(&preferences).map_err(|error| error.to_string())?,
+        )
+    }
+
+    pub fn configure_dialogue_chattiness(
+        &mut self,
+        chattiness: DialogueChattiness,
+    ) -> Result<LauncherStatus, String> {
+        self.begin_operation("dialogue-chattiness");
+        let record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        if self.client_process_id.is_some() || self.worldserver_is_running(&record)? {
+            return Err("arrêtez le monde avant de modifier le niveau de bavardage".into());
+        }
+        write_atomic(
+            &self.app_data.join("dialogue-preferences.json"),
+            &serde_json::to_vec_pretty(&chattiness).map_err(|error| error.to_string())?,
+        )?;
+        let server_root = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        write_ollama_chat_config(
+            server_root,
+            record.ai_enabled,
+            record.ai_model.as_deref(),
+            chattiness,
+        )?;
+        Ok(self.installed_status(
+            &record,
+            LauncherPhase::Ready,
+            "Niveau de bavardage enregistré",
+            false,
+        ))
+    }
+
     pub fn inspect_ai_capability(&self) -> AiCapability {
-        ai::inspect_ai_capability(&self.runner)
+        let mut capability = ai::inspect_ai_capability(&self.runner);
+        if let Ok(available) = fs2::available_space(&self.app_data) {
+            capability.disk_available_gb = Some(available as f32 / 1024_f32.powi(3));
+            capability.disk_space_sufficient = capability
+                .ollama_model
+                .as_deref()
+                .and_then(ai::model_download_bytes)
+                .map(|required| available >= required + DISK_SAFETY_MARGIN_BYTES);
+        }
+        capability
     }
 
     pub fn client_process_id(&self) -> Option<u32> {
@@ -690,12 +1219,17 @@ impl<R: CommandRunner> LauncherService<R> {
                 phase: LauncherPhase::Error,
                 message: "Installation incomplète".into(),
                 detail: Some("Un composant géré a disparu. Une réparation sera nécessaire.".into()),
+                error_code: Some(ErrorCode::InstallationIncomplete),
                 progress: 0,
                 installed: false,
+                recovery_available: find_latest_recovery_point(&self.app_data).is_ok(),
                 bots_enabled: record.bots_enabled,
                 bot_count: record.bot_count,
+                requested_bot_count: self.world_preferences(Some(&record)).requested_bot_count,
+                applied_bot_count: record.bot_count,
                 ai_enabled: record.ai_enabled,
                 ai_model: record.ai_model.clone(),
+                dialogue_chattiness: self.dialogue_chattiness(),
                 game_data_path: Some(record.game_data_root.display().to_string()),
                 account_name: None,
                 account_password: None,
@@ -715,13 +1249,21 @@ impl<R: CommandRunner> LauncherService<R> {
             Err(error) => LauncherStatus {
                 phase: LauncherPhase::Error,
                 message: "État local illisible".into(),
+                error_code: Some(ErrorCode::from_detail(
+                    &error,
+                    ErrorCode::InstallationStateUnreadable,
+                )),
                 detail: Some(error),
                 progress: 0,
                 installed: false,
+                recovery_available: find_latest_recovery_point(&self.app_data).is_ok(),
                 bots_enabled: true,
                 bot_count: default_bot_count(),
+                requested_bot_count: default_bot_count(),
+                applied_bot_count: default_bot_count(),
                 ai_enabled: false,
                 ai_model: None,
+                dialogue_chattiness: self.dialogue_chattiness(),
                 game_data_path: None,
                 account_name: None,
                 account_password: None,
@@ -769,6 +1311,7 @@ impl<R: CommandRunner> LauncherService<R> {
         &mut self,
         selected_path: &Path,
     ) -> Result<LauncherStatus, String> {
+        self.begin_operation("change-game-data");
         let mut record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
@@ -861,6 +1404,7 @@ impl<R: CommandRunner> LauncherService<R> {
     where
         F: FnMut(LauncherProgress),
     {
+        self.begin_operation("install");
         self.ensure_fresh_install_target()?;
         let InstallationOptions {
             client_choice,
@@ -888,8 +1432,16 @@ impl<R: CommandRunner> LauncherService<R> {
             None
         };
         let game_data_root = validate_game_data_root(selected_path)?;
-        self.emit(
+        let required_disk_bytes = BASE_INSTALLATION_DISK_BYTES
+            + ai_model
+                .as_deref()
+                .and_then(ai::model_download_bytes)
+                .unwrap_or(0);
+        ensure_available_space(&self.app_data, required_disk_bytes)?;
+        self.emit_component(
             &mut progress,
+            OperationComponent::GameData,
+            OperationStep::Validate,
             LauncherPhase::Installing,
             3,
             "Validation des données 3.3.5a",
@@ -914,7 +1466,9 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .unwrap_or_default();
-        let bot_count = effective_playerbot_count(&docker_memory, bots_enabled, bot_count);
+        let requested_bot_count = normalize_bot_count(bot_count);
+        let bot_count =
+            effective_playerbot_count(&docker_memory, bots_enabled, requested_bot_count);
         let server_images = embedded_server_images()?;
         let docker_build_jobs = if server_images.is_some() {
             DEFAULT_DOCKER_BUILD_JOBS
@@ -946,21 +1500,36 @@ impl<R: CommandRunner> LauncherService<R> {
             let (staged_client_executable, client_sha256) = match client_choice {
                 ClientChoice::ManagedOpenWow => {
                     let client_archive = staging.join(platform.openwow_archive);
-                    self.runner.run_long(
-                        "curl",
-                        &[
-                            "-L".into(),
-                            "--fail".into(),
-                            "--show-error".into(),
-                            "--output".into(),
-                            client_archive.as_os_str().into(),
-                            platform.openwow_url.into(),
-                        ],
-                        None,
+                    self.download_component(
+                        &mut progress,
+                        OperationComponent::Client,
+                        8,
+                        20,
+                        "Téléchargement du client OpenWoW",
+                        platform.openwow_url,
+                        platform.openwow_sha256,
+                        &client_archive,
                         &logs.join("openwow-download.log"),
                     )?;
-                    verify_sha256(&client_archive, platform.openwow_sha256)?;
+                    self.emit_component(
+                        &mut progress,
+                        OperationComponent::Client,
+                        OperationStep::Verify,
+                        LauncherPhase::Installing,
+                        20,
+                        "Vérification du client OpenWoW",
+                        Some("Empreinte SHA-256 conforme"),
+                    );
                     let client_root = staging.join("client");
+                    self.emit_component(
+                        &mut progress,
+                        OperationComponent::Client,
+                        OperationStep::Extract,
+                        LauncherPhase::Installing,
+                        21,
+                        "Extraction du client OpenWoW",
+                        None,
+                    );
                     extract_zip(&self.runner, &client_archive, &client_root)?;
                     let executable = client_root.join(platform.openwow_executable);
                     if !executable.is_file() {
@@ -983,8 +1552,10 @@ impl<R: CommandRunner> LauncherService<R> {
 
             let server_root = staging.join("server");
             if server_images.is_some() {
-                self.emit(
+                self.emit_component(
                     &mut progress,
+                    OperationComponent::Server,
+                    OperationStep::Configure,
                     LauncherPhase::Installing,
                     22,
                     "Préparation du serveur précompilé",
@@ -1060,22 +1631,37 @@ impl<R: CommandRunner> LauncherService<R> {
                     Some("Ollama 0.33.2 · exécution locale"),
                 );
                 let archive = staging.join(platform.ollama_archive);
-                self.runner.run_long(
-                    "curl",
-                    &[
-                        "-L".into(),
-                        "--fail".into(),
-                        "--show-error".into(),
-                        "--output".into(),
-                        archive.as_os_str().into(),
-                        platform.ollama_url.into(),
-                    ],
-                    None,
+                self.download_component(
+                    &mut progress,
+                    OperationComponent::Ai,
+                    38,
+                    46,
+                    "Téléchargement du moteur de dialogue",
+                    platform.ollama_url,
+                    platform.ollama_sha256,
+                    &archive,
                     &logs.join("ollama-download.log"),
                 )?;
-                verify_sha256(&archive, platform.ollama_sha256)?;
+                self.emit_component(
+                    &mut progress,
+                    OperationComponent::Ai,
+                    OperationStep::Verify,
+                    LauncherPhase::Installing,
+                    46,
+                    "Vérification du moteur de dialogue",
+                    Some("Empreinte SHA-256 conforme"),
+                );
                 let ai_root = staging.join("ai");
                 fs::create_dir_all(&ai_root).map_err(|error| error.to_string())?;
+                self.emit_component(
+                    &mut progress,
+                    OperationComponent::Ai,
+                    OperationStep::Extract,
+                    LauncherPhase::Installing,
+                    47,
+                    "Extraction du moteur de dialogue",
+                    None,
+                );
                 extract_ollama(&self.runner, &archive, &ai_root)?;
                 let executable = ai_root.join(platform.ollama_executable);
                 if !executable.is_file() {
@@ -1100,8 +1686,10 @@ impl<R: CommandRunner> LauncherService<R> {
                 &self.app_data.join("original-client-backup"),
             )?;
 
-            self.emit(
+            self.emit_component(
                 &mut progress,
+                OperationComponent::Server,
+                OperationStep::Download,
                 LauncherPhase::Installing,
                 42,
                 if server_images.is_some() {
@@ -1143,8 +1731,10 @@ impl<R: CommandRunner> LauncherService<R> {
                 }),
             )?;
 
-            self.emit(
+            self.emit_component(
                 &mut progress,
+                OperationComponent::Database,
+                OperationStep::Configure,
                 LauncherPhase::Installing,
                 73,
                 "Préparation de la base locale",
@@ -1172,7 +1762,21 @@ impl<R: CommandRunner> LauncherService<R> {
                 &logs.join("database-import.log"),
             )?;
             write_playerbots_config(&server_root, bots_enabled, bot_count)?;
-            write_ollama_chat_config(&server_root, ai_enabled, ai_model.as_deref())?;
+            self.emit_component(
+                &mut progress,
+                OperationComponent::Bots,
+                OperationStep::Configure,
+                LauncherPhase::Installing,
+                84,
+                "Configuration des compagnons",
+                Some("Population adaptée à la mémoire Docker"),
+            );
+            write_ollama_chat_config(
+                &server_root,
+                ai_enabled,
+                ai_model.as_deref(),
+                self.dialogue_chattiness(),
+            )?;
             self.emit(
                 &mut progress,
                 LauncherPhase::Installing,
@@ -1250,6 +1854,10 @@ impl<R: CommandRunner> LauncherService<R> {
                 runtime_release: Some(runtime_release_id()),
             };
             self.save_record(&record)?;
+            self.save_world_preferences(WorldPreferences {
+                bots_enabled,
+                requested_bot_count,
+            })?;
             self.emit(
                 &mut progress,
                 LauncherPhase::Ready,
@@ -1301,15 +1909,18 @@ impl<R: CommandRunner> LauncherService<R> {
     where
         F: FnMut(LauncherProgress),
     {
+        self.begin_operation("start");
         let mut record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        let mut preferences = self.world_preferences(Some(&record));
         if let Some(enabled) = bots_enabled {
-            record.bots_enabled = enabled;
+            preferences.bots_enabled = enabled;
         }
         if let Some(requested) = bot_count {
-            record.bot_count = normalize_bot_count(requested);
+            preferences.requested_bot_count = normalize_bot_count(requested);
         }
+        record.bots_enabled = preferences.bots_enabled;
         if let Some(enabled) = ai_enabled {
             if enabled && !record.bots_enabled {
                 return Err("les dialogues IA nécessitent les compagnons Playerbots".into());
@@ -1322,6 +1933,7 @@ impl<R: CommandRunner> LauncherService<R> {
         if !record.bots_enabled {
             record.ai_enabled = false;
         }
+        self.save_world_preferences(preferences)?;
         self.save_record(&record)?;
         let server_root = record
             .compose_file
@@ -1329,7 +1941,12 @@ impl<R: CommandRunner> LauncherService<R> {
             .ok_or_else(|| "chemin serveur invalide".to_string())?;
         refresh_companion_addon(&self.addon_source, &record)?;
         ensure_worldserver_console(&record.compose_file)?;
-        write_ollama_chat_config(server_root, record.ai_enabled, record.ai_model.as_deref())?;
+        write_ollama_chat_config(
+            server_root,
+            record.ai_enabled,
+            record.ai_model.as_deref(),
+            self.dialogue_chattiness(),
+        )?;
         self.runner
             .run(
                 "docker",
@@ -1349,8 +1966,11 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .unwrap_or_default();
-        record.bot_count =
-            effective_playerbot_count(&docker_memory, record.bots_enabled, record.bot_count);
+        record.bot_count = effective_playerbot_count(
+            &docker_memory,
+            record.bots_enabled,
+            preferences.requested_bot_count,
+        );
         self.save_record(&record)?;
         write_playerbots_config(server_root, record.bots_enabled, record.bot_count)?;
 
@@ -1550,6 +2170,7 @@ impl<R: CommandRunner> LauncherService<R> {
     where
         F: FnMut(LauncherProgress),
     {
+        self.begin_operation("dialogue");
         let mut record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
@@ -1566,7 +2187,12 @@ impl<R: CommandRunner> LauncherService<R> {
             .to_path_buf();
 
         if !enabled {
-            write_ollama_chat_config(&server_root, false, record.ai_model.as_deref())?;
+            write_ollama_chat_config(
+                &server_root,
+                false,
+                record.ai_model.as_deref(),
+                self.dialogue_chattiness(),
+            )?;
             if let Some(process_id) = self.ai_process_id.take() {
                 self.runner.terminate(process_id)?;
             }
@@ -1596,6 +2222,10 @@ impl<R: CommandRunner> LauncherService<R> {
         if !ai::is_allowed_ollama_model(&model) {
             return Err("modèle Ollama refusé par la liste RealmBox".into());
         }
+        ensure_available_space(
+            &record.runtime_root,
+            ai::model_download_bytes(&model).unwrap_or(0) + DISK_SAFETY_MARGIN_BYTES,
+        )?;
         let module_config_available = server_root
             .join("modules/mod-ollama-chat/conf/mod_ollama_chat.conf.dist")
             .is_file()
@@ -1660,20 +2290,17 @@ impl<R: CommandRunner> LauncherService<R> {
                 "Téléchargement du moteur de dialogue",
                 Some("Ollama 0.33.2 · archive officielle vérifiée"),
             );
-            self.runner.run_long(
-                "curl",
-                &[
-                    "-L".into(),
-                    "--fail".into(),
-                    "--show-error".into(),
-                    "--output".into(),
-                    archive.as_os_str().into(),
-                    platform.ollama_url.into(),
-                ],
-                None,
+            self.download_component(
+                &mut progress,
+                OperationComponent::Ai,
+                8,
+                28,
+                "Téléchargement du moteur de dialogue",
+                platform.ollama_url,
+                platform.ollama_sha256,
+                &archive,
                 &logs.join("ollama-download.log"),
             )?;
-            verify_sha256(&archive, platform.ollama_sha256)?;
             extract_ollama(&self.runner, &archive, &staged_ai)?;
             let staged_executable = staged_ai.join(platform.ollama_executable);
             if !staged_executable.is_file() {
@@ -1706,7 +2333,7 @@ impl<R: CommandRunner> LauncherService<R> {
             ai_root.join(platform.ollama_executable)
         };
 
-        write_ollama_chat_config(&server_root, true, Some(&model))?;
+        write_ollama_chat_config(&server_root, true, Some(&model), self.dialogue_chattiness())?;
         record.ai_enabled = true;
         record.ai_model = Some(model.clone());
         record.ollama_executable = Some(executable);
@@ -1764,6 +2391,17 @@ impl<R: CommandRunner> LauncherService<R> {
         );
         let target_release = format!("{}-ollama-chat-{OLLAMA_CHAT_COMMIT}", runtime_release_id());
         let transition = migration_backup_stem(&source_release, &target_release);
+        let recovery_metadata = RecoveryMetadata {
+            schema_version: 1,
+            stem: transition.clone(),
+            source_runtime_release: record.runtime_release.clone(),
+            target_runtime_release: target_release.clone(),
+            ai_enabled: record.ai_enabled,
+            ai_model: record.ai_model.clone(),
+            ollama_chat_commit: record.ollama_chat_commit.clone(),
+        };
+        let recovery_metadata_bytes =
+            serde_json::to_vec_pretty(&recovery_metadata).map_err(|error| error.to_string())?;
         let staging_root = self.app_data.join(format!(".{transition}-staging"));
         let staged_server = staging_root.join("server");
         let rollback_root = self
@@ -1841,7 +2479,7 @@ impl<R: CommandRunner> LauncherService<R> {
             &record.runtime_root.join("logs/dialogue-module-extract.log"),
         )?;
         write_playerbots_config(&staged_server, record.bots_enabled, record.bot_count)?;
-        write_ollama_chat_config(&staged_server, false, None)?;
+        write_ollama_chat_config(&staged_server, false, None, self.dialogue_chattiness())?;
 
         self.emit(
             progress,
@@ -1891,6 +2529,13 @@ impl<R: CommandRunner> LauncherService<R> {
         );
         fs::create_dir_all(&rollback_root).map_err(|error| error.to_string())?;
         fs::rename(&current_server, &rollback_server).map_err(|error| error.to_string())?;
+        if let Err(error) = write_atomic(
+            &rollback_root.join("recovery.json"),
+            &recovery_metadata_bytes,
+        ) {
+            let _ = fs::rename(&rollback_server, &current_server);
+            return Err(format!("métadonnées de rollback non publiées : {error}"));
+        }
         if let Err(error) = fs::rename(&staged_server, &current_server) {
             let _ = fs::rename(&rollback_server, &current_server);
             return Err(format!("publication du runtime annulée : {error}"));
@@ -1913,10 +2558,236 @@ impl<R: CommandRunner> LauncherService<R> {
         Ok(())
     }
 
+    pub fn restore_last_recovery<F>(&mut self, mut progress: F) -> Result<LauncherStatus, String>
+    where
+        F: FnMut(LauncherProgress),
+    {
+        self.begin_operation("recovery");
+        if self.client_process_id.is_some() || self.ai_process_id.is_some() {
+            return Err("arrêtez le monde avant de restaurer son dernier état fonctionnel".into());
+        }
+        let original_record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas installé".to_string())?;
+        let point = find_latest_recovery_point(&self.app_data)?;
+        let current_server = original_record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?
+            .to_path_buf();
+        let failed_root = self
+            .app_data
+            .join(RUNTIME_ROLLBACK_DIRECTORY)
+            .join(format!("failed-after-{}", point.stem));
+        let failed_server = failed_root.join("server");
+        if failed_root.exists() {
+            return Err(
+                "un runtime postérieur est déjà conservé après une restauration ; RealmBox refuse de l’écraser"
+                    .into(),
+            );
+        }
+
+        self.emit(
+            &mut progress,
+            LauncherPhase::Recovering,
+            10,
+            "Vérification du point de restauration",
+            Some("Runtime et sauvegarde SQL vérifiés avant toute modification"),
+        );
+        validate_recovery_point(&self.app_data, point.rollback_root.clone())?;
+        let server_root = current_server.as_path();
+        self.runner.run_long(
+            "docker",
+            &compose_args(
+                &original_record.compose_file,
+                &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+            ),
+            Some(server_root),
+            &original_record
+                .runtime_root
+                .join("logs/restore-database-start.log"),
+        )?;
+        let safety_backup = create_pre_migration_backup(
+            &self.runner,
+            &self.app_data,
+            &original_record.compose_file,
+            server_root,
+            original_record
+                .runtime_release
+                .as_deref()
+                .unwrap_or("unknown-current"),
+            &format!("restore-safety-{}", point.stem),
+            &original_record
+                .runtime_root
+                .join("logs/restore-safety-backup.log"),
+        )?;
+
+        self.emit(
+            &mut progress,
+            LauncherPhase::Recovering,
+            32,
+            "Conservation de l’état actuel",
+            Some("Une sauvegarde de sécurité non écrasable a été créée"),
+        );
+        self.runner.run_long(
+            "docker",
+            &compose_args(&original_record.compose_file, &["down", "--remove-orphans"]),
+            Some(server_root),
+            &original_record
+                .runtime_root
+                .join("logs/restore-current-stop.log"),
+        )?;
+        fs::create_dir_all(&failed_root).map_err(|error| error.to_string())?;
+        fs::rename(&current_server, &failed_server).map_err(|error| error.to_string())?;
+        if let Err(error) = fs::rename(&point.rollback_server, &current_server) {
+            let _ = fs::rename(&failed_server, &current_server);
+            return Err(format!("restauration du runtime annulée : {error}"));
+        }
+
+        let mut restored_record = original_record.clone();
+        restored_record.compose_file = current_server.join("compose.realmbox.yaml");
+        restored_record.runtime_release = point
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.source_runtime_release.clone());
+        restored_record.ai_enabled = point
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.ai_enabled);
+        restored_record.ai_model = point
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.ai_model.clone());
+        restored_record.ollama_chat_commit = point
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.ollama_chat_commit.clone());
+
+        let restoration = (|| {
+            self.emit(
+                &mut progress,
+                LauncherPhase::Recovering,
+                55,
+                "Restauration des personnages",
+                Some("Import du dernier dump complet vérifié"),
+            );
+            self.runner.run_long(
+                "docker",
+                &compose_args(
+                    &restored_record.compose_file,
+                    &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+                ),
+                Some(&current_server),
+                &restored_record
+                    .runtime_root
+                    .join("logs/restore-target-database-start.log"),
+            )?;
+            restore_database_backup(
+                &self.runner,
+                &restored_record.compose_file,
+                &current_server,
+                &point.backup,
+                &restored_record.runtime_root.join("logs/restore-import.log"),
+            )?;
+            validate_live_database_after_restore(
+                &self.runner,
+                &self.app_data,
+                &restored_record.compose_file,
+                &current_server,
+                &point.stem,
+                &restored_record
+                    .runtime_root
+                    .join("logs/restore-validation.log"),
+            )?;
+            self.runner.run_long(
+                "docker",
+                &compose_args(&restored_record.compose_file, &["down", "--remove-orphans"]),
+                Some(&current_server),
+                &restored_record
+                    .runtime_root
+                    .join("logs/restore-target-stop.log"),
+            )?;
+            self.save_record(&restored_record)
+        })();
+
+        if let Err(error) = restoration {
+            let _ = self.runner.run_long(
+                "docker",
+                &compose_args(&restored_record.compose_file, &["down", "--remove-orphans"]),
+                Some(&current_server),
+                &original_record
+                    .runtime_root
+                    .join("logs/restore-failed-stop.log"),
+            );
+            let runtime_reverted = fs::rename(&current_server, &point.rollback_server)
+                .and_then(|_| fs::rename(&failed_server, &current_server));
+            let database_reverted = self
+                .runner
+                .run_long(
+                    "docker",
+                    &compose_args(
+                        &original_record.compose_file,
+                        &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+                    ),
+                    Some(&current_server),
+                    &original_record
+                        .runtime_root
+                        .join("logs/restore-revert-database-start.log"),
+                )
+                .and_then(|_| {
+                    restore_database_backup(
+                        &self.runner,
+                        &original_record.compose_file,
+                        &current_server,
+                        &safety_backup,
+                        &original_record
+                            .runtime_root
+                            .join("logs/restore-revert-import.log"),
+                    )
+                })
+                .and_then(|_| {
+                    self.runner.run_long(
+                        "docker",
+                        &compose_args(&original_record.compose_file, &["down", "--remove-orphans"]),
+                        Some(&current_server),
+                        &original_record
+                            .runtime_root
+                            .join("logs/restore-revert-stop.log"),
+                    )
+                });
+            return match (runtime_reverted, database_reverted) {
+                (Ok(()), Ok(())) => {
+                    let _ = fs::remove_dir(&failed_root);
+                    Err(format!(
+                        "restauration annulée et état précédent rétabli : {error}"
+                    ))
+                }
+                (runtime, database) => Err(format!(
+                    "restauration interrompue ; récupération automatique incomplète ({error}) ; runtime={runtime:?}, base={database:?}"
+                )),
+            };
+        }
+
+        self.emit(
+            &mut progress,
+            LauncherPhase::Ready,
+            100,
+            "Dernier état fonctionnel restauré",
+            Some("Le monde reste arrêté jusqu’à l’action Jouer"),
+        );
+        Ok(self.installed_status(
+            &restored_record,
+            LauncherPhase::Ready,
+            "Dernier état fonctionnel restauré",
+            false,
+        ))
+    }
+
     pub fn stop<F>(&mut self, mut progress: F) -> Result<LauncherStatus, String>
     where
         F: FnMut(LauncherProgress),
     {
+        self.begin_operation("stop");
         let record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas installé".to_string())?;
@@ -2046,6 +2917,10 @@ impl<R: CommandRunner> LauncherService<R> {
             record.ai_enabled = false;
         }
         self.save_record(&record)?;
+        self.save_world_preferences(WorldPreferences {
+            bots_enabled,
+            requested_bot_count: normalize_bot_count(requested_count),
+        })?;
         Ok(self.installed_status(
             &record,
             LauncherPhase::Running,
@@ -2080,12 +2955,97 @@ impl<R: CommandRunner> LauncherService<R> {
     ) where
         F: FnMut(LauncherProgress),
     {
+        self.emit_component(
+            progress,
+            OperationComponent::Launcher,
+            match phase {
+                LauncherPhase::Installing => OperationStep::Configure,
+                LauncherPhase::Starting => OperationStep::Start,
+                LauncherPhase::Stopping => OperationStep::Stop,
+                LauncherPhase::Recovering => OperationStep::Restore,
+                LauncherPhase::Ready | LauncherPhase::Running => OperationStep::Complete,
+                LauncherPhase::NeedsGameData | LauncherPhase::Error => OperationStep::Validate,
+            },
+            phase,
+            value,
+            message,
+            detail,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_component<F>(
+        &self,
+        progress: &mut F,
+        component: OperationComponent,
+        step: OperationStep,
+        phase: LauncherPhase,
+        value: u8,
+        message: &str,
+        detail: Option<&str>,
+    ) where
+        F: FnMut(LauncherProgress),
+    {
         progress(LauncherProgress {
+            operation_id: self.active_operation_id.clone(),
+            component,
+            step,
             phase,
             message: message.into(),
             detail: detail.map(str::to_owned),
+            error_code: None,
             progress: value,
+            completed_bytes: None,
+            total_bytes: None,
+            cancellable: false,
         });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn download_component<F>(
+        &self,
+        progress: &mut F,
+        component: OperationComponent,
+        start_percent: u8,
+        end_percent: u8,
+        message: &str,
+        url: &str,
+        expected_sha256: &str,
+        destination: &Path,
+        log_path: &Path,
+    ) -> Result<(), String>
+    where
+        F: FnMut(LauncherProgress),
+    {
+        self.runner.download_verified(
+            url,
+            expected_sha256,
+            destination,
+            log_path,
+            &mut |completed_bytes, total_bytes| {
+                let range = end_percent.saturating_sub(start_percent) as u64;
+                let progress_percent = total_bytes
+                    .filter(|total| *total > 0)
+                    .map(|total| {
+                        start_percent
+                            .saturating_add(((completed_bytes.min(total) * range) / total) as u8)
+                    })
+                    .unwrap_or(start_percent);
+                progress(LauncherProgress {
+                    operation_id: self.active_operation_id.clone(),
+                    component,
+                    step: OperationStep::Download,
+                    phase: LauncherPhase::Installing,
+                    message: message.into(),
+                    detail: None,
+                    error_code: None,
+                    progress: progress_percent,
+                    completed_bytes: Some(completed_bytes),
+                    total_bytes,
+                    cancellable: false,
+                });
+            },
+        )
     }
 
     fn load_record(&self) -> Result<Option<InstallationRecord>, String> {
@@ -2127,6 +3087,7 @@ impl<R: CommandRunner> LauncherService<R> {
         LauncherStatus {
             phase,
             message: message.into(),
+            error_code: None,
             detail: Some(
                 if running {
                     "Serveur, base locale et client démarrés dans cet ordre."
@@ -2137,10 +3098,14 @@ impl<R: CommandRunner> LauncherService<R> {
             ),
             progress: 100,
             installed: true,
+            recovery_available: find_latest_recovery_point(&self.app_data).is_ok(),
             bots_enabled: record.bots_enabled,
             bot_count: record.bot_count,
+            requested_bot_count: self.world_preferences(Some(record)).requested_bot_count,
+            applied_bot_count: record.bot_count,
             ai_enabled: record.ai_enabled,
             ai_model: record.ai_model.clone(),
+            dialogue_chattiness: self.dialogue_chattiness(),
             game_data_path: Some(record.game_data_root.display().to_string()),
             account_name: Some(PLAYER_ACCOUNT_NAME),
             account_password: Some(PLAYER_ACCOUNT_PASSWORD),
@@ -2168,12 +3133,17 @@ fn missing_status() -> LauncherStatus {
         phase: LauncherPhase::NeedsGameData,
         message: "Données de jeu requises".into(),
         detail: Some("Choisissez le dossier de votre copie compatible avant l’installation des composants ouverts.".into()),
+        error_code: None,
         progress: 0,
         installed: false,
+        recovery_available: false,
         bots_enabled: true,
         bot_count: default_bot_count(),
+        requested_bot_count: default_bot_count(),
+        applied_bot_count: default_bot_count(),
         ai_enabled: false,
         ai_model: None,
+        dialogue_chattiness: DialogueChattiness::default(),
         game_data_path: None,
         account_name: None,
         account_password: None,
@@ -2355,6 +3325,203 @@ fn validate_mpq_header(path: &Path) -> Result<(), String> {
             path.display()
         ))
     }
+}
+
+fn download_verified_http(
+    url: &str,
+    expected_sha256: &str,
+    destination: &Path,
+    log_path: &Path,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(), String> {
+    use reqwest::{
+        StatusCode,
+        blocking::Client,
+        header::{CONTENT_RANGE, RANGE},
+    };
+
+    if destination.is_file() && verify_sha256(destination, expected_sha256).is_ok() {
+        let total = fs::metadata(destination)
+            .map_err(|error| error.to_string())?
+            .len();
+        progress(total, Some(total));
+        return Ok(());
+    }
+    if destination.exists() {
+        fs::remove_file(destination).map_err(|error| error.to_string())?;
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut partial_name = destination
+        .file_name()
+        .ok_or_else(|| "nom de téléchargement invalide".to_string())?
+        .to_os_string();
+    partial_name.push(".part");
+    let partial = destination.with_file_name(partial_name);
+    let client = Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(30 * 60))
+        .build()
+        .map_err(|error| format!("initialisation du téléchargement impossible: {error}"))?;
+    let mut last_error = "téléchargement interrompu".to_string();
+
+    for attempt in 1..=3 {
+        let existing = fs::metadata(&partial)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let mut request = client.get(url);
+        if existing > 0 {
+            request = request.header(RANGE, format!("bytes={existing}-"));
+        }
+        let mut response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = format!("tentative {attempt}/3: {error}");
+                let _ = writeln!(
+                    OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log_path)
+                        .map_err(|error| error.to_string())?,
+                    "{last_error}"
+                );
+                continue;
+            }
+        };
+        if response.status() == StatusCode::RANGE_NOT_SATISFIABLE {
+            if existing > 0 && verify_sha256(&partial, expected_sha256).is_ok() {
+                fs::rename(&partial, destination).map_err(|error| error.to_string())?;
+                progress(existing, Some(existing));
+                return Ok(());
+            }
+            let _ = fs::remove_file(&partial);
+            last_error = format!("tentative {attempt}/3: reprise HTTP refusée");
+            continue;
+        }
+        if !response.status().is_success() {
+            last_error = format!("tentative {attempt}/3: serveur HTTP {}", response.status());
+            continue;
+        }
+
+        let resumed = response.status() == StatusCode::PARTIAL_CONTENT && existing > 0;
+        let starting_offset = if resumed { existing } else { 0 };
+        let total = response
+            .headers()
+            .get(CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit('/').next())
+            .and_then(|value| value.parse::<u64>().ok())
+            .or_else(|| {
+                response
+                    .content_length()
+                    .map(|remaining| starting_offset + remaining)
+            });
+        let downloaded = match append_download_body(
+            &mut response,
+            &partial,
+            resumed,
+            starting_offset,
+            total,
+            progress,
+        ) {
+            Ok(downloaded) => downloaded,
+            Err(error) => {
+                last_error = format!("tentative {attempt}/3: {error}");
+                continue;
+            }
+        };
+        if total.is_some_and(|total| downloaded != total) {
+            last_error = format!(
+                "tentative {attempt}/3: fichier incomplet ({downloaded}/{} octets)",
+                total.unwrap_or_default()
+            );
+            continue;
+        }
+        publish_verified_download(&partial, destination, expected_sha256)?;
+        let _ = writeln!(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+                .map_err(|error| error.to_string())?,
+            "téléchargement vérifié: {downloaded} octets"
+        );
+        return Ok(());
+    }
+    let _ = fs::remove_file(&partial);
+    Err(format!(
+        "téléchargement abandonné après trois tentatives: {last_error}"
+    ))
+}
+
+fn append_download_body(
+    response: &mut dyn Read,
+    partial: &Path,
+    resumed: bool,
+    starting_offset: u64,
+    total: Option<u64>,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<u64, String> {
+    let mut output = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(resumed)
+        .truncate(!resumed)
+        .open(partial)
+        .map_err(|error| error.to_string())?;
+    let mut downloaded = starting_offset;
+    progress(downloaded, total);
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = response.read(&mut buffer).map_err(|error| {
+            let _ = output.flush();
+            error.to_string()
+        })?;
+        if read == 0 {
+            break;
+        }
+        output
+            .write_all(&buffer[..read])
+            .map_err(|error| error.to_string())?;
+        downloaded += read as u64;
+        progress(downloaded, total);
+    }
+    output.flush().map_err(|error| error.to_string())?;
+    output.sync_all().map_err(|error| error.to_string())?;
+    Ok(downloaded)
+}
+
+fn publish_verified_download(
+    partial: &Path,
+    destination: &Path,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    if let Err(error) = verify_sha256(partial, expected_sha256) {
+        let _ = fs::remove_file(partial);
+        return Err(error);
+    }
+    fs::rename(partial, destination).map_err(|error| error.to_string())
+}
+
+fn ensure_available_space(path: &Path, required_bytes: u64) -> Result<(), String> {
+    let available = fs2::available_space(path).map_err(|error| {
+        format!(
+            "impossible de mesurer l’espace disponible pour {}: {error}",
+            path.display()
+        )
+    })?;
+    if available < required_bytes {
+        return Err(format!(
+            "espace disque insuffisant : {} Gio requis avec marge de sécurité, {} Gio disponibles",
+            required_bytes.div_ceil(1024_u64.pow(3)),
+            available / 1024_u64.pow(3)
+        ));
+    }
+    Ok(())
 }
 
 fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
@@ -3011,8 +4178,32 @@ fn redact_diagnostic_line(line: &str) -> String {
     {
         "[ligne sensible masquée]".into()
     } else {
-        trimmed.chars().take(500).collect()
+        let mut redacted = trimmed.to_owned();
+        for variable in ["HOME", "USERPROFILE"] {
+            if let Some(home) =
+                std::env::var_os(variable).and_then(|value| value.into_string().ok())
+                && !home.is_empty()
+            {
+                redacted = redacted.replace(&home, "[HOME]");
+            }
+        }
+        redact_user_directory(&redacted).chars().take(500).collect()
     }
+}
+
+fn redact_user_directory(line: &str) -> String {
+    for prefix in ["/Users/", "C:\\Users\\"] {
+        if let Some(start) = line.find(prefix) {
+            let user_start = start + prefix.len();
+            let separator = if prefix.starts_with('/') { '/' } else { '\\' };
+            if let Some(end) = line[user_start..].find(separator) {
+                let mut redacted = line.to_owned();
+                redacted.replace_range(user_start..user_start + end, "[USER]");
+                return redacted;
+            }
+        }
+    }
+    line.to_owned()
 }
 
 fn diagnose_entries(entries: &[String], installed: bool) -> (&'static str, String) {
@@ -3048,6 +4239,7 @@ fn write_ollama_chat_config(
     server_root: &Path,
     enabled: bool,
     model: Option<&str>,
+    chattiness: DialogueChattiness,
 ) -> Result<(), String> {
     let source_exists = server_root
         .join("modules/mod-ollama-chat/conf/mod_ollama_chat.conf.dist")
@@ -3068,6 +4260,12 @@ fn write_ollama_chat_config(
     }
     let enabled = u8::from(enabled).to_string();
     let model = model.unwrap_or("llama3.2:1b");
+    let (automatic_chatter, random_chance, event_chance, event_self_chance, reply_chance, cooldown) =
+        match chattiness {
+            DialogueChattiness::Quiet => ("0", "1", "4", "1", "35", "30"),
+            DialogueChattiness::Balanced => ("0", "2", "10", "2", "100", "0"),
+            DialogueChattiness::Lively => ("1", "5", "20", "5", "100", "0"),
+        };
     write_module_config(
         server_root,
         "mod-ollama-chat",
@@ -3097,26 +4295,35 @@ fn write_ollama_chat_config(
             ("OllamaChat.ThinkModeEnableForModule", "0".into()),
             ("OllamaChat.DebugEnabled", "0".into()),
             ("OllamaChat.DebugShowFullPrompt", "0".into()),
-            ("OllamaChat.PlayerReplyChance.Say", "100".into()),
-            ("OllamaChat.PlayerReplyChance.Channel", "100".into()),
-            ("OllamaChat.PlayerReplyChance.Party", "100".into()),
-            ("OllamaChat.PlayerReplyChance.Guild", "100".into()),
+            ("OllamaChat.PlayerReplyChance.Say", reply_chance.into()),
+            ("OllamaChat.PlayerReplyChance.Channel", reply_chance.into()),
+            ("OllamaChat.PlayerReplyChance.Party", reply_chance.into()),
+            ("OllamaChat.PlayerReplyChance.Guild", reply_chance.into()),
             ("OllamaChat.BotReplyChance.Say", "0".into()),
             ("OllamaChat.BotReplyChance.Channel", "0".into()),
             ("OllamaChat.BotReplyChance.Party", "0".into()),
             ("OllamaChat.BotReplyChance.Guild", "0".into()),
             ("OllamaChat.EnableWhisperReplies", enabled.clone()),
             ("OllamaChat.MaxBotsToPick", "1".into()),
-            ("OllamaChat.Cooldown.PerBotSeconds", "0".into()),
+            ("OllamaChat.Cooldown.PerBotSeconds", cooldown.into()),
             ("OllamaChat.Cooldown.PerScopeSeconds", "0".into()),
             ("OllamaChat.RateLimit.ScopePerMinute", "30".into()),
             ("OllamaChat.RateLimit.GlobalPerMinute", "120".into()),
-            ("OllamaChat.EnableRandomChatter", "0".into()),
-            ("OllamaChat.RandomChatterBotCommentChance", "2".into()),
+            ("OllamaChat.EnableRandomChatter", automatic_chatter.into()),
+            (
+                "OllamaChat.RandomChatterBotCommentChance",
+                random_chance.into(),
+            ),
             ("OllamaChat.RandomChatterMaxBotsPerPlayer", "1".into()),
-            ("OllamaChat.EnableEventChatter", "0".into()),
-            ("OllamaChat.EventChatterBotCommentChance", "10".into()),
-            ("OllamaChat.EventChatterBotSelfCommentChance", "2".into()),
+            ("OllamaChat.EnableEventChatter", automatic_chatter.into()),
+            (
+                "OllamaChat.EventChatterBotCommentChance",
+                event_chance.into(),
+            ),
+            (
+                "OllamaChat.EventChatterBotSelfCommentChance",
+                event_self_chance.into(),
+            ),
             ("OllamaChat.EventChatterMaxBotsPerPlayer", "1".into()),
             ("OllamaChat.EnableSentimentTracking", "0".into()),
         ],
@@ -3349,6 +4556,134 @@ fn create_pre_migration_backup<R: CommandRunner>(
     fs::rename(&temporary, &backup).map_err(|error| error.to_string())?;
     write_atomic(&checksum, format!("{digest}\n").as_bytes())?;
     Ok(backup)
+}
+
+fn validate_recovery_point(
+    app_data: &Path,
+    rollback_root: PathBuf,
+) -> Result<RecoveryPoint, String> {
+    let stem = rollback_root
+        .file_name()
+        .and_then(OsStr::to_str)
+        .filter(|name| name.starts_with("pre-migration-"))
+        .ok_or_else(|| "nom de rollback RealmBox invalide".to_string())?
+        .to_owned();
+    let rollback_server = rollback_root.join("server");
+    if !rollback_server.join("compose.realmbox.yaml").is_file() {
+        return Err(format!("runtime de rollback incomplet: {stem}"));
+    }
+    let backup_root = app_data.join(PLAYER_DATA_BACKUP_DIRECTORY);
+    let backup = backup_root.join(format!("{stem}.sql"));
+    let checksum = backup_root.join(format!("{stem}.sha256"));
+    if !backup.is_file() || !checksum.is_file() {
+        return Err(format!("sauvegarde SQL du rollback absente: {stem}"));
+    }
+    let expected = fs::read_to_string(&checksum).map_err(|error| error.to_string())?;
+    verify_sha256(&backup, expected.trim())?;
+    validate_database_backup(&backup)?;
+
+    let metadata_path = rollback_root.join("recovery.json");
+    let metadata = if metadata_path.is_file() {
+        let bytes = fs::read(&metadata_path).map_err(|error| error.to_string())?;
+        let metadata: RecoveryMetadata =
+            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        if metadata.schema_version != 1 || metadata.stem != stem {
+            return Err(format!("métadonnées de rollback incohérentes: {stem}"));
+        }
+        Some(metadata)
+    } else {
+        None
+    };
+
+    Ok(RecoveryPoint {
+        stem,
+        backup,
+        rollback_root,
+        rollback_server,
+        metadata,
+    })
+}
+
+fn find_latest_recovery_point(app_data: &Path) -> Result<RecoveryPoint, String> {
+    let root = app_data.join(RUNTIME_ROLLBACK_DIRECTORY);
+    if !root.is_dir() {
+        return Err("aucun état fonctionnel restaurable n’est disponible".into());
+    }
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            continue;
+        }
+        if let Ok(point) = validate_recovery_point(app_data, entry.path()) {
+            let modified = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok();
+            candidates.push((modified, point));
+        }
+    }
+    candidates.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    candidates
+        .into_iter()
+        .next()
+        .map(|(_, point)| point)
+        .ok_or_else(|| "aucun état fonctionnel complet et vérifié n’est disponible".into())
+}
+
+fn restore_database_backup<R: CommandRunner>(
+    runner: &R,
+    compose_file: &Path,
+    server_root: &Path,
+    backup: &Path,
+    log_path: &Path,
+) -> Result<(), String> {
+    validate_database_backup(backup)?;
+    let command = r#"exec mysql --user=root --password="$MYSQL_ROOT_PASSWORD""#;
+    runner.run_with_input(
+        "docker",
+        &compose_args(
+            compose_file,
+            &["exec", "-T", "database", "sh", "-c", command],
+        ),
+        Some(server_root),
+        backup,
+        log_path,
+    )
+}
+
+fn validate_live_database_after_restore<R: CommandRunner>(
+    runner: &R,
+    app_data: &Path,
+    compose_file: &Path,
+    server_root: &Path,
+    stem: &str,
+    error_log: &Path,
+) -> Result<(), String> {
+    let validation = app_data.join(format!(".restore-validation-{stem}.partial"));
+    if validation.exists() {
+        return Err(
+            "une validation de restauration précédente est incomplète ; elle est conservée".into(),
+        );
+    }
+    write_secret_atomic(&validation, b"")?;
+    let dump_command = r#"exec mysqldump --user=root --password="$MYSQL_ROOT_PASSWORD" --all-databases --single-transaction --quick --routines --events --triggers --hex-blob --no-tablespaces --set-gtid-purged=OFF"#;
+    runner.run_to_file(
+        "docker",
+        &compose_args(
+            compose_file,
+            &["exec", "-T", "database", "sh", "-c", dump_command],
+        ),
+        Some(server_root),
+        &validation,
+        error_log,
+    )?;
+    validate_database_backup(&validation)?;
+    fs::remove_file(&validation).map_err(|error| error.to_string())
 }
 
 fn compose_args(compose_file: &Path, trailing: &[&str]) -> Vec<OsString> {
@@ -3804,6 +5139,8 @@ mod tests {
     #[derive(Default)]
     struct RecordingRunner {
         commands: Mutex<Vec<String>>,
+        fail_next_input: Mutex<bool>,
+        docker_memory: Mutex<Option<String>>,
     }
 
     impl CommandRunner for RecordingRunner {
@@ -3833,7 +5170,12 @@ mod tests {
                 return Ok("true false".into());
             }
             if program == "docker" && args.iter().any(|arg| arg == "{{.MemTotal}}") {
-                return Ok("34359738368".into());
+                return Ok(self
+                    .docker_memory
+                    .lock()
+                    .expect("docker memory")
+                    .clone()
+                    .unwrap_or_else(|| "34359738368".into()));
             }
             Ok(String::new())
         }
@@ -3880,6 +5222,29 @@ mod tests {
                 "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
             )
             .map_err(|error| error.to_string())
+        }
+        fn run_with_input(
+            &self,
+            program: &str,
+            args: &[OsString],
+            _current_dir: Option<&Path>,
+            input_path: &Path,
+            _log_path: &Path,
+        ) -> Result<(), String> {
+            self.commands.lock().expect("commands").push(format!(
+                "{program} {} < {}",
+                args.iter()
+                    .map(|arg| arg.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                input_path.display()
+            ));
+            let mut fail_next_input = self.fail_next_input.lock().expect("input failure");
+            if *fail_next_input {
+                *fail_next_input = false;
+                return Err("injected database import failure".into());
+            }
+            Ok(())
         }
         fn run_long_with_env(
             &self,
@@ -4536,7 +5901,13 @@ mod tests {
             "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
         )
         .expect("source config");
-        write_ollama_chat_config(temporary.path(), true, Some("qwen3:8b")).expect("valid model");
+        write_ollama_chat_config(
+            temporary.path(),
+            true,
+            Some("qwen3:8b"),
+            DialogueChattiness::Balanced,
+        )
+        .expect("valid model");
         let config = fs::read_to_string(
             temporary
                 .path()
@@ -4559,19 +5930,40 @@ mod tests {
         assert!(!chat_prompt.contains("{chat_history}"));
         assert!(config.contains("OllamaChat.BotReplyChance.Say = 0"));
         assert!(config.contains("OllamaChat.UnmanagedDefault = keep"));
+        write_ollama_chat_config(
+            temporary.path(),
+            true,
+            Some("qwen3:8b"),
+            DialogueChattiness::Lively,
+        )
+        .expect("lively dialogue");
+        let lively = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/mod_ollama_chat.conf"),
+        )
+        .expect("lively config");
+        assert!(lively.contains("OllamaChat.EnableRandomChatter = 1"));
+        assert!(lively.contains("OllamaChat.EventChatterBotCommentChance = 20"));
         let environment = ollama_environment(Path::new("/managed/ai/models"), true);
         assert!(environment.contains(&(OsString::from("OLLAMA_NO_CLOUD"), OsString::from("true"))));
         assert!(environment.contains(&(OsString::from("OLLAMA_MAX_QUEUE"), OsString::from("8"))));
         assert!(
-            write_ollama_chat_config(temporary.path(), true, Some("remote.example/model:latest"))
-                .is_err()
+            write_ollama_chat_config(
+                temporary.path(),
+                true,
+                Some("remote.example/model:latest"),
+                DialogueChattiness::Balanced,
+            )
+            .is_err()
         );
     }
 
     #[test]
     fn ollama_configuration_is_optional_when_the_module_was_not_installed() {
         let temporary = tempfile::tempdir().expect("tempdir");
-        write_ollama_chat_config(temporary.path(), false, None).expect("disabled module");
+        write_ollama_chat_config(temporary.path(), false, None, DialogueChattiness::Balanced)
+            .expect("disabled module");
         assert!(!temporary.path().join("env/dist/etc/modules").exists());
     }
 
@@ -4916,6 +6308,245 @@ mod tests {
     }
 
     #[test]
+    fn verified_recovery_restores_runtime_and_database_without_deleting_volumes() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let current_server = runtime_root.join("server");
+        let compose_file = current_server.join("compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        fs::create_dir_all(&current_server).expect("current server");
+        fs::create_dir_all(client_executable.parent().expect("client parent")).expect("client");
+        fs::write(&compose_file, "services: {}\n# current-runtime\n").expect("compose");
+        fs::write(&client_executable, "client").expect("client");
+
+        let stem = "pre-migration-recoverytest";
+        let rollback_root = temporary.path().join(RUNTIME_ROLLBACK_DIRECTORY).join(stem);
+        let rollback_server = rollback_root.join("server");
+        fs::create_dir_all(&rollback_server).expect("rollback server");
+        fs::write(
+            rollback_server.join("compose.realmbox.yaml"),
+            "services: {}\n# last-working-runtime\n",
+        )
+        .expect("rollback compose");
+        let metadata = RecoveryMetadata {
+            schema_version: 1,
+            stem: stem.into(),
+            source_runtime_release: Some("0.2.3-schema-3".into()),
+            target_runtime_release: runtime_release_id(),
+            ai_enabled: false,
+            ai_model: None,
+            ollama_chat_commit: None,
+        };
+        fs::write(
+            rollback_root.join("recovery.json"),
+            serde_json::to_vec_pretty(&metadata).expect("metadata"),
+        )
+        .expect("metadata file");
+        let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+        fs::create_dir_all(&backup_root).expect("backup root");
+        let backup = backup_root.join(format!("{stem}.sql"));
+        fs::write(
+            &backup,
+            "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
+        )
+        .expect("backup");
+        fs::write(
+            backup_root.join(format!("{stem}.sha256")),
+            format!("{}\n", sha256_file(&backup).expect("checksum")),
+        )
+        .expect("checksum file");
+
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file: compose_file.clone(),
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: true,
+                ai_model: Some("llama3.2:3b".into()),
+                ollama_executable: Some(temporary.path().join("ai/ollama")),
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: Some("test-ollama-sha256".into()),
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: Some(OLLAMA_CHAT_COMMIT.into()),
+                runtime_release: Some(runtime_release_id()),
+            })
+            .expect("record");
+
+        assert!(service.status().recovery_available);
+        let status = service
+            .restore_last_recovery(|_| {})
+            .expect("verified recovery");
+
+        assert_eq!(status.phase, LauncherPhase::Ready);
+        assert!(!status.recovery_available);
+        assert!(
+            fs::read_to_string(&compose_file)
+                .expect("restored compose")
+                .contains("last-working-runtime")
+        );
+        assert!(
+            fs::read_to_string(
+                temporary
+                    .path()
+                    .join(RUNTIME_ROLLBACK_DIRECTORY)
+                    .join(format!("failed-after-{stem}/server/compose.realmbox.yaml")),
+            )
+            .expect("preserved failed runtime")
+            .contains("current-runtime")
+        );
+        let restored_record = service.load_record().expect("record").expect("installed");
+        assert_eq!(
+            restored_record.runtime_release.as_deref(),
+            Some("0.2.3-schema-3")
+        );
+        assert!(!restored_record.ai_enabled);
+        let commands = service.runner.commands.lock().expect("commands");
+        assert!(
+            commands
+                .iter()
+                .any(|command| command.contains("exec mysql"))
+        );
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("--volumes"))
+        );
+    }
+
+    #[test]
+    fn failed_recovery_restores_the_original_runtime_and_safety_backup() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let current_server = runtime_root.join("server");
+        let compose_file = current_server.join("compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        fs::create_dir_all(&current_server).expect("current server");
+        fs::create_dir_all(client_executable.parent().expect("client parent")).expect("client");
+        fs::write(&compose_file, "services: {}\n# current-runtime\n").expect("compose");
+        fs::write(&client_executable, "client").expect("client");
+
+        let stem = "pre-migration-recoveryfailure";
+        let rollback_root = temporary.path().join(RUNTIME_ROLLBACK_DIRECTORY).join(stem);
+        let rollback_server = rollback_root.join("server");
+        fs::create_dir_all(&rollback_server).expect("rollback server");
+        fs::write(
+            rollback_server.join("compose.realmbox.yaml"),
+            "services: {}\n# last-working-runtime\n",
+        )
+        .expect("rollback compose");
+        let metadata = RecoveryMetadata {
+            schema_version: 1,
+            stem: stem.into(),
+            source_runtime_release: Some("0.2.3-schema-3".into()),
+            target_runtime_release: runtime_release_id(),
+            ai_enabled: false,
+            ai_model: None,
+            ollama_chat_commit: None,
+        };
+        fs::write(
+            rollback_root.join("recovery.json"),
+            serde_json::to_vec_pretty(&metadata).expect("metadata"),
+        )
+        .expect("metadata file");
+        let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+        fs::create_dir_all(&backup_root).expect("backup root");
+        let backup = backup_root.join(format!("{stem}.sql"));
+        fs::write(
+            &backup,
+            "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
+        )
+        .expect("backup");
+        fs::write(
+            backup_root.join(format!("{stem}.sha256")),
+            format!("{}\n", sha256_file(&backup).expect("checksum")),
+        )
+        .expect("checksum file");
+
+        let runner = RecordingRunner {
+            fail_next_input: Mutex::new(true),
+            ..Default::default()
+        };
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file: compose_file.clone(),
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: true,
+                ai_model: Some("llama3.2:3b".into()),
+                ollama_executable: Some(temporary.path().join("ai/ollama")),
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: Some("test-ollama-sha256".into()),
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: Some(OLLAMA_CHAT_COMMIT.into()),
+                runtime_release: Some(runtime_release_id()),
+            })
+            .expect("record");
+
+        let error = service
+            .restore_last_recovery(|_| {})
+            .expect_err("first database import must fail");
+
+        assert!(error.contains("état précédent rétabli"));
+        assert!(
+            fs::read_to_string(&compose_file)
+                .expect("original compose restored")
+                .contains("current-runtime")
+        );
+        assert!(
+            fs::read_to_string(rollback_server.join("compose.realmbox.yaml"))
+                .expect("recovery point preserved")
+                .contains("last-working-runtime")
+        );
+        assert!(
+            !temporary
+                .path()
+                .join(RUNTIME_ROLLBACK_DIRECTORY)
+                .join(format!("failed-after-{stem}"))
+                .exists()
+        );
+        let record = service.load_record().expect("record").expect("installed");
+        assert_eq!(record.runtime_release, Some(runtime_release_id()));
+        assert!(record.ai_enabled);
+        let commands = service.runner.commands.lock().expect("commands");
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.contains("exec mysql") && command.contains(" < "))
+                .count(),
+            2
+        );
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("--volumes"))
+        );
+    }
+
+    #[test]
     fn incomplete_database_backup_blocks_migration() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let backup = temporary.path().join("backup.sql");
@@ -5059,7 +6690,7 @@ mod tests {
     #[test]
     fn completed_client_process_is_reaped_and_reported_stopped() {
         let temporary = tempfile::tempdir().expect("tempdir");
-        let runner = SystemCommandRunner;
+        let runner = SystemCommandRunner::default();
         let process_id = runner
             .spawn(
                 Path::new("/bin/sh"),
@@ -5080,6 +6711,88 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
         panic!("completed client process remained visible after one second");
+    }
+
+    #[test]
+    fn integrated_downloader_resumes_and_publishes_only_after_checksum() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let destination = temporary.path().join("client.zip");
+        let partial = temporary.path().join("client.zip.part");
+        fs::write(&partial, b"hello ").expect("partial");
+        let payload = b"hello world";
+        let expected = format!("{:x}", Sha256::digest(payload));
+        let mut observed = Vec::new();
+        let mut remainder = std::io::Cursor::new(b"world");
+
+        let downloaded = append_download_body(
+            &mut remainder,
+            &partial,
+            true,
+            6,
+            Some(11),
+            &mut |completed, total| observed.push((completed, total)),
+        )
+        .expect("resume body");
+        publish_verified_download(&partial, &destination, &expected).expect("verified publication");
+
+        assert_eq!(downloaded, 11);
+        assert_eq!(fs::read(&destination).expect("published"), payload);
+        assert!(!partial.exists());
+        assert_eq!(observed.last(), Some(&(11, Some(11))));
+    }
+
+    #[test]
+    fn integrated_downloader_removes_a_checksum_mismatch() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let destination = temporary.path().join("client.zip");
+        let partial = temporary.path().join("client.zip.part");
+        fs::write(&partial, b"bad").expect("partial");
+
+        let error = publish_verified_download(&partial, &destination, &"0".repeat(64))
+            .expect_err("checksum mismatch");
+
+        assert!(error.contains("SHA-256"));
+        assert!(!destination.exists());
+        assert!(!partial.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_runner_refuses_to_terminate_an_unowned_process() {
+        let runner = SystemCommandRunner::default();
+        let error = runner
+            .terminate(std::process::id())
+            .expect_err("current test process is not owned by the runner");
+        assert!(error.contains("refuse d’arrêter"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_runner_terminates_its_owned_process_group() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = SystemCommandRunner::default();
+        let process_id = runner
+            .spawn(
+                Path::new("/bin/sh"),
+                &["-c".into(), "sleep 30".into()],
+                &[],
+                None,
+                &temporary.path().join("client.log"),
+            )
+            .expect("spawn owned process group");
+        assert!(
+            runner
+                .is_process_running(process_id)
+                .expect("inspect owned")
+        );
+
+        runner.terminate(process_id).expect("terminate owned group");
+
+        assert!(
+            !runner
+                .is_process_running(process_id)
+                .expect("ownership is cleared after termination")
+        );
     }
 
     #[test]
@@ -5215,7 +6928,10 @@ mod tests {
         let mut service = LauncherService::new(
             temporary.path().to_path_buf(),
             temporary.path().join("addon"),
-            RecordingRunner::default(),
+            RecordingRunner {
+                docker_memory: Mutex::new(Some("25769803776".into())),
+                ..Default::default()
+            },
         )
         .expect("service");
         service
@@ -5242,10 +6958,12 @@ mod tests {
         service.client_process_id = Some(42);
 
         let status = service
-            .update_playerbot_population(true, 100)
+            .update_playerbot_population(true, 150)
             .expect("hot update");
         assert_eq!(status.phase, LauncherPhase::Running);
         assert_eq!(status.bot_count, 100);
+        assert_eq!(status.requested_bot_count, 150);
+        assert_eq!(status.applied_bot_count, 100);
         let config =
             fs::read_to_string(runtime_root.join("server/env/dist/etc/modules/playerbots.conf"))
                 .expect("updated config");
@@ -5266,7 +6984,7 @@ mod tests {
         fs::create_dir_all(&logs).expect("logs");
         fs::write(
             logs.join("worldserver.log"),
-            "INFO ready\nERROR playerbots failed\nWARNING password=secret\n",
+            "INFO ready\nERROR playerbots failed in /Users/Benjamin/Games\nWARNING password=secret\n",
         )
         .expect("log");
         let entries = filtered_log_entries(&logs, 10).expect("entries");
@@ -5276,6 +6994,7 @@ mod tests {
                 .iter()
                 .any(|entry| entry.contains("playerbots failed"))
         );
+        assert!(entries.iter().all(|entry| !entry.contains("Benjamin")));
         assert!(
             entries
                 .iter()

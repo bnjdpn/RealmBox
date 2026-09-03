@@ -98,6 +98,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .inline-error { color: #f0aaa3 !important; font-size: 12px !important; }
 .active-progress { width: 420px; height: 4px; margin-top: 20px; overflow: hidden; border-radius: 3px; background: #ffffff1f; box-shadow: 0 1px 6px #000; }
 .active-progress span { display: block; height: 100%; border-radius: inherit; background: var(--ice-bright); box-shadow: 0 0 12px #8ce9f2; transition: width .3s ease; }
+.progress-volume { margin: 7px 0 0; color: #d8edf1; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .primary-zone { margin-top: 24px; }
 .primary-action {

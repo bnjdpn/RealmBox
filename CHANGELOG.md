@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — 2026-09-03
+
+- Ajout de `cargo xtask release check` et d’un manifeste partagé par le site pour bloquer les versions ou statuts de plateforme incohérents.
+- Suppression des anciens crates de démonstration qui ne pilotaient pas l’application Tauri.
+- Remplacement de l’interprétation des phrases d’erreur côté React par des codes d’erreur sérialisés et des actions de récupération stables.
+- Expurgation des chemins utilisateur dans les diagnostics partageables et ajout d’un piège de focus avec restauration dans la fenêtre de réglages.
+- Ajout des builds Tauri macOS arm64 et Windows x64 aux pull requests et regroupement mensuel des mises à jour Dependabot mineures/correctives.
+- Ajout de la restauration vérifiée du dernier runtime fonctionnel et de sa sauvegarde SQL, avec sauvegarde de sécurité puis retour automatique à l’état initial si l’import échoue.
+- Supervision des seuls processus créés par RealmBox au moyen de groupes Unix et de Job Objects Windows fermés avec l’application.
+- Remplacement de `curl` par un client HTTP Rust avec reprise bornée, progression en octets, proxy système et publication seulement après contrôle SHA-256.
+- Ajout des profils de population, de la distinction souhaitée/appliquée, du contrôle d’espace disque et de trois niveaux de bavardage local.
+- Ajout d’un contrôle axe automatisé, des jalons/issues de durcissement et d’un ruleset `main` exigeant les checks commun, macOS et Windows.
+
 ## 0.2.4 — 2026-09-03
 
 - Ajoute à l’addon une icône de minimap déplaçable, la réduction/restauration du panneau, un bouton de fermeture, les commandes `/realmbox` et `/rb`, ainsi que la mémorisation des positions et de la visibilité.

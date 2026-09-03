@@ -1,6 +1,6 @@
 {
   "name": "realmbox",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
@@ -12,7 +12,8 @@
     "typecheck": "pnpm --dir apps/desktop typecheck",
     "lint": "pnpm --dir apps/desktop lint",
     "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm check:rust"
+    "check:release": "cargo xtask release check",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm check:rust && pnpm check:release"
   },
   "devDependencies": {
     "fengari": "0.1.5"

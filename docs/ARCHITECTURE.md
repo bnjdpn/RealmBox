@@ -1,6 +1,8 @@
 # Architecture
 
-Le parcours joueur normal passe par cinq commandes Tauri étroites : état initial, conseil matériel, installation, démarrage et arrêt. React ne manipule ni processus, ni Docker, ni secret. `LauncherService` possède la machine à états et dépend d'un `CommandRunner` typé, remplaçable par un enregistreur dans les tests.
+Le parcours joueur normal passe par des commandes Tauri étroites couvrant l’état initial, le conseil matériel, l’inspection des données, l’installation, la configuration, le démarrage, l’arrêt et le diagnostic. React ne manipule ni processus, ni Docker, ni secret. `LauncherService` possède la machine à états et dépend d'un `CommandRunner` typé, remplaçable par un enregistreur dans les tests.
+
+Les erreurs traversent cette frontière sous forme de `LauncherCommandError` sérialisée : code stable, composant, détail technique optionnel et actions de récupération bornées. React traduit le code et ne déduit plus la cause depuis une phrase française. Le détail brut reste réservé au diagnostic.
 
 ```text
 React → commandes Tauri → LauncherService → CommandRunner
@@ -30,4 +32,4 @@ Le nom de projet Compose `realmbox-v3` est un identifiant persistant, pas un num
 
 Si les dialogues sont actifs, RealmBox lance son exécutable Ollama sur l'interface loopback avant le monde, avec `OLLAMA_NO_CLOUD=true`. Un superviseur suit le PID du client possédé par le lanceur ; quand ce client disparaît, il déclenche le même arrêt ordonné que le bouton Arrêter et ne touche pas un éventuel processus étranger. Le détail serveur reste dans les logs et diagnostics, pas dans le flux principal.
 
-Les anciens crates domaine/SQLite/fake sont encore présents dans le workspace pour l'historique et leurs tests, mais ne pilotent plus l'application Tauri actuelle.
+Le workspace ne conserve qu’une implémentation produit : l’application Tauri et ses outils. Les anciens crates de démonstration, qui ne pilotaient pas le launcher, ont été retirés afin que les tests du workspace couvrent uniquement du code réellement utilisé.

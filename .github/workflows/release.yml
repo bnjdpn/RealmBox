@@ -33,6 +33,7 @@ jobs:
             echo "::error::tag de release invalide: $GITHUB_REF_NAME"
             exit 1
           fi
+          cargo xtask release check --tag "$GITHUB_REF_NAME"
       - name: Refuser une release sans les quatre images immuables
         shell: bash
         run: |

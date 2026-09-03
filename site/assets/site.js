@@ -102,9 +102,32 @@ async function wireLatestRelease() {
   }
 }
 
+async function wireProductManifest() {
+  try {
+    const response = await fetch("release-manifest.json", { cache: "no-cache" });
+    if (!response.ok) throw new Error(`Manifest returned ${response.status}`);
+    const manifest = await response.json();
+    if (manifest.schemaVersion !== 1 || typeof manifest.productVersion !== "string") return;
+
+    const version = document.querySelector("#product-version");
+    if (version) version.textContent = manifest.productVersion;
+    const updatedAt = document.querySelector("#product-updated-at");
+    if (updatedAt && /^\d{4}-\d{2}-\d{2}$/.test(manifest.updatedAt ?? "")) {
+      const [year, month, day] = manifest.updatedAt.split("-");
+      const months = currentLanguage() === "fr"
+        ? ["JANV.", "FÉVR.", "MARS", "AVR.", "MAI", "JUIN", "JUIL.", "AOÛT", "SEPT.", "OCT.", "NOV.", "DÉC."]
+        : ["JAN.", "FEB.", "MAR.", "APR.", "MAY", "JUN.", "JUL.", "AUG.", "SEP.", "OCT.", "NOV.", "DEC."];
+      updatedAt.textContent = `${Number(day)} ${months[Number(month) - 1]} ${year}`;
+    }
+  } catch {
+    // Le HTML contient une valeur de repli cohérente pour une consultation hors ligne.
+  }
+}
+
 document.querySelectorAll("[data-set-language]").forEach((button) => {
   button.addEventListener("click", () => setLanguage(button.dataset.setLanguage));
 });
 
 setLanguage(queryLanguage ?? storedLanguage ?? browserLanguage);
+wireProductManifest();
 wireLatestRelease();

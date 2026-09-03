@@ -11,4 +11,4 @@ Conserver une fiche séparée par plateforme et noter commit, architecture, bina
 7. Fermer le client et vérifier que seuls les processus appartenant à RealmBox sont arrêtés.
 8. Relancer et vérifier la reprise du personnage et l'absence de processus orphelin.
 
-Rien dans cette liste n'a encore été exécuté avec le runtime réel.
+Le parcours macOS Apple Silicon a été exécuté avec le runtime réel jusqu’à la connexion, au personnage, aux quêtes, aux bots et à l’arrêt ; les preuves datées sont consignées dans [STATUS.md](../STATUS.md). Cette fiche reste entièrement à exécuter sur Windows 11 et doit être rejouée après tout changement de restauration ou de supervision.

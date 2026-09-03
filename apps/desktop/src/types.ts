@@ -6,10 +6,29 @@ export type LauncherPhase =
   | "starting"
   | "running"
   | "stopping"
+  | "recovering"
   | "error";
 
 export type ComponentState = "missing" | "installing" | "ready" | "running" | "stopped" | "error";
 export type ClientChoice = "managedOpenWow" | "originalWindows";
+export type DialogueChattiness = "quiet" | "balanced" | "lively";
+export type LauncherErrorCode =
+  | "dockerMissing"
+  | "dockerNotRunning"
+  | "portUnavailable"
+  | "gameDataIncomplete"
+  | "gameBuildUnsupported"
+  | "downloadInterrupted"
+  | "checksumMismatch"
+  | "backupFailed"
+  | "migrationFailed"
+  | "recoveryFailed"
+  | "clientLaunchFailed"
+  | "worldServerTimeout"
+  | "installationIncomplete"
+  | "installationStateUnreadable"
+  | "operationUnavailable"
+  | "unknown";
 
 export interface LauncherComponent {
   id: "client" | "database" | "server" | "bots" | "ai";
@@ -22,12 +41,17 @@ export interface LauncherStatus {
   phase: LauncherPhase;
   message: string;
   detail: string | null;
+  errorCode: LauncherErrorCode | null;
   progress: number;
   installed: boolean;
+  recoveryAvailable: boolean;
   botsEnabled: boolean;
   botCount: number;
+  requestedBotCount: number;
+  appliedBotCount: number;
   aiEnabled: boolean;
   aiModel: string | null;
+  dialogueChattiness: DialogueChattiness;
   gameDataPath: string | null;
   accountName: string | null;
   accountPassword: string | null;
@@ -35,6 +59,12 @@ export interface LauncherStatus {
   originalClientSupported: boolean;
   platformLabel: string;
   components: LauncherComponent[];
+  operationId?: string;
+  component?: LauncherProgress["component"];
+  step?: LauncherProgress["step"];
+  completedBytes?: number | null;
+  totalBytes?: number | null;
+  cancellable?: boolean;
 }
 
 export interface AiCapability {
@@ -47,6 +77,8 @@ export interface AiCapability {
   grade: string | null;
   estimatedTokensPerSecond: number | null;
   downloadSizeGb: number | null;
+  diskAvailableGb: number | null;
+  diskSpaceSufficient: boolean | null;
   modelLicense: string | null;
   detail: string;
   sourceUrl: string;
@@ -59,10 +91,24 @@ export interface GameDataInspection {
 }
 
 export interface LauncherProgress {
+  operationId: string;
+  component: "launcher" | "gameData" | "client" | "server" | "database" | "bots" | "ai";
+  step: "validate" | "download" | "verify" | "extract" | "configure" | "start" | "stop" | "restore" | "complete";
   phase: LauncherPhase;
   message: string;
   detail: string | null;
+  errorCode: LauncherErrorCode | null;
   progress: number;
+  completedBytes: number | null;
+  totalBytes: number | null;
+  cancellable: boolean;
+}
+
+export interface LauncherCommandError {
+  code: LauncherErrorCode;
+  component: "client" | "database" | "server" | "bots" | "ai" | "launcher";
+  technicalDetail: string | null;
+  recoveryActions: Array<"retry" | "chooseGameData" | "startDocker" | "openDiagnostics">;
 }
 
 export interface RealmDiagnostics {

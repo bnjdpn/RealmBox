@@ -10,7 +10,7 @@
 
 RealmBox est un lanceur Windows x64 et macOS Apple Silicon pour jouer sur un monde 3.3.5a entièrement local. Au premier lancement, il demande le dossier d'une copie compatible appartenant au joueur, puis prépare le client, le serveur, la base locale et Playerbots. Si la machine est assez confortable, il peut aussi installer Ollama et `mod-ollama-chat` pour calculer localement les dialogues des bots. Aux lancements suivants, il démarre la pile dans l'ordre et ouvre le client.
 
-L’interface 0.2.4 est disponible en français et en anglais. Elle sépare **Mon monde**, **Compagnons**, **Dialogues** et **Diagnostic**, montre une cause courte avec l’action de récupération utile et garde les détails serveur hors du parcours joueur.
+L’interface 0.3.0 est disponible en français et en anglais. Elle sépare **Mon monde**, **Compagnons**, **Dialogues** et **Diagnostic**, montre une cause courte avec l’action de récupération utile et garde les détails serveur hors du parcours joueur.
 
 Le launcher et le site partagent une identité originale de portail fantasy nordique : deux panoramas raster distincts créés pour RealmBox avec ImageGen et un médaillon R/B. Le launcher est une scène fixe de 1024 × 640 centrée sur l’état courant et une seule action ; langue, compagnons, dialogues et diagnostic restent dans les réglages. Aucun asset de jeu ni police distante n’est utilisé. Le [design system](docs/DESIGN_SYSTEM.md), l’[audit de réinterprétation historique](docs/WOTLK_ERA_VISUAL_AUDIT.md) et la [provenance de chaque asset](docs/ASSET_PROVENANCE.md) sont documentés dans le dépôt.
 
@@ -69,13 +69,14 @@ La matrice et les décisions détaillées sont suivies dans [ROADMAP.md](ROADMAP
 
 ## Développement
 
-Le développement local observé reste macOS Apple Silicon. Le produit cible aussi Windows x64 ; le chemin Windows compile avec le toolchain MSVC et dispose d'une CI dédiée, mais doit encore être exécuté sur une vraie machine Windows. Le parcours requiert Docker Desktop démarré, Git et curl ; Node, pnpm et Rust ne sont requis que pour construire RealmBox.
+Le développement local observé reste macOS Apple Silicon. Le produit cible aussi Windows x64 ; le chemin Windows compile avec le toolchain MSVC et dispose d'une CI dédiée, mais doit encore être exécuté sur une vraie machine Windows. Le parcours joueur requiert actuellement Docker Desktop démarré, mais plus Git ni curl : RealmBox télécharge par son client HTTP intégré et utilise les images serveur immuables. Node, pnpm, Git et Rust ne sont requis que pour construire RealmBox ou exécuter le mode développeur sans images précompilées.
 
 ```sh
 pnpm install
 pnpm dev          # application Tauri, commandes réelles
 pnpm dev:preview  # aperçu navigateur, aucune simulation d'installation
 pnpm verify
+cargo xtask release check  # cohérence versions, manifeste et statuts de plateforme
 python3 -m http.server 1421 --directory site  # aperçu du site Pages
 ```
 

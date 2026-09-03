@@ -2,18 +2,11 @@
 resolver = "2"
 members = [
   "apps/desktop/src-tauri",
-  "crates/realmbox-domain",
-  "crates/realmbox-storage",
-  "crates/realmbox-client",
-  "crates/realmbox-config",
-  "crates/realmbox-orchestrator",
-  "crates/realmbox-runtime",
-  "crates/realmbox-test-support",
   "tools/xtask",
 ]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.3.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 rust-version = "1.85"

@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +25,8 @@ pub struct AiCapability {
     pub grade: Option<String>,
     pub estimated_tokens_per_second: Option<u32>,
     pub download_size_gb: Option<f32>,
+    pub disk_available_gb: Option<f32>,
+    pub disk_space_sufficient: Option<bool>,
     pub model_license: Option<&'static str>,
     pub detail: String,
     pub source_url: &'static str,
@@ -142,6 +144,8 @@ pub fn inspect_ai_capability<R: CommandRunner>(runner: &R) -> AiCapability {
         grade: None,
         estimated_tokens_per_second: None,
         download_size_gb: None,
+        disk_available_gb: None,
+        disk_space_sufficient: None,
         model_license: None,
         detail: format!("Conseil CanIRun indisponible : {error}"),
         source_url: "https://www.canirun.ai/",
@@ -165,6 +169,8 @@ fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapabi
             grade: None,
             estimated_tokens_per_second: None,
             download_size_gb: None,
+            disk_available_gb: None,
+            disk_space_sufficient: None,
             model_license: None,
             detail: "L’IA de dialogue reste désactivée : RealmBox réserve cette option aux machines disposant d’au moins 16 Go de mémoire.".into(),
             source_url: "https://www.canirun.ai/",
@@ -189,24 +195,9 @@ fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapabi
             quantization: "Q4_K_M",
         };
         let body = serde_json::to_string(&request).map_err(|error| error.to_string())?;
-        let Ok(response) = runner.run(
-            "curl",
-            &[
-                "--silent".into(),
-                "--show-error".into(),
-                "--fail".into(),
-                "--max-time".into(),
-                "8".into(),
-                "--request".into(),
-                "POST".into(),
-                CANIRUN_COMPATIBILITY_URL.into(),
-                "--header".into(),
-                "content-type: application/json".into(),
-                "--data".into(),
-                OsString::from(body),
-            ],
-            None,
-        ) else {
+        let Ok(response) =
+            runner.post_json(CANIRUN_COMPATIBILITY_URL, &body, Duration::from_secs(8))
+        else {
             continue;
         };
         let Ok(report) = serde_json::from_str::<CompatibilityResponse>(&response) else {
@@ -263,6 +254,8 @@ fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapabi
             grade: None,
             estimated_tokens_per_second: None,
             download_size_gb: None,
+            disk_available_gb: None,
+            disk_space_sufficient: None,
             model_license: None,
             detail: "CanIRun ne classe aucun modèle RealmBox comme confortable dans le budget réservé au jeu.".into(),
             source_url: "https://www.canirun.ai/",
@@ -279,6 +272,8 @@ fn inspect_ai_capability_result<R: CommandRunner>(runner: &R) -> Result<AiCapabi
         grade: Some(report.grade.clone()),
         estimated_tokens_per_second: Some(report.estimated.tokens_per_second.round() as u32),
         download_size_gb: Some(candidate.download_size_gb),
+        disk_available_gb: None,
+        disk_space_sufficient: None,
         model_license: Some(candidate.license),
         detail: format!(
             "CanIRun le classe confortable en Q4 ; RealmBox l’a choisi automatiquement pour son rapport vitesse/taille dans un budget de {:.0} Go.",
@@ -357,6 +352,13 @@ pub fn is_allowed_ollama_model(model: &str) -> bool {
         .any(|candidate| candidate.ollama_model == model)
 }
 
+pub fn model_download_bytes(model: &str) -> Option<u64> {
+    AI_CANDIDATES
+        .iter()
+        .find(|candidate| candidate.ollama_model == model)
+        .map(|candidate| (f64::from(candidate.download_size_gb) * 1024_f64.powi(3)) as u64)
+}
+
 pub fn expected_ollama_digest(model: &str) -> Option<&'static str> {
     AI_CANDIDATES
         .iter()
@@ -374,7 +376,7 @@ fn parse_u32(value: &str, label: &str) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{path::Path, sync::Mutex, time::Duration};
+    use std::{ffi::OsString, path::Path, sync::Mutex, time::Duration};
 
     #[derive(Default)]
     struct FakeRunner {

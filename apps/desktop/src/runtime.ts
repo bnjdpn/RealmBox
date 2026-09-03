@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AiCapability, ClientChoice, GameDataInspection, LauncherProgress, LauncherStatus, RealmDiagnostics } from "./types";
+import type { AiCapability, ClientChoice, DialogueChattiness, GameDataInspection, LauncherProgress, LauncherStatus, RealmDiagnostics } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -12,12 +12,17 @@ function browserStatus(): LauncherStatus {
     phase: "needsGameData",
     message: "Données de jeu requises",
     detail: "L’installation réelle est disponible dans l’application desktop RealmBox.",
+    errorCode: null,
     progress: 0,
     installed: false,
+    recoveryAvailable: false,
     botsEnabled: true,
     botCount: 50,
+    requestedBotCount: 50,
+    appliedBotCount: 50,
     aiEnabled: false,
     aiModel: null,
+    dialogueChattiness: "balanced",
     gameDataPath: null,
     accountName: null,
     accountPassword: null,
@@ -54,6 +59,7 @@ function browserStatus(): LauncherStatus {
       phase: previewState as "ready" | "running" | "error",
       message: running ? "Le monde est lancé" : "Installation terminée",
       detail: previewState === "error" ? "Le serveur local n’a pas répondu dans le délai prévu" : null,
+      errorCode: previewState === "error" ? "worldServerTimeout" : null,
       progress: previewState === "error" ? 76 : 100,
       installed: true,
       gameDataPath: "/Jeux/RealmBox",
@@ -89,6 +95,8 @@ export async function inspectAiCapability(): Promise<AiCapability> {
       grade: "A",
       estimatedTokensPerSecond: 42,
       downloadSizeGb: 2,
+      diskAvailableGb: 80,
+      diskSpaceSufficient: true,
       modelLicense: "Licence du modèle affichée avant installation",
       detail: "Exemple visuel local, sans téléchargement ni exécution.",
       sourceUrl: "https://www.canirun.ai/",
@@ -102,6 +110,8 @@ export async function inspectAiCapability(): Promise<AiCapability> {
       grade: null,
       estimatedTokensPerSecond: null,
       downloadSizeGb: null,
+      diskAvailableGb: null,
+      diskSpaceSufficient: null,
       modelLicense: null,
       detail: "Le conseil matériel est disponible dans l’application desktop.",
       sourceUrl: "https://www.canirun.ai/",
@@ -118,6 +128,13 @@ export async function configureLocalDialogue(
     return { ...browserStatus(), phase: "ready", installed: true, aiEnabled: enabled, aiModel: enabled ? model : null };
   }
   return invoke<LauncherStatus>("configure_local_dialogue", { enabled, model });
+}
+
+export async function configureDialogueChattiness(chattiness: DialogueChattiness): Promise<LauncherStatus> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { ...browserStatus(), phase: "ready", installed: true, dialogueChattiness: chattiness };
+  }
+  return invoke<LauncherStatus>("configure_dialogue_chattiness", { chattiness });
 }
 
 export async function inspectGameData(gameDataPath: string): Promise<GameDataInspection> {
@@ -153,9 +170,13 @@ export async function stopRealm(): Promise<LauncherStatus> {
   return invoke<LauncherStatus>("stop_realm");
 }
 
+export async function restoreLastRecovery(): Promise<LauncherStatus> {
+  return invoke<LauncherStatus>("restore_last_recovery");
+}
+
 export async function updatePlayerbotPopulation(botsEnabled: boolean, botCount: number): Promise<LauncherStatus> {
   if (!window.__TAURI_INTERNALS__) {
-    return { ...browserStatus(), phase: "running", installed: true, botsEnabled, botCount };
+    return { ...browserStatus(), phase: "running", installed: true, botsEnabled, botCount, requestedBotCount: botCount, appliedBotCount: botCount };
   }
   return invoke<LauncherStatus>("update_playerbot_population", { botsEnabled, botCount });
 }

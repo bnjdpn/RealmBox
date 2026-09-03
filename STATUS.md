@@ -2,20 +2,34 @@
 
 Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO pour le parcours local macOS avec OpenWoW, AzerothCore et Playerbots, ainsi que pour les dialogues joueur-bot locaux observés en français et en anglais. GO automatisé pour RealmBox 0.2.0, son site FR/EN, ses images serveur multiarchitecture et sa pré-release GitHub en brouillon. NO-GO pour publier ce brouillon comme release publique prête pour Windows et pour l'affirmation que toutes les fonctions OpenWoW sont équivalentes au client original.**
+Décision actuelle : **GO pour le parcours local macOS déjà observé avec OpenWoW, AzerothCore et Playerbots, ainsi que pour les dialogues joueur-bot locaux observés en français et en anglais. GO automatisé pour les sources RealmBox 0.3.0, son site FR/EN et ses images serveur multiarchitecture. Le bundle installé et la preuve réelle restent en 0.2.4 ; le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée, et pour affirmer que toutes les fonctions OpenWoW sont équivalentes au client original.**
+
+## Durcissement automatisé 0.3.0
+
+| Fonction | Niveau de preuve | Résultat |
+|---|---|---|
+| Restauration automatique | tests Rust avec runner factice | runtime et dump SQL vérifiés avant échange ; sauvegarde de sécurité non écrasable ; import cible ; validation des quatre bases ; un import volontairement défaillant restaure automatiquement runtime et base initiaux ; aucun `--volumes` |
+| Supervision des processus | tests Unix réels + compilation MSVC isolée | seuls les enfants conservés par handle sont arrêtables ; groupe de processus Unix fermé ; Job Object Windows configuré avec `KILL_ON_JOB_CLOSE` ; parcours Windows réel non exécuté |
+| Téléchargements joueur | tests Rust + compilation | client HTTP Rust avec proxy système, reprise HTTP, trois tentatives, octets transférés et publication atomique après SHA-256 ; `curl` reste seulement le fallback des runners de test/développement |
+| Profils et limites | tests UI/Rust | profils Aventure tranquille, Monde vivant, Monde dense et Personnalisé ; population souhaitée conservée séparément de la valeur plafonnée réellement appliquée |
+| Dialogues | tests UI/Rust | espace disponible affiché et marge disque imposée ; trois niveaux de bavardage bornés, modifiables uniquement monde arrêté ; commandes de jeu toujours hors LLM |
+| Accessibilité | axe + tests UI | 23 tests React, dont flux principal et modale contrôlés par axe hors contraste non calculable dans jsdom ; VoiceOver et Narrator restent manuels |
+| Industrialisation GitHub | lecture API après mutation | jalons 0.3/0.4/1.0, issues #11 à #20 et ruleset `main` actif ; checks Validation, macOS arm64 et Windows x64 obligatoires, résolution des discussions, bypass administrateur |
+| Vérification locale | automatisée | `pnpm verify` réussi après mise à jour du statut : typecheck, lint, 23 tests UI, 7 tests de scripts, build Vite, Clippy strict, 49 tests Rust et cohérence de release 0.3.0 |
 
 ## Refonte desktop et correctifs 0.2.2–0.2.4
 
 | Fonction | Niveau de preuve | Résultat |
 |---|---|---|
 | Launcher fixe | configuration + test Node + build Tauri | fenêtre 1024 × 640, min/max identiques, non redimensionnable, non maximisable et centrée ; bundle `.app` accepté par le schéma Tauri 2 |
-| Composition joueur | 18 tests UI + QA visuelle simulée | une illustration ImageGen plein cadre, une marque, un état et une action ; réglages, langue, compagnons, dialogues et diagnostic dans un panneau contextuel ; états premier lancement, vérification, installation, prêt et erreur contrôlés à 1024 × 640 |
+| Composition joueur | 20 tests UI + QA visuelle simulée | une illustration ImageGen plein cadre, une marque, un état et une action ; réglages, langue, compagnons, dialogues et diagnostic dans un panneau contextuel ; focus piégé dans la modale puis restauré ; états premier lancement, vérification, installation, prêt et erreur contrôlés à 1024 × 640 |
 | Progression et erreurs | tests UI + QA visuelle simulée | aucune jauge à 0 ou 100 %, progression visible uniquement pendant une opération active ; détails techniques absents de l’accueil et accessibles dans Diagnostic |
+| Protocole et diagnostic partageable | tests UI/Rust | codes d’erreur et récupérations sérialisés par Tauri ; le front ne classe plus les phrases ; secrets et chemins utilisateur expurgés, chemin local exclu de la copie partageable |
 | Activation des dialogues après 0.2.0 | tests UI/Rust + parcours réel | l'ouverture ne démarre plus automatiquement le monde ; le blocage monde actif propose un arrêt explicite ; runtime serveur préparé en staging après backup SQL vérifié, ancien serveur conservé hors runtime et projet Compose `realmbox-v3` inchangé ; extraction corrigée depuis `/azerothcore/env/ref/etc/modules/mod_ollama_chat.conf.dist` |
 | Dossier client modifiable | 2 tests UI + 3 tests Rust | changement interdit pendant la partie ; nouveau dossier 3.3.5a revalidé ; overlay OpenWoW remplacé atomiquement ou chemin `Wow.exe` mis à jour ; Compose et base joueurs inchangés ; parcours Windows réel non rejoué |
 | Addon Compagnons 0.2.0-dev | 5 tests exécutant le Lua + analyse XML | réduction dans une icône de minimap, visibilité et positions persistées, FR/EN, composition du groupe, prérequis d’action et commandes bornées couverts avec API WoW simulée ; rendu et commandes `co ±boost` non encore rejoués dans OpenWoW |
 | Bundle macOS local | build + installation + inspection locale | RealmBox 0.2.4 arm64 installé dans `/Users/benjamin/Applications/RealmBox.app`, signé ad hoc ; `codesign --deep --strict` valide ; exécutable SHA-256 `e136e64c…d2c308` ; les quatre références serveur immuables, le prompt bilingue minimal et l’addon de reconnexion sont intégrés |
-| Vérification locale | automatisée | `pnpm verify` réussi : typecheck, lint, 18 tests UI, 7 tests de scripts dont 5 exécutant le Lua de l’addon, build Vite, Clippy strict et 57 tests Rust du workspace |
+| Vérification locale | automatisée | `pnpm verify` réussi : typecheck, lint, 20 tests UI, 7 tests de scripts dont 5 exécutant le Lua de l’addon, build Vite, Clippy strict, 43 tests Rust du workspace et contrôle de cohérence de release |
 
 ## Jalon 0.2.0
 
@@ -78,7 +92,7 @@ Le bundle 0.2.4 est installé dans `/Users/benjamin/Applications/RealmBox.app`, 
 - Les 50 bots autonomes sont répartis dans Azeroth. Seuls les quatre bots d’équipe sont garantis près du joueur.
 - La nouvelle ergonomie 0.2.0-dev de l’addon Compagnons passe son harnais Lua simulé, mais l’icône de minimap, la persistance, le bilingue et les commandes `co +boost` / `co -boost` doivent encore être observés dans OpenWoW.
 - Le contrôle à chaud est implémenté dans 0.2.0 et prouvé avec fakes plus un conteneur Docker isolé. Il reste à le rejouer sur le vrai worldserver après le prochain démarrage géré, sans interrompre la session actuellement ouverte.
-- Le contrat de mise à jour protège désormais le volume et impose une sauvegarde avant migration. Trois dumps réels présents ont une empreinte SHA-256 valide, dont ceux créés pendant le parcours 0.2.2 ; aucune restauration complète n'a toutefois été exécutée.
+- Le contrat de mise à jour protège désormais le volume et impose une sauvegarde avant migration. Trois dumps réels présents ont une empreinte SHA-256 valide, dont ceux créés pendant le parcours 0.2.2 ; la restauration complète passe avec fakes, y compris le retour après import défaillant, mais n’a pas encore été exécutée puis vérifiée en jeu sur les données réelles.
 - L'activation Ollama après une installation antérieure est prouvée sur ce Mac avec staging, sauvegarde, rollback du runtime, téléchargement et inférence. Le correctif 0.2.4 a été rechargé par la commande upstream `ollama reload` et les réponses FR puis EN ont été observées dans le canal de groupe. La qualité factuelle reste celle d'un modèle local 3B et n'est pas garantie.
 - Les fichiers du nouvel addon 0.2.4 sont identiques à la source dans le runtime actif, mais son interface enrichie n'a pas été confirmée visuellement après `/reload` dans OpenWoW ; le prochain démarrage géré le réinstallera avant d'ouvrir le client.
 - Les images serveur RealmBox sont publiées et épinglées par digest. Le prochain parcours réel doit confirmer qu’une installation neuve les télécharge sans recompiler AzerothCore et Playerbots.
