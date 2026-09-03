@@ -12,6 +12,7 @@ export type LauncherPhase =
 export type ComponentState = "missing" | "installing" | "ready" | "running" | "stopped" | "error";
 export type ClientChoice = "managedOpenWow" | "originalWindows";
 export type DialogueChattiness = "quiet" | "balanced" | "lively";
+export type BotPresence = "dispersed" | "natural" | "close";
 export type LauncherErrorCode =
   | "dockerMissing"
   | "dockerNotRunning"
@@ -49,6 +50,7 @@ export interface LauncherStatus {
   botCount: number;
   requestedBotCount: number;
   appliedBotCount: number;
+  botPresence: BotPresence;
   aiEnabled: boolean;
   aiModel: string | null;
   dialogueChattiness: DialogueChattiness;
@@ -116,4 +118,9 @@ export interface RealmDiagnostics {
   component: "client" | "database" | "server" | "bots" | "ai" | "launcher";
   logsPath: string;
   recentEntries: string[];
+}
+
+export interface RealmBackupSummary {
+  createdAtUnixMs: number;
+  sizeBytes: number;
 }

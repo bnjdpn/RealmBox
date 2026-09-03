@@ -1,9 +1,9 @@
 From: RealmBox
-Subject: [PATCH] Bound ambient chatter and reset schedules on reload
+Subject: [PATCH] Prioritize player replies and invalidate stale ambient chat
 Upstream-Commit: a9d14b0b8955be136e657ac168dd255f5281a535
 
 diff --git a/src/mod-ollama-chat_command.cpp b/src/mod-ollama-chat_command.cpp
-index 22d03df..3157a3f 100644
+index 22d03df..6bd9f0d 100644
 --- a/src/mod-ollama-chat_command.cpp
 +++ b/src/mod-ollama-chat_command.cpp
 @@ -6,6 +6,7 @@
@@ -14,22 +14,358 @@ index 22d03df..3157a3f 100644
  #include "mod-ollama-chat_response.h"
  #include "mod-ollama-chat_roleplay.h"
  #include "mod-ollama-chat-utilities.h"
-@@ -64,6 +65,7 @@ bool OllamaChatConfigCommand::HandleOllamaReloadCommand(ChatHandler* handler)
+@@ -64,6 +65,8 @@ bool OllamaChatConfigCommand::HandleOllamaReloadCommand(ChatHandler* handler)
      sConfigMgr->Reload();
      LoadOllamaChatConfig();
      Roleplay_Load();
++    OllamaDispatch_OnConfigReload();
 +    OllamaRandomChatter_ResetSchedule();
- 
+
      // Re-probe: the operator may have just pointed the module at a different
      // model, and think-mode support is per-model.
+diff --git a/src/mod-ollama-chat_dispatch.cpp b/src/mod-ollama-chat_dispatch.cpp
+index b58b76d..17d2c5f 100644
+--- a/src/mod-ollama-chat_dispatch.cpp
++++ b/src/mod-ollama-chat_dispatch.cpp
+@@ -24,6 +24,7 @@
+ #include "PlayerbotAI.h"
+ #include "PlayerbotMgr.h"
+
++#include <algorithm>
+ #include <atomic>
+ #include <chrono>
+ #include <condition_variable>
+@@ -43,6 +44,7 @@ namespace
+     {
+         TaskType          type = TaskType::ChatReply;
+         OllamaChatRequest request;
++        uint64_t          ambientEpoch = 0;
+
+         // Sentiment-only payload.
+         uint64_t    sentimentBotGuid    = 0;
+@@ -57,11 +59,25 @@ namespace
+         std::string memoryPrompt;
+     };
+
++    bool IsHumanReply(const Task& task)
++    {
++        // Human-originated chat replies are the only requests that record a
++        // player/bot turn. Bot chains, ambient lines, events and background
++        // maintenance never set this flag.
++        return task.type == TaskType::ChatReply && task.request.recordHistory;
++    }
++
++    bool IsAmbientChat(const Task& task)
++    {
++        return task.type == TaskType::ChatReply && !IsHumanReply(task);
++    }
++
+     struct Completion
+     {
+         OllamaChatRequest request;
+         std::string       text;
+         uint32_t          emoteId = 0;
++        uint64_t          ambientEpoch = 0;
+         Clock::time_point deliverAt;
+     };
+
+@@ -84,6 +100,7 @@ namespace
+     std::atomic<uint64_t> g_droppedEmpty{ 0 };
+     std::atomic<uint64_t> g_droppedGovernor{ 0 };
+     std::atomic<uint64_t> g_totalFailed{ 0 };
++    std::atomic<uint64_t> g_ambientEpoch{ 1 };
+
+     std::mutex  g_errorMutex;
+     std::string g_lastError;
+@@ -99,6 +116,10 @@ namespace
+
+     void RunChatTask(const Task& task)
+     {
++        if (IsAmbientChat(task) &&
++            task.ambientEpoch != g_ambientEpoch.load(std::memory_order_acquire))
++            return;
++
+         OllamaApiResult api = QueryOllama(task.request.prompt, task.request.kind);
+
+         if (!api.ok)
+@@ -138,6 +159,7 @@ namespace
+         completion.request = task.request;
+         completion.text    = std::move(text);
+         completion.emoteId = emoteId;
++        completion.ambientEpoch = task.ambientEpoch;
+
+         uint32_t delayMs = 0;
+         if (g_EnableTypingSimulation)
+@@ -152,6 +174,9 @@ namespace
+         completion.deliverAt = Clock::now() + std::chrono::milliseconds(delayMs);
+
+         std::lock_guard<std::mutex> lock(g_doneMutex);
++        if (IsAmbientChat(task) &&
++            task.ambientEpoch != g_ambientEpoch.load(std::memory_order_acquire))
++            return;
+         g_done.push_back(std::move(completion));
+     }
+
+@@ -326,6 +351,10 @@ namespace
+
+     void Deliver(const Completion& c, const OllamaWorldSnapshot& world)
+     {
++        if (!c.request.recordHistory &&
++            c.ambientEpoch != g_ambientEpoch.load(std::memory_order_acquire))
++            return;
++
+         Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(c.request.botGuid));
+         if (!bot || !bot->IsInWorld())
+             return;
+@@ -338,7 +367,12 @@ namespace
+
+         // Repetition is checked at delivery rather than at submission, because
+         // we only know what the model actually said now.
+-        if (Governor_IsRepetitive(botGuid, c.request.scopeKey, c.text))
++        // A real player's eligible message must not disappear because ambient
++        // chatter used the shared governor budget first. Human replies remain
++        // bounded by the dispatcher queue/worker pool, and may still fail if
++        // Ollama fails or the destination no longer exists.
++        const bool humanReply = c.request.recordHistory;
++        if (!humanReply && Governor_IsRepetitive(botGuid, c.request.scopeKey, c.text))
+         {
+             ++g_droppedGovernor;
+             if (g_DebugEnabled)
+@@ -348,7 +382,7 @@ namespace
+             return;
+         }
+
+-        if (!Governor_TryConsumeSend(botGuid, c.request.scopeKey))
++        if (!humanReply && !Governor_TryConsumeSend(botGuid, c.request.scopeKey))
+         {
+             ++g_droppedGovernor;
+             if (g_DebugEnabled)
+@@ -468,6 +502,7 @@ bool OllamaDispatch_Submit(OllamaChatRequest request)
+     Task task;
+     task.type    = TaskType::ChatReply;
+     task.request = std::move(request);
++    const bool humanReply = IsHumanReply(task);
+
+     {
+         std::lock_guard<std::mutex> lock(g_queueMutex);
+@@ -475,17 +510,59 @@ bool OllamaDispatch_Submit(OllamaChatRequest request)
+         if (!g_running)
+             return false;
+
+-        if (g_MaxQueueDepth > 0 && g_queue.size() >= g_MaxQueueDepth)
++        if (!humanReply)
++            task.ambientEpoch = g_ambientEpoch.load(std::memory_order_acquire);
++
++        if (g_MaxQueueDepth > 0)
+         {
+-            ++g_droppedQueueFull;
+-            if (g_DebugEnabled)
+-                LOG_INFO("module.ollamachat",
+-                         "[Ollama Chat] Queue full ({}); dropping request for {}.",
+-                         g_queue.size(), task.request.botName);
+-            return false;
++            if (humanReply && g_queue.size() >= g_MaxQueueDepth)
++            {
++                // The last slot is reserved for a player reply. If older
++                // ambient work filled the queue before this policy was loaded,
++                // evict the newest non-human task rather than the player.
++                auto evict = g_queue.end();
++                for (auto it = g_queue.begin(); it != g_queue.end(); ++it)
++                    if (!IsHumanReply(*it))
++                        evict = it;
++
++                if (evict == g_queue.end())
++                {
++                    ++g_droppedQueueFull;
++                    return false; // bounded even under a flood of player chat
++                }
++
++                g_queue.erase(evict);
++                ++g_droppedQueueFull;
++            }
++            else if (!humanReply)
++            {
++                const size_t ambientLimit = g_MaxQueueDepth > 0
++                    ? static_cast<size_t>(g_MaxQueueDepth - 1)
++                    : 0;
++                if (g_queue.size() >= ambientLimit)
++                {
++                    ++g_droppedQueueFull;
++                    if (g_DebugEnabled)
++                        LOG_INFO("module.ollamachat",
++                                 "[Ollama Chat] Ambient queue limit ({}) reached; reserving one slot for player chat.",
++                                 ambientLimit);
++                    return false;
++                }
++            }
+         }
+
+-        g_queue.push_back(std::move(task));
++        if (humanReply)
++        {
++            // Stable priority: preserve FIFO among player replies, but put them
++            // ahead of every queued ambient/background task.
++            auto firstAmbient = std::find_if(g_queue.begin(), g_queue.end(),
++                [](const Task& queued) { return !IsHumanReply(queued); });
++            g_queue.insert(firstAmbient, std::move(task));
++        }
++        else
++        {
++            g_queue.push_back(std::move(task));
++        }
+     }
+
+     ++g_totalSubmitted;
+@@ -493,6 +570,42 @@ bool OllamaDispatch_Submit(OllamaChatRequest request)
+     return true;
+ }
+
++void OllamaDispatch_OnConfigReload()
++{
++    uint64_t currentEpoch;
++    size_t queuedRemoved = 0;
++    size_t completedRemoved = 0;
++
++    {
++        std::lock_guard<std::mutex> lock(g_queueMutex);
++        currentEpoch = g_ambientEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;
++
++        const size_t before = g_queue.size();
++        g_queue.erase(std::remove_if(g_queue.begin(), g_queue.end(), IsAmbientChat),
++                      g_queue.end());
++        queuedRemoved = before - g_queue.size();
++    }
++
++    {
++        std::lock_guard<std::mutex> lock(g_doneMutex);
++        const size_t before = g_done.size();
++        g_done.erase(
++            std::remove_if(g_done.begin(), g_done.end(),
++                [currentEpoch](const Completion& completion)
++                {
++                    return !completion.request.recordHistory &&
++                           completion.ambientEpoch != currentEpoch;
++                }),
++            g_done.end());
++        completedRemoved = before - g_done.size();
++    }
++
++    if (g_DebugEnabled && (queuedRemoved > 0 || completedRemoved > 0))
++        LOG_INFO("module.ollamachat",
++                 "[Ollama Chat] Config reload invalidated {} queued and {} completed ambient request(s).",
++                 queuedRemoved, completedRemoved);
++}
++
+ void OllamaDispatch_SubmitSentiment(uint64_t botGuid, uint64_t playerGuid,
+                                     const std::string& message)
+ {
+diff --git a/src/mod-ollama-chat_dispatch.h b/src/mod-ollama-chat_dispatch.h
+index bbb43ba..5dc8ed4 100644
+--- a/src/mod-ollama-chat_dispatch.h
++++ b/src/mod-ollama-chat_dispatch.h
+@@ -81,6 +81,10 @@ void OllamaDispatch_Update(uint32_t diff);
+ void OllamaDispatch_Start();
+ void OllamaDispatch_Stop();
+
++// Preserve player replies across a config reload, but invalidate ambient chat
++// that was generated under the previous conversation mode.
++void OllamaDispatch_OnConfigReload();
++
+ // Fire-and-forget sentiment analysis. Runs entirely on a worker: the sentiment
+ // store is mutex-guarded in-memory state plus async DB writes, so it never
+ // needs the world thread -- and it must never run on it, because the analysis
+diff --git a/src/mod-ollama-chat_events.cpp b/src/mod-ollama-chat_events.cpp
+index 867f116..aee8bae 100644
+--- a/src/mod-ollama-chat_events.cpp
++++ b/src/mod-ollama-chat_events.cpp
+@@ -15,6 +15,7 @@
+ #include "AchievementMgr.h"
+ #include "Containers.h"
+ #include "GameObject.h"
++#include "Group.h"
+ #include "Guild.h"
+ #include "Item.h"
+ #include "Log.h"
+@@ -252,10 +253,14 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type,
+             isGuildEvent ? SRC_GUILD_LOCAL
+                          : (partyAudience ? SRC_PARTY_LOCAL : SRC_SAY_LOCAL);
+
++        const uint32_t groupOrZoneId =
++            (source_ == SRC_PARTY_LOCAL || source_ == SRC_RAID_LOCAL) && bot->GetGroup()
++                ? bot->GetGroup()->GetGUID().GetCounter()
++                : bot->GetZoneId();
+         const std::string scopeKey = Governor_MakeScopeKey(
+             ChatChannelSourceLocalStr[source_], 0, "",
+             source_ == SRC_GUILD_LOCAL ? bot->GetGuildId() : 0,
+-            bot->GetZoneId());
++            groupOrZoneId);
+
+         if (!Governor_CanSend(bot->GetGUID(), scopeKey))
+             continue;
+diff --git a/src/mod-ollama-chat_governor.cpp b/src/mod-ollama-chat_governor.cpp
+index 9e0706a..57bd0a4 100644
+--- a/src/mod-ollama-chat_governor.cpp
++++ b/src/mod-ollama-chat_governor.cpp
+@@ -223,6 +223,11 @@ std::string Governor_MakeScopeKey(const char* sourceName, uint32_t channelId,
+         key += "#g";
+         key += std::to_string(guildId);
+     }
++    else if (key == "Party" || key == "Raid")
++    {
++        key += "#p";
++        key += std::to_string(groupOrZoneId);
++    }
+     else
+     {
+         key += "#z";
+diff --git a/src/mod-ollama-chat_handler.cpp b/src/mod-ollama-chat_handler.cpp
+index 81658e9..4e87519 100644
+--- a/src/mod-ollama-chat_handler.cpp
++++ b/src/mod-ollama-chat_handler.cpp
+@@ -1095,13 +1095,17 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
+     // --- conversation governor -------------------------------------------
+     // One key per conversation space so cooldowns, rate limits and repetition
+     // history are tracked per channel rather than globally.
++    const uint32_t groupOrZoneId =
++        (sourceLocal == SRC_PARTY_LOCAL || sourceLocal == SRC_RAID_LOCAL) && player->GetGroup()
++            ? player->GetGroup()->GetGUID().GetCounter()
++            : player->GetZoneId();
+     const std::string scopeKey = Governor_MakeScopeKey(
+         ChatChannelSourceLocalStr[sourceLocal],
+         channel ? channel->GetChannelId() : 0,
+         channel ? channel->GetName() : std::string(),
+         (sourceLocal == SRC_GUILD_LOCAL || sourceLocal == SRC_OFFICER_LOCAL)
+             ? player->GetGuildId() : 0,
+-        player->GetZoneId());
++        groupOrZoneId);
+
+     if (!senderIsBot)
+     {
+@@ -1634,7 +1638,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
+         // Everything below runs on the world thread: prompt building reads
+         // live world state, and the governor decides before we spend an LLM
+         // call rather than after.
+-        if (!Governor_CanSend(bot->GetGUID(), scopeKey))
++        if (senderIsBot && !Governor_CanSend(bot->GetGUID(), scopeKey))
+         {
+             if (g_DebugEnabled)
+                 LOG_INFO("module.ollamachat",
 diff --git a/src/mod-ollama-chat_random.cpp b/src/mod-ollama-chat_random.cpp
-index 710070b..9797b2c 100644
+index 710070b..8c489cb 100644
 --- a/src/mod-ollama-chat_random.cpp
 +++ b/src/mod-ollama-chat_random.cpp
-@@ -201,6 +201,12 @@ void OllamaRandomChatter_ForgetBot(ObjectGuid botGuid)
+@@ -14,6 +14,7 @@
+
+ #include "Channel.h"
+ #include "ChannelMgr.h"
++#include "Group.h"
+ #include "Guild.h"
+ #include "Log.h"
+ #include "Map.h"
+@@ -201,6 +202,12 @@ void OllamaRandomChatter_ForgetBot(ObjectGuid botGuid)
      g_nextRandomChatTime.erase(botGuid.GetRawValue());
  }
- 
+
 +void OllamaRandomChatter_ResetSchedule()
 +{
 +    std::lock_guard<std::mutex> lock(g_scheduleMutex);
@@ -37,12 +373,12 @@ index 710070b..9797b2c 100644
 +}
 +
  OllamaBotRandomChatter::OllamaBotRandomChatter() : WorldScript("OllamaBotRandomChatter") { }
- 
+
  void OllamaBotRandomChatter::OnUpdate(uint32 diff)
-@@ -284,6 +290,12 @@ void OllamaBotRandomChatter::HandleRandomChatter()
- 
+@@ -284,6 +291,12 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+
      const time_t now = time(nullptr);
- 
+
 +    // This limit is deliberately local to one ambient-chatter pass and one
 +    // destination scope. A busy party or city must not consume another
 +    // audience's allowance, and a full dispatcher queue must not count as a
@@ -52,10 +388,21 @@ index 710070b..9797b2c 100644
      for (auto const& itr : allPlayers)
      {
          Player* bot = itr.second;
-@@ -363,6 +375,16 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+@@ -357,11 +370,25 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+
+         // Same inputs the reply path uses, so ambient lines and replies in the
+         // same channel share one cooldown, rate limit and repetition history.
++        const uint32_t groupOrZoneId =
++            (source == SRC_PARTY_LOCAL || source == SRC_RAID_LOCAL) && bot->GetGroup()
++                ? bot->GetGroup()->GetGUID().GetCounter()
++                : bot->GetZoneId();
+         const std::string scopeKey = Governor_MakeScopeKey(
+             ChatChannelSourceLocalStr[source],
+             channelId, channelName,
              source == SRC_GUILD_LOCAL ? bot->GetGuildId() : 0,
-             bot->GetZoneId());
- 
+-            bot->GetZoneId());
++            groupOrZoneId);
++
 +        const auto submittedIt = successfulSubmissionsByScope.find(scopeKey);
 +        const uint32_t submittedForScope = submittedIt == successfulSubmissionsByScope.end()
 +            ? 0
@@ -65,19 +412,18 @@ index 710070b..9797b2c 100644
 +            reschedule();
 +            continue;
 +        }
-+
+
          if (!Governor_CanSend(bot->GetGUID(), scopeKey))
          {
-             reschedule();
-@@ -390,7 +412,10 @@ void OllamaBotRandomChatter::HandleRandomChatter()
+@@ -390,7 +417,10 @@ void OllamaBotRandomChatter::HandleRandomChatter()
          request.triggerBotReplies = true;
- 
+
          if (OllamaDispatch_Submit(std::move(request)))
 +        {
              Topics_NoteUsed(bot->GetGUID(), topic.key);
 +            ++successfulSubmissionsByScope[scopeKey];
 +        }
- 
+
          reschedule();
      }
 diff --git a/src/mod-ollama-chat_random.h b/src/mod-ollama-chat_random.h
@@ -87,7 +433,7 @@ index c910af9..fa27e52 100644
 @@ -20,4 +20,8 @@ private:
  // bot GUID the server had ever seen and never released one.
  void OllamaRandomChatter_ForgetBot(ObjectGuid botGuid);
- 
+
 +// Clears every pending random-chatter deadline. Config hot reloads call this
 +// after changing the min/max interval so bots do not keep stale deadlines.
 +void OllamaRandomChatter_ResetSchedule();

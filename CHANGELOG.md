@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0 — 2026-09-03
+
+- Ajoute dans Réglages une vue **Protection** bilingue qui crée à la demande un nouveau dump cohérent des quatre bases, vérifie son contenu et son SHA-256, le conserve hors du runtime sans écrasement et laisse un monde déjà ouvert en fonctionnement.
+- Verrouille dans le manifeste de provenance le correctif RealmBox appliqué au module Ollama et documente les idées retenues ou écartées après revue des principaux projets solo, Playerbots, NPCBots et assistants locaux.
+- Sépare les cinq populations proposées — 5, 25, 50, 100 et 150 — de leur présence autour du joueur avec trois choix explicites : **Dispersés**, **Naturelle** (recommandé) et **Toujours proches**. Les installations neuves choisissent Naturelle ; une installation antérieure à 0.4.0 sans préférence enregistrée conserve Toujours proches pour éviter un changement silencieux.
+- Rend chaque profil de présence cohérent de bout en bout dans Playerbots et `mod-realmbox-presence`, puis rend les bots déplacés au cycle de voyage natif avec `ScheduleTeleport` après un délai borné. Le mode Dispersés peut raccourcir ce délai pour les bots placés et encore suivis par la même instance serveur, dès qu’ils sont sûrs et hors de vue, sans téléportation immédiate ; il ne devine pas l’origine des événements hérités après un redémarrage.
+- Présente **Escorte**, **Garde** et **Libres** comme trois choix séparés dans l’addon. La préférence enregistrée n’est réappliquée qu’après stabilisation du groupe ; libérer l’équipe restaure d’abord les stratégies autonomes avant `leave`.
+- Borne à 30 secondes la réapplication différée d’un comportement d’équipe, conserve le modèle local lors d’une réactivation hors ligne et resynchronise toutes les préférences après restauration d’un runtime.
+- Remplace les libellés techniques de bavardage par **Direct**, **Immersif** et **Vivant**. Direct coupe l’ambiance ; Immersif utilise des occasions modérées et un intervalle de 90–180 s ; Vivant augmente ces occasions avec un intervalle de 30–90 s, toujours sous plafonds par portée et global.
+- Place les demandes humaines éligibles, configurées à 100 %, avant les tâches ambiantes, réserve un emplacement de file au trafic humain et sépare les budgets des groupes et raids. Un changement de mode invalide l’ambiance en attente ou en vol sans supprimer les demandes humaines. Une file humaine pleine, un échec Ollama ou une destination disparue peuvent toujours empêcher la réponse.
+- Désactive l’historique, la mémoire, les relations, le RAG, le sentiment et les emotes générées dans les profils RealmBox. Le prompt direct demande une réponse dans la langue du dernier message ; les prompts ambiants sont français pour une copie `frFR` et anglais pour les autres locales prises en charge.
+- Ajoute une couverture automatisée des profils, migrations de préférences, commandes bornées et invariants structurels du patch. La cadence de présence, le rendu de l’addon et les nouveaux comportements de dialogue restent à qualifier dans un parcours OpenWoW réel.
+
+## 0.3.4 — 2026-09-03
+
+- Détecte la disparition des volumes Docker gérés et annonce leur reconstruction au prochain lancement du monde.
+- Recrée les ressources Docker supprimées, restaure automatiquement la dernière sauvegarde SQL complète et vérifiée, puis reprend les migrations avant d’ouvrir le client ; sans sauvegarde valide, RealmBox échoue fermé plutôt que de créer un royaume vide.
+- Rend le binaire Docker Desktop et ses helpers d’identifiants accessibles aux processus lancés depuis l’application macOS, afin que les images épinglées puissent être retéléchargées après une purge.
+- Remplace une image serveur locale disparue par l’ensemble d’images de release immuables embarqué dans le launcher, sans changer le projet Compose `realmbox-v3` ni demander la suppression d’un volume.
+- Embarque et monte la configuration MMaps du commit serveur épinglé, y compris lors de la reprise d’un ancien Compose, afin que les données de navigation soient réellement régénérées après la purge.
+- Nettoie uniquement l’intermédiaire `Buildings` et les sorties VMaps/MMaps générées et incomplètes avant leur régénération, afin qu’une reconstruction interrompue puisse reprendre sans toucher au volume de la base joueurs.
+- Classe les échecs de reconstruction comme erreurs serveur et ignore les noms de fichiers contenant seulement une sous-chaîne telle que `Warningtree` dans le diagnostic.
+
 ## 0.3.3 — 2026-09-03
 
 - Réapplique à chaque démarrage une présence dense autour du joueur : un bot autonome de même faction par seconde, placé à 30–90 mètres, jusqu'à la cible existante de 60 %.
@@ -38,7 +61,7 @@
 - Rend l’addon bilingue FR/EN, affiche la composition connectée du groupe et les membres hors ligne, puis désactive les ordres impossibles en expliquant leur prérequis.
 - Remplace la commande inexistante `cooldowns on` par le vrai contrôle Playerbots `co +boost` / `co -boost`, affiché honnêtement comme une préférence envoyée sans accusé serveur.
 - Exécute le Lua de l’addon dans cinq tests Fengari avec une API WoW simulée, en plus de valider la structure XML et les métadonnées 3.3.5a.
-- Remplace le prompt de conversation par un gabarit minimal et déterministe : seul le dernier message joueur décide du français ou de l’anglais, sans historique susceptible d’imposer la langue précédente.
+- Remplace le prompt de conversation par un gabarit minimal et déterministe qui demande au modèle de suivre la langue du dernier message joueur, sans historique susceptible d’imposer la langue précédente.
 - Réinstalle atomiquement l’addon compagnon intégré à chaque démarrage afin que les correctifs atteignent aussi les mondes déjà installés.
 - Remplace automatiquement les compagnons hors ligne au lieu de considérer leurs emplacements de groupe comme occupés.
 

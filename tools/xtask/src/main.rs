@@ -5,6 +5,15 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use sha2::{Digest, Sha256};
+
+const MOD_OLLAMA_CHAT_PATCH: &str = "patches/mod-ollama-chat-realmbox.patch";
+
+#[derive(Debug, PartialEq, Eq)]
+struct PatchDeclaration {
+    path: PathBuf,
+    sha256: String,
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -57,6 +66,9 @@ fn release_check(args: Vec<String>) -> Result<()> {
         [flag, tag] if flag == "--tag" => Some(tag.as_str()),
         _ => bail!("usage: cargo xtask release check [--tag vX.Y.Z]"),
     };
+
+    let third_party: toml::Value = read_toml(&root.join("third-party.lock.toml"))?;
+    verify_mod_ollama_chat_patch(&root, &third_party)?;
 
     let cargo: toml::Value = read_toml(&root.join("Cargo.toml"))?;
     let version = cargo["workspace"]["package"]["version"]
@@ -134,9 +146,90 @@ fn release_check(args: Vec<String>) -> Result<()> {
     }
 
     println!("[ok] versions cohérentes: {version}");
+    println!("[ok] patch mod-ollama-chat déclaré et vérifié");
     println!("[ok] aucune release publique revendiquée");
     println!("[ok] macOS Apple Silicon qualifié; Windows x64 expérimental");
     Ok(())
+}
+
+fn verify_mod_ollama_chat_patch(root: &Path, lock: &toml::Value) -> Result<()> {
+    verify_mod_ollama_chat_patch_with(lock, |relative_path| {
+        let path = root.join(relative_path);
+        fs::read(&path).with_context(|| format!("lecture du patch déclaré {}", path.display()))
+    })
+}
+
+fn verify_mod_ollama_chat_patch_with<F>(lock: &toml::Value, read_patch: F) -> Result<()>
+where
+    F: FnOnce(&Path) -> Result<Vec<u8>>,
+{
+    let declaration = mod_ollama_chat_patch_declaration(lock)?;
+    let contents = read_patch(&declaration.path).with_context(|| {
+        format!(
+            "mod-ollama-chat: patch déclaré introuvable: {}",
+            declaration.path.display()
+        )
+    })?;
+    let actual_sha256 = sha256_hex(&contents);
+    ensure!(
+        actual_sha256 == declaration.sha256,
+        "mod-ollama-chat: SHA-256 du patch incohérent (attendu {}, calculé {})",
+        declaration.sha256,
+        actual_sha256
+    );
+    Ok(())
+}
+
+fn mod_ollama_chat_patch_declaration(lock: &toml::Value) -> Result<PatchDeclaration> {
+    let components = lock
+        .get("component")
+        .and_then(toml::Value::as_array)
+        .context("third-party.lock.toml: tableau [[component]] absent")?;
+    let matches = components
+        .iter()
+        .filter(|component| {
+            component.get("name").and_then(toml::Value::as_str) == Some("mod-ollama-chat")
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "third-party.lock.toml: mod-ollama-chat doit être déclaré exactement une fois"
+    );
+
+    let component = matches[0];
+    let patch_set = component
+        .get("patch_set")
+        .and_then(toml::Value::as_str)
+        .context("third-party.lock.toml: mod-ollama-chat.patch_set absent")?;
+    ensure!(
+        patch_set != "none" && !patch_set.trim().is_empty(),
+        "third-party.lock.toml: mod-ollama-chat doit déclarer son patch RealmBox"
+    );
+    ensure!(
+        patch_set == MOD_OLLAMA_CHAT_PATCH,
+        "third-party.lock.toml: chemin de patch mod-ollama-chat inattendu: {patch_set} (attendu {MOD_OLLAMA_CHAT_PATCH})"
+    );
+
+    let patch_sha256 = component
+        .get("patch_sha256")
+        .and_then(toml::Value::as_str)
+        .context("third-party.lock.toml: mod-ollama-chat.patch_sha256 absent")?;
+    ensure!(
+        patch_sha256.len() == 64
+            && patch_sha256
+                .chars()
+                .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)),
+        "third-party.lock.toml: mod-ollama-chat.patch_sha256 doit être un SHA-256 hexadécimal minuscule"
+    );
+
+    Ok(PatchDeclaration {
+        path: PathBuf::from(patch_set),
+        sha256: patch_sha256.to_owned(),
+    })
+}
+
+fn sha256_hex(contents: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(contents))
 }
 
 fn workspace_root() -> Result<PathBuf> {
@@ -205,4 +298,78 @@ fn run_command(program: &str, args: &[&str]) -> Result<()> {
         bail!("{program} a échoué avec {status}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    fn lock_with_patch(patch_set: &str, patch_sha256: Option<&str>) -> toml::Value {
+        let hash = patch_sha256
+            .map(|value| format!("patch_sha256 = \"{value}\""))
+            .unwrap_or_default();
+        toml::from_str(&format!(
+            r#"
+                [[component]]
+                name = "mod-ollama-chat"
+                patch_set = "{patch_set}"
+                {hash}
+            "#
+        ))
+        .expect("fixture TOML valide")
+    }
+
+    #[test]
+    fn accepts_declared_patch_with_matching_digest() {
+        let lock = lock_with_patch(MOD_OLLAMA_CHAT_PATCH, Some(ABC_SHA256));
+
+        verify_mod_ollama_chat_patch_with(&lock, |path| {
+            assert_eq!(path, Path::new(MOD_OLLAMA_CHAT_PATCH));
+            Ok(b"abc".to_vec())
+        })
+        .expect("le patch verrouillé doit être accepté");
+    }
+
+    #[test]
+    fn rejects_mod_ollama_chat_without_patch() {
+        let lock = lock_with_patch("none", None);
+
+        let error = verify_mod_ollama_chat_patch_with(&lock, |_| Ok(Vec::new()))
+            .expect_err("patch_set = none doit échouer");
+
+        assert!(format!("{error:#}").contains("doit déclarer son patch RealmBox"));
+    }
+
+    #[test]
+    fn rejects_missing_declared_patch() {
+        let lock = lock_with_patch(MOD_OLLAMA_CHAT_PATCH, Some(ABC_SHA256));
+
+        let error =
+            verify_mod_ollama_chat_patch_with(&lock, |_| bail!("fichier volontairement absent"))
+                .expect_err("un patch absent doit échouer");
+
+        assert!(format!("{error:#}").contains("patch déclaré introuvable"));
+    }
+
+    #[test]
+    fn rejects_drifted_declared_patch() {
+        let lock = lock_with_patch(MOD_OLLAMA_CHAT_PATCH, Some(ABC_SHA256));
+
+        let error = verify_mod_ollama_chat_patch_with(&lock, |_| Ok(b"abcd".to_vec()))
+            .expect_err("un patch modifié doit échouer");
+
+        assert!(format!("{error:#}").contains("SHA-256 du patch incohérent"));
+    }
+
+    #[test]
+    fn rejects_unexpected_patch_path() {
+        let lock = lock_with_patch("patches/other.patch", Some(ABC_SHA256));
+
+        let error = verify_mod_ollama_chat_patch_with(&lock, |_| Ok(b"abc".to_vec()))
+            .expect_err("un autre chemin de patch doit échouer");
+
+        assert!(format!("{error:#}").contains("chemin de patch mod-ollama-chat inattendu"));
+    }
 }

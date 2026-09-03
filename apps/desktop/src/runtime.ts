@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AiCapability, ClientChoice, DialogueChattiness, GameDataInspection, LauncherProgress, LauncherStatus, RealmDiagnostics } from "./types";
+import type { AiCapability, BotPresence, ClientChoice, DialogueChattiness, GameDataInspection, LauncherProgress, LauncherStatus, RealmBackupSummary, RealmDiagnostics } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -20,6 +20,7 @@ function browserStatus(): LauncherStatus {
     botCount: 50,
     requestedBotCount: 50,
     appliedBotCount: 50,
+    botPresence: "natural",
     aiEnabled: false,
     aiModel: null,
     dialogueChattiness: "balanced",
@@ -157,14 +158,15 @@ export async function installRealm(
   clientChoice: ClientChoice,
   botsEnabled: boolean,
   botCount: number,
+  botPresence: BotPresence,
   aiEnabled: boolean,
   aiModel: string | null,
 ): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("install_realm", { request: { gameDataPath, clientChoice, botsEnabled, botCount, aiEnabled, aiModel } });
+  return invoke<LauncherStatus>("install_realm", { request: { gameDataPath, clientChoice, botsEnabled, botCount, botPresence, aiEnabled, aiModel } });
 }
 
-export async function startRealm(botsEnabled: boolean, botCount: number, aiEnabled: boolean): Promise<LauncherStatus> {
-  return invoke<LauncherStatus>("start_realm", { botsEnabled, botCount, aiEnabled });
+export async function startRealm(botsEnabled: boolean, botCount: number, botPresence: BotPresence, aiEnabled: boolean): Promise<LauncherStatus> {
+  return invoke<LauncherStatus>("start_realm", { botsEnabled, botCount, botPresence, aiEnabled });
 }
 
 export async function stopRealm(): Promise<LauncherStatus> {
@@ -175,11 +177,23 @@ export async function restoreLastRecovery(): Promise<LauncherStatus> {
   return invoke<LauncherStatus>("restore_last_recovery");
 }
 
-export async function updatePlayerbotPopulation(botsEnabled: boolean, botCount: number): Promise<LauncherStatus> {
+export async function updatePlayerbotPopulation(botsEnabled: boolean, botCount: number, botPresence: BotPresence): Promise<LauncherStatus> {
   if (!window.__TAURI_INTERNALS__) {
-    return { ...browserStatus(), phase: "running", installed: true, botsEnabled, botCount, requestedBotCount: botCount, appliedBotCount: botCount };
+    return { ...browserStatus(), phase: "running", installed: true, botsEnabled, botCount, requestedBotCount: botCount, appliedBotCount: botCount, botPresence };
   }
-  return invoke<LauncherStatus>("update_playerbot_population", { botsEnabled, botCount });
+  return invoke<LauncherStatus>("update_playerbot_population", { botsEnabled, botCount, botPresence });
+}
+
+export async function inspectRealmBackup(): Promise<RealmBackupSummary | null> {
+  if (!window.__TAURI_INTERNALS__) return null;
+  return invoke<RealmBackupSummary | null>("inspect_realm_backup");
+}
+
+export async function createRealmBackup(): Promise<RealmBackupSummary> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { createdAtUnixMs: Date.now(), sizeBytes: 4_194_304 };
+  }
+  return invoke<RealmBackupSummary>("create_realm_backup");
 }
 
 export async function getRealmDiagnostics(): Promise<RealmDiagnostics> {

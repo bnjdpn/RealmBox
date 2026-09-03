@@ -17,6 +17,7 @@ const missing: LauncherStatus = {
   botCount: 50,
   requestedBotCount: 50,
   appliedBotCount: 50,
+  botPresence: "natural",
   aiEnabled: false,
   aiModel: null,
   dialogueChattiness: "balanced",
@@ -60,6 +61,7 @@ const runtime = vi.hoisted(() => ({
   chooseGameData: vi.fn(),
   configureLocalDialogue: vi.fn(),
   configureDialogueChattiness: vi.fn(),
+  createRealmBackup: vi.fn(),
   installRealm: vi.fn(),
   restoreLastRecovery: vi.fn(),
   startRealm: vi.fn(),
@@ -68,6 +70,7 @@ const runtime = vi.hoisted(() => ({
   subscribeLauncherStatus: vi.fn(),
   inspectAiCapability: vi.fn(),
   inspectGameData: vi.fn(),
+  inspectRealmBackup: vi.fn(),
   updatePlayerbotPopulation: vi.fn(),
   getRealmDiagnostics: vi.fn(),
 }));
@@ -92,7 +95,9 @@ describe("RealmBox launcher", () => {
     runtime.stopRealm.mockResolvedValue(ready);
     runtime.configureLocalDialogue.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b" });
     runtime.configureDialogueChattiness.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b", dialogueChattiness: "lively" });
-    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...running, botCount: 100, requestedBotCount: 100, appliedBotCount: 100 });
+    runtime.inspectRealmBackup.mockResolvedValue({ createdAtUnixMs: 1_788_437_400_000, sizeBytes: 4_194_304 });
+    runtime.createRealmBackup.mockResolvedValue({ createdAtUnixMs: 1_788_437_460_000, sizeBytes: 4_325_376 });
+    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...running, botCount: 100, requestedBotCount: 100, appliedBotCount: 100, botPresence: "close" });
     runtime.getRealmDiagnostics.mockResolvedValue({
       summary: "Aucune erreur récente détectée dans les journaux gérés.",
       component: "launcher",
@@ -135,7 +140,7 @@ describe("RealmBox launcher", () => {
     await user.click(screen.getByRole("checkbox", { name: /dialogues locaux/i }));
     await user.click(screen.getByRole("button", { name: /fermer/i }));
     await user.click(screen.getByRole("button", { name: /^installer$/i }));
-    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, 50, true, "llama3.2:3b");
+    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, 50, "natural", true, "llama3.2:3b");
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
   });
 
@@ -181,6 +186,7 @@ describe("RealmBox launcher", () => {
       "originalWindows",
       true,
       50,
+      "natural",
       false,
       null,
     );
@@ -217,6 +223,23 @@ describe("RealmBox launcher", () => {
     expect(screen.queryByRole("button", { name: /installer/i })).not.toBeInTheDocument();
   });
 
+  it("announces a detected Docker purge in French and English before rebuilding", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({
+      ...ready,
+      message: "Les ressources Docker seront reconstruites depuis la sauvegarde locale vérifiée au prochain lancement",
+    });
+    render(<App />);
+
+    expect(await screen.findByText(/ressources Docker seront reconstruites/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /jouer/i })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: "English" }));
+    await user.click(screen.getByRole("button", { name: /^close$/i }));
+    expect(screen.getByText(/rebuilt from the verified local backup/i)).toBeVisible();
+  });
+
   it("returns to the ready state when the supervised client exits", async () => {
     let publishStatus: ((status: LauncherStatus) => void) | undefined;
     runtime.bootstrapLauncher.mockResolvedValue(running);
@@ -241,7 +264,8 @@ describe("RealmBox launcher", () => {
 
     expect(screen.getByRole("heading", { name: /set up my world/i })).toBeVisible();
     expect(screen.getByText(/does not download proprietary game data/i)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.getByRole("radio", { name: /natural/i })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^close$/i }));
     expect(screen.getByRole("button", { name: /choose the folder/i })).toBeVisible();
   });
 
@@ -252,14 +276,69 @@ describe("RealmBox launcher", () => {
     await screen.findByRole("button", { name: /arrêter le monde/i });
 
     await user.click(screen.getByRole("button", { name: /réglages/i }));
-    await user.click(screen.getByRole("button", { name: /compagnons/i }));
-    expect(screen.getByRole("heading", { name: /population du monde/i })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^compagnons\b/i }));
+    expect(screen.getByRole("heading", { name: /compagnons et présence/i })).toBeVisible();
     await user.selectOptions(screen.getByRole("combobox", { name: /profil du monde/i }), "dense");
+    await user.click(screen.getByRole("radio", { name: /toujours proches/i }));
     await user.click(screen.getByRole("button", { name: /appliquer maintenant/i }));
 
-    expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(true, 100);
+    expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(true, 100, "close");
     expect(runtime.stopRealm).not.toHaveBeenCalled();
     expect(await screen.findByText(/sans redémarrer le client/i)).toBeVisible();
+  });
+
+  it("saves a dispersed presence for the next game while the world is stopped", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...ready, botPresence: "dispersed" });
+    render(<App />);
+    await screen.findByRole("button", { name: /^jouer$/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^compagnons\b/i }));
+    await user.click(screen.getByRole("radio", { name: /dispersés/i }));
+    await user.click(screen.getByRole("button", { name: /enregistrer pour la prochaine partie/i }));
+
+    expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(true, 50, "dispersed");
+    expect(await screen.findByText(/enregistrées pour la prochaine partie/i)).toBeVisible();
+  });
+
+  it("creates a complete verified backup from the player-facing protection panel", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(running);
+    render(<App />);
+    await screen.findByRole("button", { name: /arrêter le monde/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^protection/i }));
+
+    expect(await screen.findByRole("heading", { name: /protection du monde/i })).toBeVisible();
+    expect(await screen.findByText(/^vérifiée$/i)).toBeVisible();
+    expect(screen.getByText(/le monde reste ouvert/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /sauvegarder maintenant/i }));
+
+    expect(runtime.createRealmBackup).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/nouvelle sauvegarde complète et vérifiée/i)).toBeVisible();
+    expect(runtime.stopRealm).not.toHaveBeenCalled();
+  });
+
+  it("turns local dialogue off when companions are disabled", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b" });
+    runtime.updatePlayerbotPopulation.mockResolvedValue({ ...ready, botsEnabled: false, aiEnabled: false, botCount: 0, appliedBotCount: 0 });
+    render(<App />);
+    await screen.findByRole("button", { name: /^jouer$/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^compagnons\b/i }));
+    await user.click(screen.getByRole("checkbox", { name: /peupler le monde/i }));
+    await user.click(screen.getByRole("button", { name: /enregistrer pour la prochaine partie/i }));
+    await user.click(screen.getByRole("button", { name: /retour/i }));
+    await user.click(screen.getByRole("button", { name: /fermer/i }));
+    await user.click(screen.getByRole("button", { name: /^jouer$/i }));
+
+    expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(false, 50, "natural");
+    expect(runtime.startRealm).toHaveBeenCalledWith(false, 50, "natural", false);
   });
 
   it("lets RealmBox present and activate its CanIRun decision after installation", async () => {
@@ -293,10 +372,75 @@ describe("RealmBox launcher", () => {
 
     await user.click(screen.getByRole("button", { name: /réglages/i }));
     await user.click(screen.getByRole("button", { name: /dialogues/i }));
-    await user.selectOptions(screen.getByRole("combobox", { name: /niveau de bavardage/i }), "lively");
+    await user.click(screen.getByRole("radio", { name: /vivant · conversations/i }));
 
     expect(runtime.configureDialogueChattiness).toHaveBeenCalledWith("lively");
-    expect(await screen.findByText(/niveau de bavardage appliqué/i)).toBeVisible();
+    expect(await screen.findByText(/mode de discussion appliqué/i)).toBeVisible();
+  });
+
+  it("chooses the next conversation mode while the installed model is disabled", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({
+      ...ready,
+      aiEnabled: false,
+      aiModel: "llama3.2:3b",
+      dialogueChattiness: "balanced",
+    });
+    runtime.configureDialogueChattiness.mockResolvedValue({
+      ...ready,
+      aiEnabled: false,
+      aiModel: "llama3.2:3b",
+      dialogueChattiness: "quiet",
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /^jouer$/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^dialogues/i }));
+    await user.click(screen.getByRole("radio", { name: /direct · répond/i }));
+
+    expect(runtime.configureDialogueChattiness).toHaveBeenCalledWith("quiet");
+    expect(await screen.findByText(/mode de discussion appliqué/i)).toBeVisible();
+  });
+
+  it("reactivates the retained local model without depending on CanIRun", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({
+      ...ready,
+      aiEnabled: false,
+      aiModel: "llama3.2:3b",
+    });
+    runtime.inspectAiCapability.mockResolvedValue({
+      state: "unavailable",
+      deviceName: null,
+      ramGb: null,
+      modelId: null,
+      modelName: null,
+      ollamaModel: null,
+      grade: null,
+      estimatedTokensPerSecond: null,
+      downloadSizeGb: null,
+      diskAvailableGb: null,
+      diskSpaceSufficient: null,
+      modelLicense: null,
+      detail: "CanIRun indisponible hors ligne.",
+      sourceUrl: "https://www.canirun.ai/",
+    });
+    runtime.configureLocalDialogue.mockResolvedValue({
+      ...ready,
+      aiEnabled: true,
+      aiModel: "llama3.2:3b",
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: /^jouer$/i });
+
+    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^dialogues/i }));
+    const reactivate = await screen.findByRole("button", { name: /réactiver le modèle installé/i });
+    expect(reactivate).toBeEnabled();
+    await user.click(reactivate);
+
+    expect(runtime.configureLocalDialogue).toHaveBeenCalledWith(true, "llama3.2:3b");
   });
 
   it("applies dialogue chattiness live when the local model is running", async () => {
@@ -318,10 +462,10 @@ describe("RealmBox launcher", () => {
 
     await user.click(screen.getByRole("button", { name: /réglages/i }));
     await user.click(screen.getByRole("button", { name: /^dialogues/i }));
-    await user.selectOptions(screen.getByRole("combobox", { name: /niveau de bavardage/i }), "lively");
+    await user.click(screen.getByRole("radio", { name: /vivant · conversations/i }));
 
     expect(runtime.configureDialogueChattiness).toHaveBeenCalledWith("lively");
-    expect(await screen.findByText(/niveau de bavardage appliqué/i)).toBeVisible();
+    expect(await screen.findByText(/mode de discussion appliqué/i)).toBeVisible();
   });
 
   it("changes the installed game folder without reinstalling the realm", async () => {
@@ -404,6 +548,21 @@ describe("RealmBox launcher", () => {
 
     expect(runtime.restoreLastRecovery).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
+  it("resynchronizes restored dialogue preferences before the next launch", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b" });
+    runtime.restoreLastRecovery.mockResolvedValue({ ...ready, aiEnabled: false, aiModel: "llama3.2:3b" });
+    runtime.bootstrapLauncher
+      .mockResolvedValueOnce({ ...ready, phase: "error", errorCode: "migrationFailed", recoveryAvailable: true })
+      .mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b" });
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /restaurer la dernière version fonctionnelle/i }));
+    await user.click(await screen.findByRole("button", { name: /^jouer$/i }));
+
+    expect(runtime.startRealm).toHaveBeenCalledWith(true, 50, "natural", false);
   });
 
   it("shows immediate feedback while retrying and handles another failure", async () => {
@@ -492,14 +651,29 @@ describe("RealmBox launcher", () => {
     expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining("/RealmBox/logs"));
   });
 
-  it("has no automatically detectable accessibility violation in the main flow and dialog", async () => {
+  it("has no automatically detectable accessibility violation in the main flow and settings panels", async () => {
     const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
     const { container } = render(<App />);
-    await screen.findByRole("heading", { name: /préparer mon monde/i });
+    await screen.findByRole("button", { name: /^jouer$/i });
     const options = { rules: { "color-contrast": { enabled: false } } };
     expect((await axe.run(container, options)).violations).toEqual([]);
 
     await user.click(screen.getByRole("button", { name: /réglages/i }));
+    expect((await axe.run(container, options)).violations).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /^compagnons\b/i }));
+    expect(await screen.findByRole("heading", { name: /^compagnons\b/i })).toBeVisible();
+    expect((await axe.run(container, options)).violations).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /retour/i }));
+    await user.click(screen.getByRole("button", { name: /^dialogues\b/i }));
+    expect(await screen.findByRole("heading", { name: /^dialogues\b/i })).toBeVisible();
+    expect((await axe.run(container, options)).violations).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /retour/i }));
+    await user.click(screen.getByRole("button", { name: /^protection/i }));
+    expect(await screen.findByRole("heading", { name: /protection du monde/i })).toBeVisible();
     expect((await axe.run(container, options)).violations).toEqual([]);
   });
 });

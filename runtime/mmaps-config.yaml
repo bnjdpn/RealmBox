@@ -1,0 +1,38 @@
+# Copied from src/tools/mmaps_generator/mmaps-config.yaml at the pinned
+# AzerothCore Playerbots commit 47960183bb03b83e8943eb2f0f39c16df9710c9d.
+mmapsConfig:
+  skipLiquid: false
+  skipContinents: false
+  skipJunkMaps: true
+  skipBattlegrounds: false
+
+  dataDir: "./"
+
+  offmeshConnections:
+    - "562 31,20 (6234.474121 256.563721 11.063726) (6230.162598 251.681976 11.199670) 2.1"
+    - "562 31,20 (6242.273926 266.697540 11.090456) (6246.688965 272.064819 11.235604) 2.1"
+
+  meshSettings:
+    walkableSlopeAngle: 60
+    walkableHeight: 6
+    walkableClimb: 4
+    walkableRadius: 2
+    verticesPerMapEdge: 2000
+    verticesPerTileEdge: 80
+    maxSimplificationError: 0.8
+
+    mapsOverrides:
+      "48":
+        cellSizeVertical: 0.5334
+
+      "529":
+        tilesOverrides:
+          "30,29":
+            walkableSlopeAngle: 45
+
+      "530":
+        tilesOverrides:
+          "32,30":
+            walkableSlopeAngle: 45
+
+  debugOutput: false

@@ -6,7 +6,7 @@
   --panel: #071019f2;
   --text: #f2f5f4;
   --muted: #aab7bc;
-  --quiet: #71848c;
+  --quiet: #94a5ab;
   --line: #ffffff20;
   --ice-bright: #dff8fc;
   --ready: #9dcb8a;
@@ -154,6 +154,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .option-row.muted { opacity: .46; }
 .select-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; color: #c9d2d3; font-size: 12px; }
 select { min-width: 128px; min-height: 36px; padding: 0 9px; border: 1px solid #ffffff24; border-radius: 3px; color: #e5eeee; background: #0d1b24; }
+.choice-group { min-width: 0; margin: 18px 0; padding: 0; border: 0; }
+.choice-group legend { margin-bottom: 9px; color: #c9d2d3; font-size: 12px; }
+.choice-card { display: flex; gap: 10px; align-items: flex-start; padding: 10px 11px; border: 1px solid #ffffff17; border-radius: 3px; color: #e1e7e6; background: #ffffff06; }
+.choice-card + .choice-card { margin-top: 7px; }
+.choice-card:has(input:checked) { border-color: #88c9d86b; background: #17313d; }
+.choice-card:has(input:disabled) { opacity: .46; }
+.choice-card input { width: 15px; height: 15px; flex: 0 0 auto; margin: 2px 0 0; accent-color: #7dc4d6; }
+.choice-card span, .choice-card strong, .choice-card small { display: block; }
+.choice-card strong { color: #e8eeee; font-size: 12px; font-weight: 600; }
+.choice-card small { margin-top: 3px; color: var(--quiet); font-size: 10px; line-height: 1.4; }
+.choice-card em { margin-left: 7px; color: #9dcb8a; font-size: 9px; font-style: normal; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 
 .settings-nav { margin-top: 18px; border-top: 1px solid var(--line); }
 .settings-nav button { width: 100%; display: block; padding: 17px 0; border: 0; border-bottom: 1px solid var(--line); color: #dfe6e6; background: transparent; text-align: left; }
@@ -170,6 +181,11 @@ select { min-width: 128px; min-height: 36px; padding: 0 9px; border: 1px solid #
 .helper, .success-message, .error-message { color: var(--quiet); font-size: 11px; line-height: 1.5; }
 .helper.success, .success-message { color: #a9d49a; }
 .helper.error, .error-message { color: #e8a39b; }
+.mode-summary { margin: 19px 0 6px; padding: 14px; border: 1px solid #ffffff18; border-radius: 3px; background: #02070c66; }
+.mode-summary h3 { margin: 0; color: #dfe6e5; font-size: 12px; }
+.mode-summary p { margin: 6px 0 9px; color: var(--quiet); font-size: 10px; line-height: 1.45; }
+.mode-summary ul { margin: 0; padding-left: 17px; color: #aebdc0; font-size: 10px; line-height: 1.65; }
+.mode-summary strong { color: #dce5e4; font-weight: 600; }
 .game-folder-path { padding: 11px 12px; border: 1px solid #ffffff18; border-radius: 3px; background: #02070c80; }
 .game-folder-path span, .game-folder-path code { display: block; }
 .game-folder-path span { color: var(--quiet); font-size: 10px; }

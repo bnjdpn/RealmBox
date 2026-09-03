@@ -9,7 +9,7 @@ un paquet RealmBox.
 | OpenWoW snapshot | `2521e1f72eeffd661913be63d1e2b374073c316c` | AGPL-3.0-only | source non vendored; build de compatibilité uniquement |
 | AzerothCore Playerbot fork | `47960183bb03b83e8943eb2f0f39c16df9710c9d` | GPL-2.0-only | source non vendored; build de compatibilité uniquement |
 | mod-playerbots | `2f7d9f774987d0157c6a0d0cc08c40bec3db3945` | GPL-2.0-only | source non vendored; build de compatibilité uniquement |
-| mod-ollama-chat | `a9d14b0b8955be136e657ac168dd255f5281a535` | AGPL-3.0-only | source non vendored; build de compatibilité uniquement |
+| mod-ollama-chat | `a9d14b0b8955be136e657ac168dd255f5281a535` | AGPL-3.0-only | source non vendored; patch RealmBox `patches/mod-ollama-chat-realmbox.patch` verrouillé par SHA-256 |
 | Ollama | `e5e437711540eb4becb393c2847fed6cae6e5cd5` | MIT | non intégré et non redistribué |
 | Qwen 3 8B | manifeste `500a1f06…b2b8b41` | Apache-2.0 | téléchargement local facultatif ; non redistribué |
 | Gemma 3 4B | manifeste `a2af6cc3…41195f5a` | Gemma Terms of Use | téléchargement local facultatif ; non redistribué |
@@ -22,6 +22,11 @@ Les textes de licence conservés dans `LICENSES/` proviennent des révisions
 `Cargo.lock` et `pnpm-lock.yaml`; les rapports SBOM et licence sont produits par
 la CI de validation. Les données, médias et binaires propriétaires du jeu ne
 sont jamais fournis par RealmBox.
+
+`third-party.lock.toml` est la source canonique du chemin et du SHA-256 du patch
+RealmBox appliqué à `mod-ollama-chat`. `cargo xtask release check` refuse une
+release si cette déclaration manque, pointe vers un autre fichier ou si le
+contenu du patch a dérivé.
 
 La décision de redistribuer un binaire upstream reste bloquée tant que ses
 dépendances transitives, notices, sommes de contrôle, signature et provenance

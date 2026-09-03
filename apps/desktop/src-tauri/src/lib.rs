@@ -10,9 +10,9 @@ use std::{
 
 use ai::AiCapability;
 use launcher::{
-    ClientChoice, DialogueChattiness, ErrorCode, GameDataInspection, InstallationOptions,
-    LauncherPhase, LauncherProgress, LauncherService, LauncherStatus, OperationComponent,
-    OperationStep, RealmDiagnostics, SystemCommandRunner,
+    BotPresence, ClientChoice, DialogueChattiness, ErrorCode, GameDataInspection,
+    InstallationOptions, LauncherPhase, LauncherProgress, LauncherService, LauncherStatus,
+    OperationComponent, OperationStep, RealmBackupSummary, RealmDiagnostics, SystemCommandRunner,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -25,6 +25,7 @@ struct InstallRealmRequest {
     client_choice: ClientChoice,
     bots_enabled: bool,
     bot_count: usize,
+    bot_presence: BotPresence,
     ai_enabled: bool,
     ai_model: Option<String>,
 }
@@ -197,6 +198,7 @@ async fn install_realm(
                     client_choice: request.client_choice,
                     bots_enabled: request.bots_enabled,
                     bot_count: request.bot_count,
+                    bot_presence: request.bot_presence,
                     ai_enabled: request.ai_enabled,
                     ai_model: request.ai_model,
                 },
@@ -220,6 +222,7 @@ async fn start_realm(
     state: State<'_, AppState>,
     bots_enabled: bool,
     bot_count: usize,
+    bot_presence: BotPresence,
     ai_enabled: bool,
 ) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
@@ -231,6 +234,7 @@ async fn start_realm(
             .start(
                 Some(bots_enabled),
                 Some(bot_count),
+                Some(bot_presence),
                 Some(ai_enabled),
                 |progress| emit_progress(&app_handle, progress),
             )
@@ -243,7 +247,9 @@ async fn start_realm(
             "launcher",
         )
     })?
-    .map_err(|error| LauncherCommandError::new(error, ErrorCode::ClientLaunchFailed, "client"))?;
+    .map_err(|error| {
+        LauncherCommandError::new(error, ErrorCode::InstallationIncomplete, "server")
+    })?;
     if status.phase == LauncherPhase::Running {
         monitor_client(app, Arc::clone(&state.0));
     }
@@ -399,19 +405,64 @@ async fn update_playerbot_population(
     state: State<'_, AppState>,
     bots_enabled: bool,
     bot_count: usize,
+    bot_presence: BotPresence,
 ) -> Result<LauncherStatus, LauncherCommandError> {
     let service = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
         service
             .lock()
             .map_err(|_| "état du lanceur indisponible".to_string())?
-            .update_playerbot_population(bots_enabled, bot_count)
+            .update_playerbot_population(bots_enabled, bot_count, bot_presence)
     })
     .await
     .map_err(|error| {
         LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "bots")
     })?
     .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "bots"))
+}
+
+#[tauri::command]
+async fn inspect_realm_backup(
+    state: State<'_, AppState>,
+) -> Result<Option<RealmBackupSummary>, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .inspect_realm_backup()
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "database",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::BackupFailed, "database"))
+}
+
+#[tauri::command]
+async fn create_realm_backup(
+    state: State<'_, AppState>,
+) -> Result<RealmBackupSummary, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .create_realm_backup()
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "database",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::BackupFailed, "database"))
 }
 
 #[tauri::command]
@@ -463,6 +514,8 @@ pub fn run() {
             stop_realm,
             restore_last_recovery,
             update_playerbot_population,
+            inspect_realm_backup,
+            create_realm_backup,
             get_realm_diagnostics,
             inspect_ai_capability,
             configure_local_dialogue,
@@ -489,5 +542,14 @@ mod tests {
         assert_eq!(value["code"], "dockerNotRunning");
         assert_eq!(value["component"], "launcher");
         assert_eq!(value["recoveryActions"][0], "startDocker");
+
+        let server_error = LauncherCommandError::new(
+            "docker a échoué; consultez start-server-data.log",
+            ErrorCode::InstallationIncomplete,
+            "server",
+        );
+        let server_value = serde_json::to_value(server_error).expect("serialized server error");
+        assert_eq!(server_value["code"], "installationIncomplete");
+        assert_eq!(server_value["component"], "server");
     }
 }

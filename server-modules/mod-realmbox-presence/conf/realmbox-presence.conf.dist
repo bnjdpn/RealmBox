@@ -32,6 +32,14 @@ RealmBoxPresence.DisappearanceGuardRadius = 150.0
 RealmBoxPresence.BotCooldownSeconds = 10
 RealmBoxPresence.ReleasedBotGraceSeconds = 300
 
+# A bot placed by RealmBox is handed back to Playerbots' native travel scheduler
+# after this delay. The module clamps the value to 30..86400 seconds. If presence
+# is disabled in the same worldserver process, only bots still tracked as placed
+# by this module can have that deadline shortened, once autonomous, safe, and no
+# longer visible. Unmarked legacy events cannot be distinguished safely from
+# native Playerbots events and are intentionally left untouched.
+RealmBoxPresence.AutonomyReturnSeconds = 600
+
 # 0 disables level filtering. Set a positive value to keep ambience bots within
 # that many levels of the player.
 RealmBoxPresence.MaxLevelDelta = 0

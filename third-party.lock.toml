@@ -51,7 +51,8 @@ commit = "a9d14b0b8955be136e657ac168dd255f5281a535"
 branch = "main"
 license = "AGPL-3.0-only"
 platforms = ["macos-arm64", "macos-x86_64", "windows-x86_64"]
-patch_set = "none"
+patch_set = "patches/mod-ollama-chat-realmbox.patch"
+patch_sha256 = "9995a201dfb7b114df2eaa41bd08be9a95d27984c6c1f4616146492783be918e"
 redistribution_status = "source-reviewed; bundled dependency notices need audit"
 test_status = "module compiled into macos-arm64 worldserver; Ollama request not tested; README still names predecessor forks"
 

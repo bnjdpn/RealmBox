@@ -12,10 +12,10 @@ RealmBox est un launcher desktop libre pour jouer à World of Warcraft entièrem
 
 - une seule application orientée joueur pour installer, lancer, arrêter, configurer et diagnostiquer ;
 - un serveur d’authentification et un monde AzerothCore locaux avec MySQL ;
-- des Playerbots autonomes dont une majorité de même faction converge progressivement près des joueurs actifs, et une équipe de compagnons contrôlable en jeu ;
+- des Playerbots autonomes avec des réglages séparés de population et de proximité, ainsi qu’une équipe de compagnons contrôlable en jeu ;
 - OpenWoW géré sur macOS Apple Silicon, ainsi que `Wow.exe` ou OpenWoW sur Windows x64 ;
-- des dialogues locaux facultatifs, bornés en débit, entre joueurs et bots ou entre bots via un runtime Ollama géré par RealmBox ;
-- une installation atomique, des images serveur immuables, des personnages persistants et des sauvegardes vérifiées avant migration.
+- des dialogues locaux facultatifs et bornés, avec les modes Direct, Immersif et Vivant via un runtime Ollama géré par RealmBox ;
+- une installation atomique, des images serveur immuables, des personnages persistants et des sauvegardes complètes vérifiées, automatiques avant migration ou créées à la demande.
 
 RealmBox ne contient aucun client World of Warcraft, MPQ, carte extraite, identifiant, base de personnages ni autre donnée propriétaire du jeu. Ces fichiers proviennent de la copie compatible du joueur et restent en local.
 
@@ -78,13 +78,30 @@ La limite de bots dépend de la mémoire attribuée à Docker, pas de la mémoir
 | 20 à 27 Gio | 100 |
 | 28 Gio ou plus | 150 |
 
+## Expérience des bots
+
+RealmBox ne déduit aucun choix de bot à partir d’un autre. La dimension du monde contient deux réglages séparés — population et présence — et reste indépendante du comportement de l’équipe en jeu comme des dialogues locaux.
+
+| Réglage | Choix | Effet |
+| --- | --- | --- |
+| Population | **5**, **25**, **50**, **100** ou **150** | Définit combien d’aventuriers autonomes sont demandés dans le monde ; RealmBox applique toujours le plafond sûr lié à la mémoire Docker. |
+| Présence | **Dispersés**, **Naturelle** (recommandé) ou **Toujours proches** | Laisse les déplacements natifs de Playerbots agir seuls, fait passer une population plus légère dans la zone du joueur ou demande une cible plus dense à proximité. |
+| Équipe en jeu | **Escorte**, **Garde** ou **Libres** | S’applique uniquement aux quatre compagnons pilotés par l’addon : suivre, tenir la position ou reprendre leurs activités autonomes. |
+| Discussion | **Direct**, **Immersif** ou **Vivant** | Autorise seulement les réponses demandées par le joueur, quelques échanges contextuels ou des conversations plus présentes mais toujours bornées. |
+
+Une installation neuve démarre avec la présence **Naturelle**. Une installation antérieure à 0.4.0 sans préférence de présence enregistrée démarre avec **Toujours proches**, afin de conserver son ancien comportement dense jusqu’à ce que le joueur le change. La population et la présence peuvent être appliquées pendant que le worldserver géré tourne ; sinon elles sont enregistrées pour la prochaine partie.
+
+Les messages joueur éligibles ont une chance de réponse configurée à 100 %, passent devant le travail ambiant déjà en file et disposent d’un emplacement que ce bavardage ne peut pas occuper. Cela réduit le risque d’attente sans garantir une réponse : une file déjà remplie de demandes joueur, un échec du modèle local ou la disparition de la destination peuvent encore empêcher l’envoi. Les budgets ambiants de groupe et de raid sont isolés par groupe, avec un plafond global partagé entre les échanges ambiants. Les demandes joueur éligibles contournent ce gouverneur ambiant, mais pas la file, le modèle ni la validation de la destination.
+
+Les trois modes ne conservent ni historique de discussion, ni mémoire ou relation évolutive, et n’utilisent ni RAG ni emotes générées. Pour une réponse directe, le prompt demande au modèle de répondre dans la langue du dernier message joueur. Les échanges ambiants utilisent des prompts français avec une copie `frFR` et anglais avec les autres locales prises en charge ; ce choix automatisé n’a pas encore été qualifié dans OpenWoW.
+
 ## Installation
 
 1. Installez et démarrez [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Téléchargez les données WoW compatibles depuis la page ChromieCraft [française](https://chromiecraft.com/fr/telechargements/) ou [anglaise](https://chromiecraft.com/en/downloads/).
 3. Téléchargez RealmBox depuis les [releases GitHub](https://github.com/bnjdpn/RealmBox/releases) et comparez l’artefact avec `SHA256SUMS.txt`.
 4. Ouvrez RealmBox et sélectionnez le dossier qui contient `Data`.
-5. Choisissez la population de bots et, si vous le souhaitez, les dialogues locaux, puis cliquez sur **Installer**.
+5. Choisissez la population, la présence des bots et, si vous le souhaitez, les dialogues locaux, puis cliquez sur **Installer**.
 6. Cliquez sur **Jouer** lorsque RealmBox indique qu’Azeroth est prêt.
 
 Les binaires distribués actuellement ne sont ni signés ni notariés. Ne contournez pas un avertissement du système si le SHA-256 de l’artefact téléchargé ne correspond pas exactement à la somme publiée. Le [guide d’installation complet](docs/INSTALLATION.md) détaille chaque plateforme.
@@ -101,7 +118,11 @@ Avant la première migration exécutée par chaque version desktop, RealmBox :
 4. applique la migration ;
 5. n’avance le marqueur de version migrée qu’après réussite.
 
+Après installation, **Réglages → Protection** permet aussi de créer un nouveau point complet et vérifié à la demande. Si le monde est ouvert, RealmBox réalise la copie cohérente sans l’arrêter. S’il est fermé, RealmBox démarre uniquement la base de données puis la remet à l’arrêt. Ces points restent hors du runtime remplaçable, ne sont jamais écrasés et peuvent servir à la récupération après une purge Docker.
+
 Un schéma d’installation inconnu, une sauvegarde incomplète ou une migration en échec bloque la mise à jour. Le launcher ne transforme jamais un royaume existant en installation neuve et n’appelle jamais `docker compose down --volumes` ou `-v`.
+
+Si Docker Desktop est purgé en dehors de RealmBox, le launcher détecte les volumes manquants. Au prochain clic sur **Jouer**, il retélécharge les images immuables, reconstruit les ressources serveur et restaure la sauvegarde joueurs complète et vérifiée la plus récente avant les migrations. Sans sauvegarde valide, il s’arrête au lieu de créer silencieusement un royaume vide.
 
 ## Organisation du dépôt
 
@@ -148,6 +169,9 @@ cargo xtask release check
 - [Sécurité](docs/SECURITY.md)
 - [Compilation](docs/BUILDING.md)
 - [Dépannage](docs/TROUBLESHOOTING.md)
+- [Population, présence et comportement Playerbots](docs/PLAYERBOTS_INTEGRATION.md)
+- [Dialogues locaux](docs/OLLAMA_CHAT_INTEGRATION.md)
+- [Revue des projets solo et bots étudiés](docs/ECOSYSTEM_REVIEW_2026-09-03.md)
 - [Distribution et licences](docs/LEGAL_AND_DISTRIBUTION.md)
 
 ## Licence et indépendance

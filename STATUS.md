@@ -2,7 +2,40 @@
 
 Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
 
-Décision actuelle : **GO automatisé pour les sources RealmBox 0.3.3 : présence dense réappliquée à chaque démarrage, suivi rapide du joueur entre les zones du monde ouvert, comportements de l’addon et dialogues locaux bornés. Le bundle macOS 0.3.3 est installé et le worldserver a relu les nouvelles valeurs ; la validation visuelle et gameplay reste volontairement à effectuer par l’utilisateur. Aucune release publique 0.3.3 n’est revendiquée. Le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
+Décision actuelle : **GO source, build, installation locale et parcours réel pour la récupération Docker RealmBox 0.3.4 : la purge a été détectée, le dump vérifié restauré, Maps/VMaps/MMaps régénérés, le marqueur retiré, le serveur et OpenWoW lancés, les personnages relus et un personnage existant rejoué à Stormwind. Le bundle corrigé est installé dans `/Users/benjamin/Applications/RealmBox.app`; sa relance depuis ce chemin n’a pas été forcée afin de ne pas interrompre la partie restaurée encore ouverte. Aucune release publique 0.3.4 n’est revendiquée. Le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
+
+Le workspace courant porte désormais **RealmBox 0.4.0**, mais ce rework bots et dialogues reste **NO-GO pour une qualification réelle ou une release** : les sources et contrôles ciblés séparent les quatre réglages, tandis que l’installation et le parcours de récupération qualifiés ci-dessous concernent le bundle 0.3.4 construit avant ce changement de version. Aucun nouveau parcours OpenWoW, build unique réunissant les trois modules ni bundle distribué ne prouve encore les modes 0.4.0.
+
+## Rework bots et dialogues 0.4.0
+
+| Fonction | Niveau de preuve | Résultat |
+|---|---|---|
+| Réglages indépendants | tests UI/Rust ciblés | population 5/25/50/100/150 avec plafond de sécurité, présence **Dispersés / Naturelle / Toujours proches**, comportement **Escorte / Garde / Libres** et discussion **Direct / Immersif / Vivant** ne se déduisent plus les uns des autres |
+| Protection joueur | tests UI et Rust ciblés avec fakes | une vue FR/EN crée un dump cohérent des quatre bases, contrôle son contenu et son SHA-256, ne réutilise ni n’écrase un point existant et laisse une base déjà active en ligne ; aucune sauvegarde réelle n’a encore été déclenchée par cette vue |
+| Présence | tests Rust de génération + 8 tests C++ de politique + compilation du module | trois configurations bornées et retour au scheduler Playerbots avec `ScheduleTeleport` ; Dispersés n’accélère que les échéances des bots placés et encore suivis par l’instance serveur courante, car un événement hérité est indiscernable d’un événement natif après redémarrage ; cadence et rendu visuel non observés dans OpenWoW |
+| Comportement de l’équipe | harnais Fengari sur le vrai Lua | trois boutons explicites, préférence réappliquée après stabilisation du groupe et autonomie envoyée avant `leave` ; l’addon ne reçoit pas d’accusé structuré du serveur et le rendu réel reste à vérifier |
+| Discussion Direct | configuration + contrôles structurels | ambiance aléatoire, événementielle et bot-à-bot coupée ; demandes humaines éligibles configurées à 100 % et prioritaires, sans garantie en cas de file humaine pleine, panne du modèle ou destination disparue |
+| Discussion Immersif | configuration + contrôles structurels | aléatoire 20 %, événements 8 %/1 %, réponses bot en dire 20 % et groupe 50 %, intervalle 90–180 s, plafonds ambiants 2 par portée et 4 globalement |
+| Discussion Vivant | configuration + contrôles structurels | aléatoire 35 %, événements 10 %/2 %, réponses bot en dire 35 % et groupe 100 %, intervalle 30–90 s, plafonds ambiants 4 par portée et 6 globalement |
+| Changement à chaud | contrôles structurels du patch | l’ambiance en file ou déjà en vol est invalidée par génération, tandis que les demandes humaines sont conservées ; rendu réel non observé |
+| Contexte conversationnel | inspection de la configuration générée | historique, mémoire, relations, RAG, sentiment et emotes générées désactivés ; réponse directe guidée par le dernier message joueur |
+| Langue ambiante | test Rust de génération | les prompts sans message joueur sont français pour une copie `frFR` et anglais pour les autres locales prises en charge ; rendu réel encore non qualifié |
+| Compilations serveur ciblées | builds C++ séparés | worldserver compilé avec Playerbots + Ollama patché ; `mod-realmbox-presence` compilé et lié séparément avec Playerbots ; aucun build unique des trois modules ni démarrage runtime 0.4.0 |
+| Vérification globale du worktree | `pnpm verify` | typecheck et lint, 31 tests UI, 15 tests de scripts, builds Vite/Astro, Clippy strict, 71 tests desktop, 5 tests `xtask` et contrôle du patch déclaré réussis ; cela ne prouve ni un bundle ni un parcours OpenWoW 0.4.0 |
+| Parcours complet 0.4.0 | non prouvé | aucun nouveau parcours OpenWoW ne qualifie la présence, les boutons, la priorité sous charge, deux groupes simultanés, le bot-à-bot, le rendu de la langue ambiante ou l’absence de flood |
+
+## Récupération Docker 0.3.4
+
+| Fonction | Niveau de preuve | Résultat |
+|---|---|---|
+| Détection de purge | tests Rust + lecture UI réelle | bootstrap prêt mais explicite lorsque les volumes gérés manquent ou qu’un marqueur de reprise subsiste ; le clic sur Jouer passe en récupération |
+| Données joueurs | tests Rust + parcours réel | sélection du dump SQL complet et vérifié le plus récent, marqueur hors Docker, restauration et validation avant `db-import` ; marqueur retiré seulement après disponibilité ; deux personnages existants relus à l’écran de sélection et personnage niveau 80 rejoué à Stormwind |
+| Reconstruction runtime | tests Rust + parcours réel | remplacement d’une image locale disparue par l’ensemble immuable embarqué ; projet `realmbox-v3` conservé, aucun `--volumes`, Maps/VMaps/MMaps régénérés puis serveur et client ouverts |
+| Reprise d’extraction | tests Rust + interruptions réelles | configuration MMaps épinglée embarquée et montée ; les sorties dérivées `Buildings`, `vmaps` et `mmaps` sont nettoyées juste avant leur producteur, ce qui a permis de reprendre après deux répertoires partiels sans toucher à la base joueurs |
+| Docker Desktop macOS | test Rust + pull réel | le `PATH` enfant inclut le dossier des helpers `docker-credential-*`, même depuis un bundle ouvert par Finder ; pull des images et recréation des ressources réussis |
+| Vérification globale | `pnpm verify` | typecheck, lint, 27 tests UI, 14 tests de scripts, builds Vite/Astro, Clippy strict, 63 tests Rust et cohérence de release réussis |
+| Bundle macOS corrigé | build + signature + parcours réel | bundle arm64 0.3.4 signé ad hoc, `codesign --deep --strict` valide, SHA-256 exécutable `8c037e41…9546f6` ; parcours réel exécuté depuis ce bundle |
+| Installation locale | échange atomique + lecture fraîche | `/Users/benjamin/Applications/RealmBox.app` contient le build corrigé 0.3.4 (`8c037e41…9546f6`), signature ad hoc stricte valide ; l’ancien build (`9611e158…e42a2`) reste récupérable dans `/private/tmp/RealmBox-0.3.4-pre-recovery-install-20260903-1722.app`; manifeste, SQLite et neuf dumps SQL inchangés ; pas de relance forcée pendant la partie ouverte |
 
 ## Évolution bots 0.3.3
 

@@ -7,9 +7,11 @@ import {
   chooseGameData,
   configureLocalDialogue,
   configureDialogueChattiness,
+  createRealmBackup,
   getRealmDiagnostics,
   inspectAiCapability,
   inspectGameData,
+  inspectRealmBackup,
   installRealm,
   restoreLastRecovery,
   startRealm,
@@ -18,15 +20,15 @@ import {
   subscribeLauncherStatus,
   updatePlayerbotPopulation,
 } from "./runtime";
-import type { AiCapability, ClientChoice, DialogueChattiness, GameDataInspection, LauncherCommandError, LauncherErrorCode, LauncherStatus, RealmDiagnostics } from "./types";
+import type { AiCapability, BotPresence, ClientChoice, DialogueChattiness, GameDataInspection, LauncherCommandError, LauncherErrorCode, LauncherStatus, RealmBackupSummary, RealmDiagnostics } from "./types";
 
-type Panel = "settings" | "companions" | "dialogues" | "diagnostics";
+type Panel = "settings" | "companions" | "dialogues" | "backups" | "diagnostics";
 type WorldProfile = "quiet" | "balanced" | "dense" | "custom";
 
 const initialStatus: LauncherStatus = {
   phase: "checking", message: "Vérification de l’installation…", detail: null, errorCode: null, progress: 0,
   installed: false, recoveryAvailable: false, botsEnabled: true, botCount: 50, requestedBotCount: 50, appliedBotCount: 50, aiEnabled: false, aiModel: null,
-  dialogueChattiness: "balanced",
+  botPresence: "natural", dialogueChattiness: "balanced",
   gameDataPath: null, accountName: null, accountPassword: null, clientChoice: "managedOpenWow",
   originalClientSupported: false, platformLabel: "Détection en cours", components: [],
 };
@@ -73,9 +75,16 @@ function formatBytes(bytes: number, language: Language) {
   return `${new Intl.NumberFormat(language, { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(value)} ${units[unit]}`;
 }
 
+function formatBackupDate(timestamp: number, language: Language) {
+  return new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(timestamp);
+}
+
 function phaseCopy(status: LauncherStatus, copy: Copy) {
   if (status.phase === "running") return { title: copy.runningTitle, body: copy.runningBody };
-  if (status.phase === "ready") return { title: copy.readyTitle, body: copy.readyBody };
+  if (status.phase === "ready") return {
+    title: copy.readyTitle,
+    body: status.message.startsWith("Les ressources Docker seront reconstruites") ? localizedOperation(status.message, copy) : copy.readyBody,
+  };
   if (status.phase === "installing") return { title: copy.installingTitle, body: localizedOperation(status.message, copy) };
   if (status.phase === "starting") return { title: copy.startingTitle, body: localizedOperation(status.message, copy) };
   if (status.phase === "stopping") return { title: copy.stoppingTitle, body: localizedOperation(status.message, copy) };
@@ -92,6 +101,7 @@ function localizedOperation(message: string, copy: Copy) {
     "Téléchargement du client OpenWoW": "Downloading the OpenWoW client",
     "Vérification du client fourni": "Checking your game client",
     "Préparation du serveur précompilé": "Preparing the prebuilt server",
+    "Préparation sécurisée du serveur": "Preparing the server update safely",
     "Téléchargement du serveur épinglé": "Downloading the pinned server",
     "Installation du module Playerbots": "Installing Playerbots",
     "Ajout des dialogues locaux": "Adding local dialogue",
@@ -99,9 +109,13 @@ function localizedOperation(message: string, copy: Copy) {
     "Téléchargement du serveur local": "Downloading the local server",
     "Construction du serveur local": "Building the local server",
     "Préparation de la base locale": "Preparing the local save",
+    "Sauvegarde des personnages": "Backing up characters",
+    "Les ressources Docker seront reconstruites depuis la sauvegarde locale vérifiée au prochain lancement": "Docker resources will be rebuilt from the verified local backup when you play",
+    "Reconstruction des ressources Docker": "Rebuilding Docker resources",
     "Création du compte local": "Creating the local account",
     "Préparation du modèle local": "Preparing the local model",
     "Finalisation de RealmBox": "Finishing RealmBox setup",
+    "Mise à jour du serveur local": "Updating the local server",
     "Démarrage de la base locale": "Starting the local save",
     "Vérification du monde": "Checking the world",
     "Réveil des dialogues locaux": "Starting local dialogue",
@@ -152,6 +166,7 @@ export default function App() {
   const [gameDataFeedback, setGameDataFeedback] = useState<string | null>(null);
   const [botsEnabled, setBotsEnabled] = useState(true);
   const [botCount, setBotCount] = useState(50);
+  const [botPresence, setBotPresence] = useState<BotPresence>("natural");
   const [worldProfile, setWorldProfile] = useState<WorldProfile>("balanced");
   const [clientChoice, setClientChoice] = useState<ClientChoice>("managedOpenWow");
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -160,11 +175,27 @@ export default function App() {
   const [populationFeedback, setPopulationFeedback] = useState<string | null>(null);
   const [dialogueFeedback, setDialogueFeedback] = useState<string | null>(null);
   const [dialogueError, setDialogueError] = useState<string | null>(null);
+  const [backupSummary, setBackupSummary] = useState<RealmBackupSummary | null>(null);
+  const [backupLoaded, setBackupLoaded] = useState(false);
+  const [backupPending, setBackupPending] = useState(false);
+  const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<RealmDiagnostics | null>(null);
   const [diagnosticPending, setDiagnosticPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const bootstrapRequest = useRef<Promise<LauncherStatus> | null>(null);
   const aiRequest = useRef<Promise<AiCapability> | null>(null);
+
+  function applyLauncherStatus(next: LauncherStatus) {
+    setStatus(next);
+    setBotsEnabled(next.botsEnabled);
+    setBotCount(next.requestedBotCount);
+    setBotPresence(next.botPresence);
+    setWorldProfile(profileForPopulation(next.requestedBotCount));
+    setAiEnabled(next.aiEnabled);
+    setClientChoice(next.clientChoice);
+    setGameDataPath(next.gameDataPath);
+  }
 
   useEffect(() => {
     let active = true;
@@ -174,14 +205,12 @@ export default function App() {
       .then((unlisten) => { unlistenProgress = unlisten; });
     void subscribeLauncherStatus((next) => {
       if (!active) return;
-      setStatus(next); setBotsEnabled(next.botsEnabled); setBotCount(next.requestedBotCount); setWorldProfile(profileForPopulation(next.requestedBotCount));
-      setAiEnabled(next.aiEnabled); setClientChoice(next.clientChoice); setGameDataPath(next.gameDataPath);
+      applyLauncherStatus(next);
     }).then((unlisten) => { unlistenStatus = unlisten; });
     bootstrapRequest.current ??= bootstrapLauncher();
     void bootstrapRequest.current.then((next) => {
       if (!active) return;
-      setStatus(next); setGameDataPath(next.gameDataPath);
-      setBotsEnabled(next.botsEnabled); setBotCount(next.requestedBotCount); setWorldProfile(profileForPopulation(next.requestedBotCount)); setAiEnabled(next.aiEnabled); setClientChoice(next.clientChoice);
+      applyLauncherStatus(next);
       if (next.aiModel) setAiCapability({ ...checkingAi, state: "recommended", modelName: next.aiModel, ollamaModel: next.aiModel });
     }).catch((error: unknown) => active && setStatus({ ...initialStatus, phase: "error", ...commandError(error) }));
     aiRequest.current ??= inspectAiCapability();
@@ -233,6 +262,8 @@ export default function App() {
   const phase = useMemo(() => phaseCopy(status, copy), [status, copy]);
   const presentedError = errorCopy(status.errorCode, copy);
   const displayedPlatform = language === "en" && status.platformLabel === "Aperçu navigateur" ? "Browser preview" : status.platformLabel;
+  const dialogueActivationModel = status.aiModel ?? aiCapability.ollamaModel;
+  const capabilityMatchesInstalledModel = status.aiModel != null && aiCapability.ollamaModel === status.aiModel;
 
   async function selectData() {
     setRequestPending(true); setGameDataError(null);
@@ -249,7 +280,7 @@ export default function App() {
   async function install() {
     if (!gameDataPath) return;
     setRequestPending(true);
-    try { setStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, botCount, aiEnabled, aiEnabled ? aiCapability.ollamaModel : null)); }
+    try { applyLauncherStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, botCount, botPresence, aiEnabled, aiEnabled ? aiCapability.ollamaModel : null)); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); }
     finally { setRequestPending(false); }
   }
@@ -261,7 +292,7 @@ export default function App() {
       if (!selected) return;
       const inspection = await inspectGameData(selected);
       const next = await changeGameDataPath(inspection.path);
-      setStatus(next); setGameDataPath(next.gameDataPath); setGameDataInspection(inspection);
+      applyLauncherStatus(next); setGameDataInspection(inspection);
       setGameDataFeedback(copy.gameFolderUpdated);
     } catch (error) {
       setGameDataFeedback(null); setGameDataError(String(error));
@@ -270,14 +301,14 @@ export default function App() {
 
   async function start() {
     setRequestPending(true);
-    try { setStatus(await startRealm(botsEnabled, botCount, aiEnabled)); }
+    try { applyLauncherStatus(await startRealm(botsEnabled, botCount, botPresence, aiEnabled)); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); }
     finally { setRequestPending(false); }
   }
 
   async function stop() {
     setRequestPending(true);
-    try { setStatus(await stopRealm()); }
+    try { applyLauncherStatus(await stopRealm()); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); }
     finally { setRequestPending(false); }
   }
@@ -292,14 +323,14 @@ export default function App() {
       errorCode: null,
       progress: 0,
     }));
-    try { setStatus(await bootstrapLauncher()); }
+    try { applyLauncherStatus(await bootstrapLauncher()); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); }
     finally { setRequestPending(false); }
   }
 
   async function restoreRecovery() {
     setRequestPending(true);
-    try { setStatus(await restoreLastRecovery()); }
+    try { applyLauncherStatus(await restoreLastRecovery()); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); }
     finally { setRequestPending(false); }
   }
@@ -307,20 +338,21 @@ export default function App() {
   async function applyPopulation() {
     setRequestPending(true); setPopulationFeedback(null);
     try {
-      const next = await updatePlayerbotPopulation(botsEnabled, botCount);
-      setStatus(next); setBotCount(next.requestedBotCount); setPopulationFeedback(copy.applied);
+      const next = await updatePlayerbotPopulation(botsEnabled, botCount, botPresence);
+      applyLauncherStatus(next);
+      setPopulationFeedback(next.phase === "running" ? copy.applied : copy.savedForNextLaunch);
     } catch (error) {
       setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); setPanel(null);
     } finally { setRequestPending(false); }
   }
 
   async function configureDialogue(enabled: boolean) {
-    if (enabled && !aiCapability.ollamaModel) return;
+    if (enabled && !dialogueActivationModel) return;
     const previousPhase = status.phase;
     setRequestPending(true); setDialogueFeedback(null); setDialogueError(null);
     try {
-      const next = await configureLocalDialogue(enabled, enabled ? aiCapability.ollamaModel : status.aiModel);
-      setStatus(next); setAiEnabled(next.aiEnabled);
+      const next = await configureLocalDialogue(enabled, enabled ? dialogueActivationModel : status.aiModel);
+      applyLauncherStatus(next);
       setDialogueFeedback(enabled ? copy.dialogueReady : copy.off);
     } catch (error) {
       setDialogueError(`${copy.dialogueFailed} ${String(error)}`);
@@ -332,7 +364,7 @@ export default function App() {
     setRequestPending(true); setDialogueFeedback(null); setDialogueError(null);
     try {
       const next = await configureDialogueChattiness(chattiness);
-      setStatus(next); setDialogueFeedback(copy.chattinessSaved);
+      applyLauncherStatus(next); setDialogueFeedback(copy.chattinessSaved);
     } catch (error) {
       setDialogueError(String(error));
     } finally { setRequestPending(false); }
@@ -345,10 +377,28 @@ export default function App() {
     finally { setDiagnosticPending(false); }
   }
 
+  async function refreshBackup() {
+    setBackupPending(true); setBackupError(null);
+    try { setBackupSummary(await inspectRealmBackup()); }
+    catch { setBackupSummary(null); setBackupError(copy.backupFailed); }
+    finally { setBackupLoaded(true); setBackupPending(false); }
+  }
+
+  async function createBackup() {
+    setBackupPending(true); setBackupFeedback(null); setBackupError(null);
+    try {
+      setBackupSummary(await createRealmBackup());
+      setBackupLoaded(true); setBackupFeedback(copy.backupCreated);
+    } catch {
+      setBackupError(copy.backupFailed);
+    } finally { setBackupPending(false); }
+  }
+
   function openPanel(next: Panel) {
     if (!panel && document.activeElement instanceof HTMLElement) panelTriggerRef.current = document.activeElement;
     setPanel(next);
     if (next === "diagnostics") void refreshDiagnostics();
+    if (next === "backups") void refreshBackup();
   }
 
   function closePanel() {
@@ -383,8 +433,21 @@ export default function App() {
       <option value="custom">{copy.customProfile}</option>
     </select>
   );
+  const presenceChoices = (
+    <fieldset className="choice-group" aria-label={copy.presence}>
+      <legend>{copy.presence}</legend>
+      {([
+        ["dispersed", copy.presenceDispersed, copy.presenceDispersedHelp],
+        ["natural", copy.presenceNatural, copy.presenceNaturalHelp],
+        ["close", copy.presenceClose, copy.presenceCloseHelp],
+      ] as const).map(([value, label, help]) => <label className="choice-card" key={value}>
+        <input type="radio" name="bot-presence" value={value} checked={botPresence === value} onChange={() => { setBotPresence(value); setPopulationFeedback(null); }} />
+        <span><strong>{label}{value === "natural" && <em>{copy.recommended}</em>}</strong><small>{help}</small></span>
+      </label>)}
+    </fieldset>
+  );
 
-  const panelTitle = panel === "companions" ? copy.companionsTitle : panel === "dialogues" ? copy.dialoguesTitle : panel === "diagnostics" ? copy.diagnosticsTitle : copy.settings;
+  const panelTitle = panel === "companions" ? copy.companionsTitle : panel === "dialogues" ? copy.dialoguesTitle : panel === "backups" ? copy.backupsTitle : panel === "diagnostics" ? copy.diagnosticsTitle : copy.settings;
   const showProgress = ["installing", "starting", "stopping", "recovering"].includes(status.phase) && status.progress > 0 && status.progress < 100;
   const progressVolume = status.completedBytes != null
     ? status.totalBytes != null
@@ -461,6 +524,7 @@ export default function App() {
                   <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => { setBotsEnabled(event.target.checked); if (!event.target.checked) setAiEnabled(false); }} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
                   {botsEnabled && <label className="select-row"><span>{copy.worldProfile}</span>{profileSelect}</label>}
                   {botsEnabled && worldProfile === "custom" && <label className="select-row"><span>{copy.population}</span>{populationSelect}</label>}
+                  {botsEnabled && presenceChoices}
                   <label className={`option-row ${aiCapability.state !== "recommended" ? "muted" : ""}`}><input type="checkbox" checked={aiEnabled} disabled={!botsEnabled || aiCapability.state !== "recommended"} onChange={(event) => setAiEnabled(event.target.checked)} /><span><strong>{copy.ai}</strong><small>{aiCapability.state === "checking" ? copy.aiChecking : aiCapability.state === "recommended" ? `${aiCapability.modelName} · ${aiCapability.downloadSizeGb ?? "?"} GB · ~${aiCapability.estimatedTokensPerSecond ?? "?"} tok/s` : copy.aiUnavailable}</small></span></label>
                 </section>}
 
@@ -475,6 +539,7 @@ export default function App() {
                 <nav className="settings-nav" aria-label={copy.settings}>
                   <button onClick={() => openPanel("companions")} disabled={!status.installed}><span><strong>{copy.companions}</strong><small>{copy.companionsBodyReady}</small></span></button>
                   <button onClick={() => openPanel("dialogues")} disabled={!status.installed}><span><strong>{copy.dialogues}</strong><small>{copy.dialoguesBody}</small></span></button>
+                  <button onClick={() => openPanel("backups")} disabled={!status.installed}><span><strong>{copy.backups}</strong><small>{copy.backupsNavBody}</small></span></button>
                   <button onClick={() => openPanel("diagnostics")}><span><strong>{copy.diagnostics}</strong><small>{copy.diagnosticsBody}</small></span></button>
                 </nav>
 
@@ -484,32 +549,64 @@ export default function App() {
 
               {panel === "companions" && <>
                 <p className="panel-intro">{status.phase === "running" ? copy.companionsBodyRunning : copy.companionsBodyReady}</p>
-                <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => setBotsEnabled(event.target.checked)} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
+                <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => { setBotsEnabled(event.target.checked); if (!event.target.checked) setAiEnabled(false); setPopulationFeedback(null); }} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
                 {botsEnabled && <label className="select-row"><span>{copy.worldProfile}</span>{profileSelect}</label>}
                 {botsEnabled && worldProfile === "custom" && <label className="select-row"><span>{copy.requestedPopulation}</span>{populationSelect}</label>}
+                {botsEnabled && presenceChoices}
                 {botsEnabled && <dl className="facts-list"><div><dt>{copy.requestedPopulation}</dt><dd>{botCount}</dd></div><div><dt>{copy.appliedPopulation}</dt><dd>{status.appliedBotCount}</dd></div></dl>}
-                <p className="helper">{copy.teamHelp}</p>
-                {status.phase === "running" ? <button className="secondary-action full" onClick={applyPopulation} disabled={requestPending}>{copy.applyNow}</button> : <p className="helper">{copy.startToApply}</p>}
-                {populationFeedback && <p className="success-message">{populationFeedback}</p>}
+                {botsEnabled && <section className="mode-summary" aria-labelledby="party-behavior-title">
+                  <h3 id="party-behavior-title">{copy.partyBehavior}</h3>
+                  <p>{copy.teamHelp}</p>
+                  <ul><li><strong>{copy.behaviorEscort}</strong> — {copy.behaviorEscortHelp}</li><li><strong>{copy.behaviorGuard}</strong> — {copy.behaviorGuardHelp}</li><li><strong>{copy.behaviorFree}</strong> — {copy.behaviorFreeHelp}</li></ul>
+                </section>}
+                {!botsEnabled && <p className="helper">{copy.behaviorRequiresCompanions}</p>}
+                <button className="secondary-action full" onClick={applyPopulation} disabled={requestPending}>{status.phase === "running" ? copy.applyNow : copy.saveForNextLaunch}</button>
+                {populationFeedback && <p className="success-message" role="status">{populationFeedback}</p>}
               </>}
 
               {panel === "dialogues" && <>
                 <p className="panel-intro">{copy.dialoguesBody}</p>
-                <div className="model-summary"><strong>{status.aiModel ?? aiCapability.modelName ?? (aiCapability.state === "checking" ? copy.aiChecking : copy.aiUnavailable)}</strong><p>{aiCapability.detail}</p></div>
-                {(status.aiModel || aiCapability.state === "recommended") && <dl className="facts-list">
+                <div className="model-summary"><strong>{status.aiModel ?? aiCapability.modelName ?? (aiCapability.state === "checking" ? copy.aiChecking : copy.aiUnavailable)}</strong><p>{status.aiModel ? copy.modelInstalled : aiCapability.detail}</p></div>
+                {(aiCapability.state === "recommended" && (!status.aiModel || capabilityMatchesInstalledModel)) && <dl className="facts-list">
                   <div><dt>{copy.downloadSize}</dt><dd>{aiCapability.downloadSizeGb ? `${aiCapability.downloadSizeGb.toLocaleString(language, { maximumFractionDigits: 1 })} GB` : "—"}</dd></div>
                   <div><dt>{copy.diskAvailable}</dt><dd>{aiCapability.diskAvailableGb != null ? `${aiCapability.diskAvailableGb.toLocaleString(language, { maximumFractionDigits: 1 })} GB` : "—"}</dd></div>
                   <div><dt>{copy.estimatedSpeed}</dt><dd>{aiCapability.estimatedTokensPerSecond ? `~${aiCapability.estimatedTokensPerSecond} tok/s` : "—"}</dd></div>
                   <div><dt>{copy.modelLicense}</dt><dd>{aiCapability.modelLicense ?? "—"}</dd></div>
                 </dl>}
                 <p className="helper">{copy.dialogueLocalProof}</p>
-                {status.aiModel && <label className="select-row"><span>{copy.chattiness}</span><select value={status.dialogueChattiness} disabled={requestPending || !status.aiEnabled} onChange={(event) => void changeChattiness(event.target.value as DialogueChattiness)}><option value="quiet">{copy.chattinessQuiet}</option><option value="balanced">{copy.chattinessBalanced}</option><option value="lively">{copy.chattinessLively}</option></select></label>}
+                {status.aiModel && <fieldset className="choice-group" aria-label={copy.chattiness} disabled={requestPending || (status.phase === "running" && !status.aiEnabled)}>
+                  <legend>{copy.chattiness}</legend>
+                  {([
+                    ["quiet", copy.chattinessQuiet],
+                    ["balanced", copy.chattinessBalanced],
+                    ["lively", copy.chattinessLively],
+                  ] as const).map(([value, label]) => <label className="choice-card" key={value}>
+                    <input type="radio" name="dialogue-profile" value={value} checked={status.dialogueChattiness === value} onChange={() => void changeChattiness(value as DialogueChattiness)} />
+                    <span><strong>{label}{value === "balanced" && <em>{copy.recommended}</em>}</strong></span>
+                  </label>)}
+                </fieldset>}
                 {status.phase === "running" ? <><p className="helper">{copy.closeToChange}</p><button className="secondary-action full" onClick={stop} disabled={requestPending}>{copy.stopForDialogues}</button></> : status.aiEnabled ?
                   <button className="secondary-action full" onClick={() => void configureDialogue(false)} disabled={requestPending}>{copy.deactivateDialogues}</button> :
-                  <button className="secondary-action full" onClick={() => void configureDialogue(true)} disabled={requestPending || aiCapability.state !== "recommended" || aiCapability.diskSpaceSufficient === false || !botsEnabled}>{copy.activateDialogues}</button>}
-                {aiCapability.diskSpaceSufficient === false && <p className="error-message">{copy.diskInsufficient}</p>}
-                {dialogueFeedback && <p className="success-message">{dialogueFeedback}</p>}
-                {dialogueError && <p className="error-message">{dialogueError}</p>}
+                  <button className="secondary-action full" onClick={() => void configureDialogue(true)} disabled={requestPending || !botsEnabled || (!status.aiModel && (aiCapability.state !== "recommended" || aiCapability.diskSpaceSufficient === false))}>{status.aiModel ? copy.reactivateDialogues : copy.activateDialogues}</button>}
+                {!botsEnabled && <p className="error-message" role="alert">{copy.dialoguesRequireCompanions}</p>}
+                {!status.aiModel && aiCapability.diskSpaceSufficient === false && <p className="error-message" role="alert">{copy.diskInsufficient}</p>}
+                {dialogueFeedback && <p className="success-message" role="status">{dialogueFeedback}</p>}
+                {dialogueError && <p className="error-message" role="alert">{dialogueError}</p>}
+              </>}
+
+              {panel === "backups" && <>
+                <p className="panel-intro">{copy.backupsBody}</p>
+                {backupPending && !backupLoaded && <p className="helper">{copy.backupChecking}</p>}
+                {backupLoaded && backupSummary && <dl className="facts-list">
+                  <div><dt>{copy.latestBackup}</dt><dd>{formatBackupDate(backupSummary.createdAtUnixMs, language)}</dd></div>
+                  <div><dt>{copy.backupSize}</dt><dd>{formatBytes(backupSummary.sizeBytes, language)}</dd></div>
+                  <div><dt>{copy.integrity}</dt><dd>{copy.verified}</dd></div>
+                </dl>}
+                {backupLoaded && !backupSummary && !backupError && <div className="model-summary"><strong>{copy.noBackup}</strong><p>{copy.backupFirstHelp}</p></div>}
+                <p className="helper">{status.phase === "running" ? copy.backupRunningHelp : copy.backupLocalHelp}</p>
+                <button className="secondary-action full" onClick={() => void createBackup()} disabled={backupPending}>{backupPending ? copy.backupWorking : copy.backupNow}</button>
+                {backupFeedback && <p className="success-message" role="status">{backupFeedback}</p>}
+                {backupError && <p className="error-message" role="alert">{backupError}</p>}
               </>}
 
               {panel === "diagnostics" && <>

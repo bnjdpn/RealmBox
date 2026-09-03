@@ -9,7 +9,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use num_bigint::BigUint;
@@ -24,6 +24,10 @@ const RUNTIME_DIRECTORY: &str = "runtime-v3";
 const COMPOSE_PROJECT_NAME: &str = "realmbox-v3";
 const PLAYER_DATA_BACKUP_DIRECTORY: &str = "player-data-backups";
 const RUNTIME_ROLLBACK_DIRECTORY: &str = "runtime-rollbacks";
+const RUNTIME_UPDATE_FILE: &str = "runtime-update.json";
+const DOCKER_RECOVERY_FILE: &str = "docker-recovery.json";
+const DATABASE_VOLUME: &str = "realmbox-v3_realmbox-database";
+const SERVER_DATA_VOLUME: &str = "realmbox-v3_realmbox-server-data";
 const SERVER_REPOSITORY: &str = "https://github.com/mod-playerbots/azerothcore-wotlk.git";
 const SERVER_COMMIT: &str = "47960183bb03b83e8943eb2f0f39c16df9710c9d";
 const PLAYERBOTS_REPOSITORY: &str = "https://github.com/mod-playerbots/mod-playerbots.git";
@@ -33,8 +37,15 @@ const OLLAMA_CHAT_COMMIT: &str = "a9d14b0b8955be136e657ac168dd255f5281a535";
 const REALMBOX_PRESENCE_MODULE: &str = "mod-realmbox-presence";
 const REALMBOX_OLLAMA_PATCH: &str = "mod-ollama-chat-realmbox.patch";
 const OLLAMA_PORT: u16 = 11435;
-const OLLAMA_DIALOGUE_SYSTEM_PROMPT: &str = r#""Reply directly in exactly the language of the quoted player message. An English message requires an English answer. A French message requires a French answer. Never use another language. Keep names and World of Warcraft terms unchanged. If unsure, say so briefly in the same language. Output only the answer.""#;
+const OLLAMA_DIALOGUE_SYSTEM_PROMPT_EN: &str = r#""Reply directly in exactly the language of the quoted player message. An English message requires an English answer. A French message requires a French answer. If there is no quoted player message, write only in English. Keep names and World of Warcraft terms unchanged. If unsure, say so briefly in the required language. Output only the answer.""#;
+const OLLAMA_DIALOGUE_SYSTEM_PROMPT_FR: &str = r#""Reply directly in exactly the language of the quoted player message. An English message requires an English answer. A French message requires a French answer. If there is no quoted player message, write only in French. Keep names and World of Warcraft terms unchanged. If unsure, say so briefly in the required language. Output only the answer.""#;
 const OLLAMA_DIALOGUE_CHAT_PROMPT: &str = r#""You are {bot_name}, a World of Warcraft {bot_class}. Player message: <player_message>{player_message}</player_message>. Reply directly to that message in the same language in under 20 words. Output only the answer, with no name, prefix, narration, classification, or meta-comment.""#;
+const OLLAMA_RANDOM_PROMPT_EN: &str = r#""You are {bot_name}, a level {bot_level} {bot_class} in {bot_area}, {bot_zone}. Personality: {bot_personality_name}: {bot_personality}. {environment_info} Write one natural in-character World of Warcraft remark in English, under 15 words. No name, prefix, quote, emoji, markdown, narration, or meta-comment.""#;
+const OLLAMA_RANDOM_VARIATIONS_EN: &str = r#""Comment on the current place or journey.|Mention a quest, fight, profession, equipment, or group need that fits the situation.|Make a brief observation about your class or role.|React to the atmosphere without inventing an event.""#;
+const OLLAMA_EVENT_PROMPT_EN: &str = r#""You are {bot_name}, a level {bot_level} {bot_class} in {bot_area}, {bot_zone}. Personality: {bot_personality_name}: {bot_personality}. Event: {actor_name} {event_type} {event_detail}. React only to this event in natural English, in character, under 15 words. No name, prefix, emoji, markdown, narration, or invented facts.""#;
+const OLLAMA_RANDOM_PROMPT_FR: &str = r#""Tu es {bot_name}, {bot_class} de niveau {bot_level}, à {bot_area}, {bot_zone}. Personnalité : {bot_personality_name}: {bot_personality}. {environment_info} Écris une seule remarque naturelle et crédible en français, dans le monde de World of Warcraft, en moins de 15 mots. Aucun nom, préfixe, guillemet, emoji, markdown, récit ou méta-commentaire.""#;
+const OLLAMA_RANDOM_VARIATIONS_FR: &str = r#""Commente le lieu actuel ou le voyage.|Mentionne une quête, un combat, un métier, un équipement ou un besoin de groupe adapté à la situation.|Fais une brève remarque sur ta classe ou ton rôle.|Réagis à l’ambiance sans inventer d’événement.""#;
+const OLLAMA_EVENT_PROMPT_FR: &str = r#""Tu es {bot_name}, {bot_class} de niveau {bot_level}, à {bot_area}, {bot_zone}. Personnalité : {bot_personality_name}: {bot_personality}. Événement : {actor_name} {event_type} {event_detail}. Réagis uniquement à cet événement, naturellement en français et dans ton rôle, en moins de 15 mots. Aucun nom, préfixe, emoji, markdown, récit ou fait inventé.""#;
 const MYSQL_IMAGE: &str =
     "mysql@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb";
 const AUTH_SERVER_IMAGE: Option<&str> = option_env!("REALMBOX_AUTH_SERVER_IMAGE");
@@ -51,7 +62,7 @@ const SUPPORTED_GAME_LOCALES: [&str; 10] = [
     "frFR", "enUS", "enGB", "deDE", "esES", "esMX", "ruRU", "koKR", "zhCN", "zhTW",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ServerImages {
     authserver: String,
     worldserver: String,
@@ -74,6 +85,26 @@ pub enum DialogueChattiness {
     #[default]
     Balanced,
     Lively,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum DialogueLanguage {
+    French,
+    #[default]
+    English,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BotPresence {
+    Dispersed,
+    #[default]
+    Natural,
+    Close,
+}
+
+fn legacy_bot_presence() -> BotPresence {
+    BotPresence::Close
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -271,6 +302,7 @@ pub struct LauncherStatus {
     pub bot_count: usize,
     pub requested_bot_count: usize,
     pub applied_bot_count: usize,
+    pub bot_presence: BotPresence,
     pub ai_enabled: bool,
     pub ai_model: Option<String>,
     pub dialogue_chattiness: DialogueChattiness,
@@ -316,11 +348,19 @@ pub struct RealmDiagnostics {
     pub recent_entries: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealmBackupSummary {
+    pub created_at_unix_ms: u64,
+    pub size_bytes: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallationOptions {
     pub client_choice: ClientChoice,
     pub bots_enabled: bool,
     pub bot_count: usize,
+    pub bot_presence: BotPresence,
     pub ai_enabled: bool,
     pub ai_model: Option<String>,
 }
@@ -330,6 +370,8 @@ pub struct InstallationOptions {
 struct WorldPreferences {
     bots_enabled: bool,
     requested_bot_count: usize,
+    #[serde(default = "legacy_bot_presence")]
+    bot_presence: BotPresence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,6 +417,37 @@ struct RecoveryMetadata {
     ai_enabled: bool,
     ai_model: Option<String>,
     ollama_chat_commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum RuntimeUpdatePhase {
+    Staged,
+    Published,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeUpdateTransaction {
+    schema_version: u32,
+    transition: String,
+    attempt: u32,
+    phase: RuntimeUpdatePhase,
+    images: ServerImages,
+    recovery: RecoveryMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DatabaseBackup {
+    stem: String,
+    backup: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DockerRecoveryRecord {
+    schema_version: u32,
+    backup_stem: String,
 }
 
 pub trait CommandRunner: Send + Sync + 'static {
@@ -706,6 +779,49 @@ fn docker_desktop_cli_candidates() -> Vec<PathBuf> {
     Vec::new()
 }
 
+fn child_command(program: &str) -> Command {
+    let resolved = resolve_program(program);
+    let mut command = Command::new(&resolved);
+    if program == "docker"
+        && let Some(path) = docker_support_path(
+            env::var_os("PATH").as_deref(),
+            &resolved,
+            &docker_desktop_cli_candidates(),
+        )
+    {
+        command.env("PATH", path);
+    }
+    command
+}
+
+fn docker_support_path(
+    current: Option<&OsStr>,
+    resolved: &Path,
+    candidates: &[PathBuf],
+) -> Option<OsString> {
+    let mut directories = Vec::new();
+    let mut append = |directory: PathBuf| {
+        if !directory.as_os_str().is_empty() && !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    };
+    if let Some(parent) = resolved.parent() {
+        append(parent.to_path_buf());
+    }
+    for directory in candidates
+        .iter()
+        .filter_map(|candidate| candidate.parent().map(Path::to_path_buf))
+    {
+        append(directory);
+    }
+    if let Some(current) = current {
+        for directory in env::split_paths(current) {
+            append(directory);
+        }
+    }
+    env::join_paths(directories).ok()
+}
+
 impl CommandRunner for SystemCommandRunner {
     fn run(
         &self,
@@ -713,7 +829,7 @@ impl CommandRunner for SystemCommandRunner {
         args: &[OsString],
         current_dir: Option<&Path>,
     ) -> Result<String, String> {
-        let mut command = Command::new(resolve_program(program));
+        let mut command = child_command(program);
         command.args(args);
         if let Some(directory) = current_dir {
             command.current_dir(directory);
@@ -743,7 +859,7 @@ impl CommandRunner for SystemCommandRunner {
         }
         let log = File::create(log_path).map_err(|error| error.to_string())?;
         let errors = log.try_clone().map_err(|error| error.to_string())?;
-        let mut command = Command::new(resolve_program(program));
+        let mut command = child_command(program);
         command
             .args(args)
             .stdout(Stdio::from(log))
@@ -779,7 +895,7 @@ impl CommandRunner for SystemCommandRunner {
         }
         let output = File::create(output_path).map_err(|error| error.to_string())?;
         let errors = File::create(error_path).map_err(|error| error.to_string())?;
-        let mut command = Command::new(resolve_program(program));
+        let mut command = child_command(program);
         command
             .args(args)
             .stdout(Stdio::from(output))
@@ -814,7 +930,7 @@ impl CommandRunner for SystemCommandRunner {
         let input = File::open(input_path).map_err(|error| error.to_string())?;
         let log = File::create(log_path).map_err(|error| error.to_string())?;
         let errors = log.try_clone().map_err(|error| error.to_string())?;
-        let mut command = Command::new(resolve_program(program));
+        let mut command = child_command(program);
         command
             .args(args)
             .stdin(Stdio::from(input))
@@ -1123,6 +1239,11 @@ impl<R: CommandRunner> LauncherService<R> {
                 requested_bot_count: record.map_or_else(default_bot_count, |record| {
                     normalize_bot_count(record.bot_count)
                 }),
+                bot_presence: if record.is_some() {
+                    legacy_bot_presence()
+                } else {
+                    BotPresence::default()
+                },
             })
     }
 
@@ -1158,6 +1279,7 @@ impl<R: CommandRunner> LauncherService<R> {
             record.ai_enabled,
             record.ai_model.as_deref(),
             chattiness,
+            dialogue_language_for_record(&record),
         )?;
         if running {
             self.runner.run_long(
@@ -1257,6 +1379,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 bot_count: record.bot_count,
                 requested_bot_count: self.world_preferences(Some(&record)).requested_bot_count,
                 applied_bot_count: record.bot_count,
+                bot_presence: self.world_preferences(Some(&record)).bot_presence,
                 ai_enabled: record.ai_enabled,
                 ai_model: record.ai_model.clone(),
                 dialogue_chattiness: self.dialogue_chattiness(),
@@ -1291,6 +1414,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 bot_count: default_bot_count(),
                 requested_bot_count: default_bot_count(),
                 applied_bot_count: default_bot_count(),
+                bot_presence: BotPresence::default(),
                 ai_enabled: false,
                 ai_model: None,
                 dialogue_chattiness: self.dialogue_chattiness(),
@@ -1317,10 +1441,27 @@ impl<R: CommandRunner> LauncherService<R> {
         F: FnMut(LauncherProgress),
     {
         let _ = progress;
-        let Some(record) = self.load_record()? else {
+        let Some(mut record) = self.load_record()? else {
             return Ok(self.status());
         };
+        self.resume_runtime_update_if_needed(&mut record)?;
         let running = self.worldserver_is_running(&record).unwrap_or(false);
+        let docker_rebuild_required = !running
+            && (self.app_data.join(DOCKER_RECOVERY_FILE).is_file()
+                || (self
+                    .runner
+                    .run(
+                        "docker",
+                        &[
+                            "info".into(),
+                            "--format".into(),
+                            "{{.ServerVersion}}".into(),
+                        ],
+                        None,
+                    )
+                    .is_ok()
+                    && (!docker_volume_exists(&self.runner, DATABASE_VOLUME)
+                        || !docker_volume_exists(&self.runner, SERVER_DATA_VOLUME))));
         Ok(self.installed_status(
             &record,
             if running {
@@ -1330,6 +1471,8 @@ impl<R: CommandRunner> LauncherService<R> {
             },
             if running {
                 "Le monde est déjà lancé"
+            } else if docker_rebuild_required {
+                "Les ressources Docker seront reconstruites depuis la sauvegarde locale vérifiée au prochain lancement"
             } else {
                 "Installation prête"
             },
@@ -1440,6 +1583,7 @@ impl<R: CommandRunner> LauncherService<R> {
             client_choice,
             bots_enabled,
             bot_count,
+            bot_presence,
             ai_enabled,
             ai_model,
         } = options;
@@ -1642,6 +1786,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 write_realmbox_dockerfile(&server_root)?;
             }
 
+            install_mmaps_config(&self.addon_source, &server_root)?;
             let (uid, gid) = platform_container_ids(&self.runner)?;
             let database_password = secure_random_hex(24)?;
             write_secret_atomic(
@@ -1797,9 +1942,9 @@ impl<R: CommandRunner> LauncherService<R> {
                 Some(&server_root),
                 &logs.join("database-import.log"),
             )?;
-            write_playerbots_config(&server_root, bots_enabled, bot_count)?;
+            write_playerbots_config(&server_root, bots_enabled, bot_count, bot_presence)?;
             install_realmbox_presence_config(&self.addon_source, &server_root)?;
-            write_realmbox_presence_config(&server_root, bots_enabled)?;
+            write_realmbox_presence_config(&server_root, bots_enabled, bot_presence)?;
             self.emit_component(
                 &mut progress,
                 OperationComponent::Bots,
@@ -1814,6 +1959,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 ai_enabled,
                 ai_model.as_deref(),
                 self.dialogue_chattiness(),
+                dialogue_language_for_game_data(&game_data_root),
             )?;
             self.emit(
                 &mut progress,
@@ -1895,6 +2041,7 @@ impl<R: CommandRunner> LauncherService<R> {
             self.save_world_preferences(WorldPreferences {
                 bots_enabled,
                 requested_bot_count,
+                bot_presence,
             })?;
             self.emit(
                 &mut progress,
@@ -1941,6 +2088,7 @@ impl<R: CommandRunner> LauncherService<R> {
         &mut self,
         bots_enabled: Option<bool>,
         bot_count: Option<usize>,
+        bot_presence: Option<BotPresence>,
         ai_enabled: Option<bool>,
         mut progress: F,
     ) -> Result<LauncherStatus, String>
@@ -1951,12 +2099,22 @@ impl<R: CommandRunner> LauncherService<R> {
         let mut record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        if self.client_process_id.is_some() {
+            return Err("le client RealmBox est déjà lancé".into());
+        }
+        self.resume_runtime_update_if_needed(&mut record)?;
+        if self.worldserver_is_running(&record)? {
+            return Err("le monde RealmBox est déjà lancé".into());
+        }
         let mut preferences = self.world_preferences(Some(&record));
         if let Some(enabled) = bots_enabled {
             preferences.bots_enabled = enabled;
         }
         if let Some(requested) = bot_count {
             preferences.requested_bot_count = normalize_bot_count(requested);
+        }
+        if let Some(presence) = bot_presence {
+            preferences.bot_presence = presence;
         }
         record.bots_enabled = preferences.bots_enabled;
         if let Some(enabled) = ai_enabled {
@@ -1973,18 +2131,12 @@ impl<R: CommandRunner> LauncherService<R> {
         }
         self.save_world_preferences(preferences)?;
         self.save_record(&record)?;
-        let server_root = record
+        let mut server_root = record
             .compose_file
             .parent()
-            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+            .ok_or_else(|| "chemin serveur invalide".to_string())?
+            .to_path_buf();
         refresh_companion_addon(&self.addon_source, &record)?;
-        ensure_worldserver_console(&record.compose_file)?;
-        write_ollama_chat_config(
-            server_root,
-            record.ai_enabled,
-            record.ai_model.as_deref(),
-            self.dialogue_chattiness(),
-        )?;
         self.runner
             .run(
                 "docker",
@@ -1996,6 +2148,28 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .map_err(|error| format!("Docker Desktop doit être démarré: {error}"))?;
+        let database_volume_missing = !docker_volume_exists(&self.runner, DATABASE_VOLUME);
+        let server_data_volume_missing = !docker_volume_exists(&self.runner, SERVER_DATA_VOLUME);
+        let database_recovery = prepare_docker_recovery(&self.app_data, database_volume_missing)?;
+        let target_release = runtime_release_id();
+        let requires_runtime_update =
+            record.runtime_release.as_deref() != Some(target_release.as_str());
+        let compose_repaired = if requires_runtime_update {
+            false
+        } else {
+            repair_missing_local_server_image(&self.runner, &record)?
+        };
+        if database_recovery.is_some() || server_data_volume_missing || compose_repaired {
+            self.emit(
+                &mut progress,
+                LauncherPhase::Recovering,
+                6,
+                "Reconstruction des ressources Docker",
+                database_recovery
+                    .as_ref()
+                    .map(|_| "La dernière sauvegarde locale vérifiée sera restaurée"),
+            );
+        }
         let docker_memory = self
             .runner
             .run(
@@ -2004,15 +2178,6 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .unwrap_or_default();
-        record.bot_count = effective_playerbot_count(
-            &docker_memory,
-            record.bots_enabled,
-            preferences.requested_bot_count,
-        );
-        self.save_record(&record)?;
-        write_playerbots_config(server_root, record.bots_enabled, record.bot_count)?;
-        install_realmbox_presence_config(&self.addon_source, server_root)?;
-        write_realmbox_presence_config(server_root, record.bots_enabled)?;
 
         self.emit(
             &mut progress,
@@ -2027,29 +2192,102 @@ impl<R: CommandRunner> LauncherService<R> {
                 &record.compose_file,
                 &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
             ),
-            Some(server_root),
+            Some(&server_root),
             &record.runtime_root.join("logs/start-database.log"),
         )?;
 
-        let target_release = runtime_release_id();
-        let requires_pre_migration_backup =
-            record.runtime_release.as_deref() != Some(target_release.as_str());
-        if requires_pre_migration_backup {
+        if let Some(recovery) = &database_recovery {
             self.emit(
                 &mut progress,
-                LauncherPhase::Starting,
-                24,
-                "Sauvegarde des personnages",
-                Some("Obligatoire avant toute migration de RealmBox"),
+                LauncherPhase::Recovering,
+                20,
+                "Restauration des personnages",
+                Some("Sauvegarde SQL locale vérifiée"),
             );
-            create_pre_migration_backup(
+            restore_database_backup(
+                &self.runner,
+                &record.compose_file,
+                &server_root,
+                &recovery.backup,
+                &record.runtime_root.join("logs/docker-recovery-import.log"),
+            )?;
+            validate_live_database_after_restore(
                 &self.runner,
                 &self.app_data,
                 &record.compose_file,
-                server_root,
-                record.runtime_release.as_deref().unwrap_or("legacy"),
-                &target_release,
-                &record.runtime_root.join("logs/database-backup.log"),
+                &server_root,
+                &format!("docker-{}", recovery.stem),
+                &record
+                    .runtime_root
+                    .join("logs/docker-recovery-validation.log"),
+            )?;
+        }
+
+        let mut runtime_swapped_now = false;
+        if requires_runtime_update {
+            let images = embedded_server_images()?.ok_or_else(|| {
+                "mise à jour refusée : cette build de développement ne contient pas les quatre images serveur immuables nécessaires au remplacement du runtime existant"
+                    .to_string()
+            })?;
+            if record.runtime_release.as_deref()
+                == Some(pending_runtime_release_id(&target_release).as_str())
+            {
+                validate_prepared_runtime_update(
+                    &self.app_data,
+                    &record,
+                    &images,
+                    &target_release,
+                )?;
+            } else {
+                self.prepare_server_runtime_update(&mut record, &images, &mut progress)?;
+                runtime_swapped_now = true;
+                server_root = record
+                    .compose_file
+                    .parent()
+                    .ok_or_else(|| "chemin serveur invalide".to_string())?
+                    .to_path_buf();
+            }
+        }
+
+        install_mmaps_config(&self.addon_source, &server_root)?;
+        ensure_worldserver_console(&record.compose_file)?;
+        ensure_mmaps_config_mount(&record.compose_file)?;
+        ensure_restartable_server_data_extraction(&record.compose_file)?;
+        write_ollama_chat_config(
+            &server_root,
+            record.ai_enabled,
+            record.ai_model.as_deref(),
+            self.dialogue_chattiness(),
+            dialogue_language_for_record(&record),
+        )?;
+        record.bot_count = effective_playerbot_count(
+            &docker_memory,
+            record.bots_enabled,
+            preferences.requested_bot_count,
+        );
+        self.save_record(&record)?;
+        write_playerbots_config(
+            &server_root,
+            record.bots_enabled,
+            record.bot_count,
+            preferences.bot_presence,
+        )?;
+        install_realmbox_presence_config(&self.addon_source, &server_root)?;
+        write_realmbox_presence_config(
+            &server_root,
+            record.bots_enabled,
+            preferences.bot_presence,
+        )?;
+
+        if runtime_swapped_now {
+            self.runner.run_long(
+                "docker",
+                &compose_args(
+                    &record.compose_file,
+                    &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+                ),
+                Some(&server_root),
+                &record.runtime_root.join("logs/start-updated-database.log"),
             )?;
         }
 
@@ -2063,26 +2301,31 @@ impl<R: CommandRunner> LauncherService<R> {
         self.runner.run_long(
             "docker",
             &compose_args(&record.compose_file, &["run", "--rm", "server-data-init"]),
-            Some(server_root),
+            Some(&server_root),
             &record.runtime_root.join("logs/start-server-data.log"),
         )?;
 
         self.runner.run_long(
             "docker",
             &compose_args(&record.compose_file, &["run", "--rm", "db-import"]),
-            Some(server_root),
+            Some(&server_root),
             &record.runtime_root.join("logs/start-db-import.log"),
         )?;
-        if requires_pre_migration_backup {
+        if requires_runtime_update {
             record.runtime_release = Some(target_release);
             self.save_record(&record)?;
         }
         mark_local_realm_available(
             &self.runner,
             &record.compose_file,
-            server_root,
+            &server_root,
             &record.runtime_root.join("logs/start-realm.log"),
         )?;
+        if database_recovery.is_some() {
+            fs::remove_file(self.app_data.join(DOCKER_RECOVERY_FILE)).map_err(|error| {
+                format!("marqueur de récupération Docker non supprimé: {error}")
+            })?;
+        }
 
         if record.ai_enabled {
             self.emit(
@@ -2122,7 +2365,7 @@ impl<R: CommandRunner> LauncherService<R> {
                     &record.compose_file,
                     &["up", "-d", "authserver", "worldserver"],
                 ),
-                Some(server_root),
+                Some(&server_root),
                 &record.runtime_root.join("logs/start-server.log"),
             )?;
             self.runner.wait_service_tcp(
@@ -2183,7 +2426,7 @@ impl<R: CommandRunner> LauncherService<R> {
                         &record.compose_file,
                         &["stop", "worldserver", "authserver", "database"],
                     ),
-                    Some(server_root),
+                    Some(&server_root),
                     &record.runtime_root.join("logs/start-rollback.log"),
                 );
                 if let Some(process_id) = self.ai_process_id.take() {
@@ -2232,6 +2475,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 false,
                 record.ai_model.as_deref(),
                 self.dialogue_chattiness(),
+                dialogue_language_for_record(&record),
             )?;
             if let Some(process_id) = self.ai_process_id.take() {
                 self.runner.terminate(process_id)?;
@@ -2262,10 +2506,17 @@ impl<R: CommandRunner> LauncherService<R> {
         if !ai::is_allowed_ollama_model(&model) {
             return Err("modèle Ollama refusé par la liste RealmBox".into());
         }
-        ensure_available_space(
-            &record.runtime_root,
-            ai::model_download_bytes(&model).unwrap_or(0) + DISK_SAFETY_MARGIN_BYTES,
-        )?;
+        let installed_executable = record
+            .ollama_executable
+            .as_ref()
+            .filter(|path| path.is_file())
+            .cloned();
+        if local_dialogue_download_required(&record, &model) {
+            ensure_available_space(
+                &record.runtime_root,
+                ai::model_download_bytes(&model).unwrap_or(0) + DISK_SAFETY_MARGIN_BYTES,
+            )?;
+        }
         let module_config_available = server_root
             .join("modules/mod-ollama-chat/conf/mod_ollama_chat.conf.dist")
             .is_file()
@@ -2280,7 +2531,7 @@ impl<R: CommandRunner> LauncherService<R> {
                 "cette build RealmBox ne contient pas les images serveur immuables nécessaires à la mise à jour des dialogues"
                     .to_string()
             })?;
-            self.prepare_dialogue_runtime(&mut record, &images, &mut progress)?;
+            self.prepare_server_runtime_update(&mut record, &images, &mut progress)?;
             server_root = record
                 .compose_file
                 .parent()
@@ -2291,12 +2542,6 @@ impl<R: CommandRunner> LauncherService<R> {
         let platform = platform_assets()?;
         let logs = record.runtime_root.join("logs");
         fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
-        let installed_executable = record
-            .ollama_executable
-            .as_ref()
-            .filter(|path| path.is_file())
-            .cloned();
-
         let executable = if let Some(executable) = installed_executable {
             if record.ai_model.as_deref() != Some(model.as_str()) {
                 self.emit(
@@ -2373,7 +2618,13 @@ impl<R: CommandRunner> LauncherService<R> {
             ai_root.join(platform.ollama_executable)
         };
 
-        write_ollama_chat_config(&server_root, true, Some(&model), self.dialogue_chattiness())?;
+        write_ollama_chat_config(
+            &server_root,
+            true,
+            Some(&model),
+            self.dialogue_chattiness(),
+            dialogue_language_for_record(&record),
+        )?;
         record.ai_enabled = true;
         record.ai_model = Some(model.clone());
         record.ollama_executable = Some(executable);
@@ -2395,7 +2646,11 @@ impl<R: CommandRunner> LauncherService<R> {
         ))
     }
 
-    fn worldserver_is_running(&self, record: &InstallationRecord) -> Result<bool, String> {
+    fn compose_service_is_running(
+        &self,
+        record: &InstallationRecord,
+        service: &str,
+    ) -> Result<bool, String> {
         let server_root = record
             .compose_file
             .parent()
@@ -2404,14 +2659,222 @@ impl<R: CommandRunner> LauncherService<R> {
             "docker",
             &compose_args(
                 &record.compose_file,
-                &["ps", "--status", "running", "--services", "worldserver"],
+                &["ps", "--status", "running", "--services", service],
             ),
             Some(server_root),
         )?;
-        Ok(output.lines().any(|line| line.trim() == "worldserver"))
+        Ok(output.lines().any(|line| line.trim() == service))
     }
 
-    fn prepare_dialogue_runtime<F>(
+    fn worldserver_is_running(&self, record: &InstallationRecord) -> Result<bool, String> {
+        self.compose_service_is_running(record, "worldserver")
+    }
+
+    pub fn inspect_realm_backup(&self) -> Result<Option<RealmBackupSummary>, String> {
+        latest_realm_backup_summary(&self.app_data)
+    }
+
+    pub fn create_realm_backup(&mut self) -> Result<RealmBackupSummary, String> {
+        self.begin_operation("realm-backup");
+        let record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        let server_root = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        let stem = next_manual_backup_stem(&self.app_data)?;
+        let database_was_running = self.compose_service_is_running(&record, "database")?;
+
+        if !database_was_running {
+            self.runner.run_long(
+                "docker",
+                &compose_args(
+                    &record.compose_file,
+                    &["up", "-d", "--wait", "--wait-timeout", "120", "database"],
+                ),
+                Some(server_root),
+                &record
+                    .runtime_root
+                    .join("logs/manual-backup-database-start.log"),
+            )?;
+        }
+
+        let backup_result = create_database_backup(
+            &self.runner,
+            &self.app_data,
+            &record.compose_file,
+            server_root,
+            &stem,
+            &record.runtime_root.join("logs/manual-backup.log"),
+        );
+        let stop_result = if database_was_running {
+            Ok(())
+        } else {
+            self.runner.run_long(
+                "docker",
+                &compose_args(&record.compose_file, &["stop", "database"]),
+                Some(server_root),
+                &record
+                    .runtime_root
+                    .join("logs/manual-backup-database-stop.log"),
+            )
+        };
+        match (backup_result, stop_result) {
+            (Ok(backup), Ok(())) => realm_backup_summary(&backup),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(_), Err(stop_error)) => Err(format!(
+                "sauvegarde vérifiée, mais la base temporairement démarrée n’a pas pu être arrêtée: {stop_error}"
+            )),
+            (Err(error), Err(stop_error)) => Err(format!(
+                "{error}; la base temporairement démarrée n’a pas pu être arrêtée: {stop_error}"
+            )),
+        }
+    }
+
+    fn resume_runtime_update_if_needed(
+        &mut self,
+        record: &mut InstallationRecord,
+    ) -> Result<bool, String> {
+        let marker = self.app_data.join(RUNTIME_UPDATE_FILE);
+        if !marker.is_file() {
+            return Ok(false);
+        }
+        let transaction: RuntimeUpdateTransaction =
+            serde_json::from_slice(&fs::read(&marker).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("marqueur de mise à jour serveur illisible: {error}"))?;
+        let expected_transition = runtime_update_transition(
+            transaction
+                .recovery
+                .source_runtime_release
+                .as_deref()
+                .unwrap_or("legacy"),
+            &transaction.recovery.target_runtime_release,
+            transaction.attempt,
+        )?;
+        if transaction.schema_version != 1
+            || transaction.transition != transaction.recovery.stem
+            || transaction.transition != expected_transition
+            || transaction.recovery.schema_version != 1
+            || transaction.recovery.target_runtime_release != runtime_release_id()
+        {
+            return Err(
+                "marqueur de mise à jour serveur incohérent ; les runtimes sont conservés".into(),
+            );
+        }
+        for image in [
+            transaction.images.authserver.as_str(),
+            transaction.images.worldserver.as_str(),
+            transaction.images.db_import.as_str(),
+            transaction.images.tools.as_str(),
+        ] {
+            validate_immutable_server_image(image)?;
+        }
+
+        let current_server = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?
+            .to_path_buf();
+        let staging_root = self
+            .app_data
+            .join(format!(".{}-staging", transaction.transition));
+        let staged_server = staging_root.join("server");
+        let rollback_root = self
+            .app_data
+            .join(RUNTIME_ROLLBACK_DIRECTORY)
+            .join(&transaction.transition);
+        let rollback_server = rollback_root.join("server");
+        if rollback_root.exists() && !rollback_root.is_dir() {
+            return Err("chemin de rollback occupé par un fichier inattendu".into());
+        }
+        fs::create_dir_all(&rollback_root).map_err(|error| error.to_string())?;
+        let recovery_path = rollback_root.join("recovery.json");
+        let expected_recovery =
+            serde_json::to_vec_pretty(&transaction.recovery).map_err(|error| error.to_string())?;
+        if recovery_path.exists() {
+            let existing: RecoveryMetadata = serde_json::from_slice(
+                &fs::read(&recovery_path).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| format!("métadonnées de rollback illisibles: {error}"))?;
+            if existing != transaction.recovery {
+                return Err(
+                    "métadonnées de rollback ambiguës ; RealmBox refuse de les écraser".into(),
+                );
+            }
+        } else {
+            write_atomic(&recovery_path, &expected_recovery)?;
+        }
+
+        let current_exists = current_server.join("compose.realmbox.yaml").is_file();
+        let staged_exists = staged_server.join("compose.realmbox.yaml").is_file();
+        let rollback_exists = rollback_server.join("compose.realmbox.yaml").is_file();
+        if transaction.phase == RuntimeUpdatePhase::Published
+            && (current_exists, staged_exists, rollback_exists) != (true, false, true)
+        {
+            return Err(
+                "marqueur publié incohérent avec les runtimes présents ; aucun fichier n’est modifié"
+                    .into(),
+            );
+        }
+        match (current_exists, staged_exists, rollback_exists) {
+            (true, true, false) => {
+                if runtime_server_matches_images(&current_server, &transaction.images)?
+                    || !runtime_server_matches_images(&staged_server, &transaction.images)?
+                {
+                    return Err(
+                        "état de mise à jour ambigu avant publication ; aucun runtime n’est écrasé"
+                            .into(),
+                    );
+                }
+                fs::rename(&current_server, &rollback_server).map_err(|error| error.to_string())?;
+                validate_recovery_point(&self.app_data, rollback_root.clone())?;
+                fs::rename(&staged_server, &current_server)
+                    .map_err(|error| format!("publication du runtime incomplète: {error}"))?;
+            }
+            (false, true, true) => {
+                if !runtime_server_matches_images(&staged_server, &transaction.images)? {
+                    return Err("le runtime stagé ne correspond pas aux images immuables".into());
+                }
+                validate_recovery_point(&self.app_data, rollback_root.clone())?;
+                fs::rename(&staged_server, &current_server)
+                    .map_err(|error| format!("reprise de publication impossible: {error}"))?;
+            }
+            (true, false, true) => {
+                if !runtime_server_matches_images(&current_server, &transaction.images)? {
+                    return Err(
+                        "le runtime publié ne correspond pas au marqueur de mise à jour".into(),
+                    );
+                }
+                validate_recovery_point(&self.app_data, rollback_root.clone())?;
+            }
+            _ => {
+                return Err(
+                    "combinaison de runtimes ambiguë ; RealmBox conserve chaque fichier et refuse de poursuivre"
+                        .into(),
+                );
+            }
+        }
+
+        record.compose_file = current_server.join("compose.realmbox.yaml");
+        record.ollama_chat_commit = Some(OLLAMA_CHAT_COMMIT.into());
+        record.runtime_release = Some(pending_runtime_release_id(
+            &transaction.recovery.target_runtime_release,
+        ));
+        self.save_record(record)?;
+        fs::remove_file(&marker).map_err(|error| error.to_string())?;
+        if staging_root.is_dir()
+            && fs::read_dir(&staging_root)
+                .map_err(|error| error.to_string())?
+                .next()
+                .is_none()
+        {
+            fs::remove_dir(&staging_root).map_err(|error| error.to_string())?;
+        }
+        Ok(true)
+    }
+
+    fn prepare_server_runtime_update<F>(
         &mut self,
         record: &mut InstallationRecord,
         images: &ServerImages,
@@ -2420,16 +2883,34 @@ impl<R: CommandRunner> LauncherService<R> {
     where
         F: FnMut(LauncherProgress),
     {
+        self.resume_runtime_update_if_needed(record)?;
+        let target_release = runtime_release_id();
+        if record.runtime_release.as_deref()
+            == Some(pending_runtime_release_id(&target_release).as_str())
+        {
+            validate_prepared_runtime_update(&self.app_data, record, images, &target_release)?;
+            return Ok(());
+        }
+        if record
+            .runtime_release
+            .as_deref()
+            .is_some_and(|release| release.starts_with("pending:"))
+        {
+            return Err(
+                "une autre mise à jour serveur incomplète doit être récupérée avant de poursuivre"
+                    .into(),
+            );
+        }
         let current_server = record
             .compose_file
             .parent()
             .ok_or_else(|| "chemin serveur invalide".to_string())?
             .to_path_buf();
-        let source_release = format!(
-            "{}-without-ollama-chat",
-            record.runtime_release.as_deref().unwrap_or("legacy")
-        );
-        let target_release = format!("{}-ollama-chat-{OLLAMA_CHAT_COMMIT}", runtime_release_id());
+        let source_release = record
+            .runtime_release
+            .as_deref()
+            .unwrap_or("legacy")
+            .to_owned();
         let transition = migration_backup_stem(&source_release, &target_release);
         let recovery_metadata = RecoveryMetadata {
             schema_version: 1,
@@ -2440,21 +2921,15 @@ impl<R: CommandRunner> LauncherService<R> {
             ai_model: record.ai_model.clone(),
             ollama_chat_commit: record.ollama_chat_commit.clone(),
         };
-        let recovery_metadata_bytes =
-            serde_json::to_vec_pretty(&recovery_metadata).map_err(|error| error.to_string())?;
         let staging_root = self.app_data.join(format!(".{transition}-staging"));
         let staged_server = staging_root.join("server");
         let rollback_root = self
             .app_data
             .join(RUNTIME_ROLLBACK_DIRECTORY)
-            .join(transition);
-        let rollback_server = rollback_root.join("server");
+            .join(&transition);
 
         if rollback_root.exists() {
-            return Err(
-                "un rollback de mise à jour existe déjà ; RealmBox le conserve et refuse de l’écraser"
-                    .into(),
-            );
+            archive_consumed_runtime_rollback(&self.app_data, &rollback_root, &recovery_metadata)?;
         }
         if staging_root.exists() {
             fs::remove_dir_all(&staging_root).map_err(|error| error.to_string())?;
@@ -2467,6 +2942,7 @@ impl<R: CommandRunner> LauncherService<R> {
             &staged_server.join("env/dist/etc"),
         )?;
 
+        install_mmaps_config(&self.addon_source, &staged_server)?;
         let (uid, gid) = platform_container_ids(&self.runner)?;
         let compose = compose_file(
             uid.trim(),
@@ -2482,7 +2958,7 @@ impl<R: CommandRunner> LauncherService<R> {
             progress,
             LauncherPhase::Installing,
             6,
-            "Préparation sécurisée des dialogues",
+            "Préparation sécurisée du serveur",
             Some("Téléchargement du serveur immuable dans un staging séparé"),
         );
         self.runner.run_long(
@@ -2518,10 +2994,26 @@ impl<R: CommandRunner> LauncherService<R> {
             &module_dist,
             &record.runtime_root.join("logs/dialogue-module-extract.log"),
         )?;
-        write_playerbots_config(&staged_server, record.bots_enabled, record.bot_count)?;
+        let preferences = self.world_preferences(Some(record));
+        write_playerbots_config(
+            &staged_server,
+            record.bots_enabled,
+            record.bot_count,
+            preferences.bot_presence,
+        )?;
         install_realmbox_presence_config(&self.addon_source, &staged_server)?;
-        write_realmbox_presence_config(&staged_server, record.bots_enabled)?;
-        write_ollama_chat_config(&staged_server, false, None, self.dialogue_chattiness())?;
+        write_realmbox_presence_config(
+            &staged_server,
+            record.bots_enabled,
+            preferences.bot_presence,
+        )?;
+        write_ollama_chat_config(
+            &staged_server,
+            record.ai_enabled,
+            record.ai_model.as_deref(),
+            self.dialogue_chattiness(),
+            dialogue_language_for_record(record),
+        )?;
 
         self.emit(
             progress,
@@ -2569,34 +3061,19 @@ impl<R: CommandRunner> LauncherService<R> {
             "Mise à jour du serveur local",
             Some("L’ancien runtime reste disponible pour rollback"),
         );
-        fs::create_dir_all(&rollback_root).map_err(|error| error.to_string())?;
-        fs::rename(&current_server, &rollback_server).map_err(|error| error.to_string())?;
-        if let Err(error) = write_atomic(
-            &rollback_root.join("recovery.json"),
-            &recovery_metadata_bytes,
-        ) {
-            let _ = fs::rename(&rollback_server, &current_server);
-            return Err(format!("métadonnées de rollback non publiées : {error}"));
-        }
-        if let Err(error) = fs::rename(&staged_server, &current_server) {
-            let _ = fs::rename(&rollback_server, &current_server);
-            return Err(format!("publication du runtime annulée : {error}"));
-        }
-
-        record.compose_file = current_server.join("compose.realmbox.yaml");
-        record.ollama_chat_commit = Some(OLLAMA_CHAT_COMMIT.into());
-        record.runtime_release = None;
-        if let Err(error) = self.save_record(record) {
-            let failed_server = staging_root.join("failed-server");
-            let _ = fs::rename(&current_server, &failed_server);
-            let _ = fs::rename(&rollback_server, &current_server);
-            return Err(format!(
-                "mise à jour annulée avant enregistrement : {error}"
-            ));
-        }
-        if staging_root.exists() {
-            fs::remove_dir_all(&staging_root).map_err(|error| error.to_string())?;
-        }
+        let transaction = RuntimeUpdateTransaction {
+            schema_version: 1,
+            transition,
+            attempt: 1,
+            phase: RuntimeUpdatePhase::Staged,
+            images: images.clone(),
+            recovery: recovery_metadata,
+        };
+        write_atomic(
+            &self.app_data.join(RUNTIME_UPDATE_FILE),
+            &serde_json::to_vec_pretty(&transaction).map_err(|error| error.to_string())?,
+        )?;
+        self.resume_runtime_update_if_needed(record)?;
         Ok(())
     }
 
@@ -2608,9 +3085,10 @@ impl<R: CommandRunner> LauncherService<R> {
         if self.client_process_id.is_some() || self.ai_process_id.is_some() {
             return Err("arrêtez le monde avant de restaurer son dernier état fonctionnel".into());
         }
-        let original_record = self
+        let mut original_record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas installé".to_string())?;
+        self.resume_runtime_update_if_needed(&mut original_record)?;
         let point = find_latest_recovery_point(&self.app_data)?;
         let current_server = original_record
             .compose_file
@@ -2810,6 +3288,8 @@ impl<R: CommandRunner> LauncherService<R> {
             };
         }
 
+        archive_recovery_directory(&point.rollback_root, &point.stem)?;
+
         self.emit(
             &mut progress,
             LauncherPhase::Ready,
@@ -2888,7 +3368,9 @@ impl<R: CommandRunner> LauncherService<R> {
         &mut self,
         bots_enabled: bool,
         requested_count: usize,
+        bot_presence: BotPresence,
     ) -> Result<LauncherStatus, String> {
+        self.begin_operation("bot-experience");
         let mut record = self
             .load_record()?
             .ok_or_else(|| "RealmBox n’est pas installé".to_string())?;
@@ -2896,29 +3378,38 @@ impl<R: CommandRunner> LauncherService<R> {
             .compose_file
             .parent()
             .ok_or_else(|| "chemin serveur invalide".to_string())?;
-        let container_id = self.runner.run(
-            "docker",
-            &compose_args(&record.compose_file, &["ps", "-q", "worldserver"]),
-            Some(server_root),
-        )?;
+        let container_id = self
+            .runner
+            .run(
+                "docker",
+                &compose_args(&record.compose_file, &["ps", "-q", "worldserver"]),
+                Some(server_root),
+            )
+            .map_err(|error| format!("état du monde Docker indisponible: {error}"))?;
         let container_id = container_id.trim();
-        if container_id.is_empty() {
-            return Err("le serveur local n’est pas prêt".into());
-        }
-        let console_state = self.runner.run(
-            "docker",
-            &[
-                "inspect".into(),
-                "--format".into(),
-                "{{.Config.OpenStdin}} {{.Config.Tty}}".into(),
-                container_id.into(),
-            ],
-            None,
-        )?;
-        if console_state.trim() != "true false" {
+        let running = !container_id.is_empty();
+        if !running && self.client_process_id.is_some() {
             return Err(
-                "redémarrez le monde une fois pour activer le contrôle des compagnons".into(),
+                "état incohérent : le client est ouvert mais le worldserver Docker est absent"
+                    .into(),
             );
+        }
+        if running {
+            let console_state = self.runner.run(
+                "docker",
+                &[
+                    "inspect".into(),
+                    "--format".into(),
+                    "{{.Config.OpenStdin}} {{.Config.Tty}}".into(),
+                    container_id.into(),
+                ],
+                None,
+            )?;
+            if console_state.trim() != "true false" {
+                return Err(
+                    "redémarrez le monde une fois pour activer le contrôle des compagnons".into(),
+                );
+            }
         }
         let docker_memory = self
             .runner
@@ -2928,42 +3419,69 @@ impl<R: CommandRunner> LauncherService<R> {
                 None,
             )
             .unwrap_or_default();
-        let effective_count =
-            effective_playerbot_count(&docker_memory, bots_enabled, requested_count);
-        write_playerbots_config(server_root, bots_enabled, effective_count)?;
+        let effective_count = if docker_memory.trim().parse::<u64>().is_ok() {
+            effective_playerbot_count(&docker_memory, bots_enabled, requested_count)
+        } else if bots_enabled {
+            record.bot_count.max(5)
+        } else {
+            0
+        };
+        write_playerbots_config(server_root, bots_enabled, effective_count, bot_presence)?;
         install_realmbox_presence_config(&self.addon_source, server_root)?;
-        write_realmbox_presence_config(server_root, bots_enabled)?;
-        self.runner.run_long(
-            "docker",
-            &compose_args(
-                &record.compose_file,
-                &[
-                    "exec",
-                    "-T",
-                    "worldserver",
-                    "sh",
-                    "-lc",
-                    "printf 'reload config\\nplayerbots rndbot reload\\nplayerbots rndbot update\\n' > /proc/1/fd/0",
-                ],
-            ),
-            Some(server_root),
-            &record.runtime_root.join("logs/playerbots-live-update.log"),
-        )?;
+        write_realmbox_presence_config(server_root, bots_enabled, bot_presence)?;
+        let disable_dialogue = !bots_enabled && record.ai_enabled;
+        if disable_dialogue {
+            write_ollama_chat_config(
+                server_root,
+                false,
+                record.ai_model.as_deref(),
+                self.dialogue_chattiness(),
+                dialogue_language_for_record(&record),
+            )?;
+        }
+        if running {
+            let commands = if disable_dialogue {
+                "printf 'reload config\\nplayerbots rndbot reload\\nplayerbots rndbot update\\nollama reload\\n' > /proc/1/fd/0"
+            } else {
+                "printf 'reload config\\nplayerbots rndbot reload\\nplayerbots rndbot update\\n' > /proc/1/fd/0"
+            };
+            self.runner.run_long(
+                "docker",
+                &compose_args(
+                    &record.compose_file,
+                    &["exec", "-T", "worldserver", "sh", "-lc", commands],
+                ),
+                Some(server_root),
+                &record.runtime_root.join("logs/playerbots-live-update.log"),
+            )?;
+        }
         record.bots_enabled = bots_enabled;
         record.bot_count = effective_count;
         if !bots_enabled {
             record.ai_enabled = false;
+            if let Some(process_id) = self.ai_process_id.take() {
+                self.runner.terminate(process_id)?;
+            }
         }
         self.save_record(&record)?;
         self.save_world_preferences(WorldPreferences {
             bots_enabled,
             requested_bot_count: normalize_bot_count(requested_count),
+            bot_presence,
         })?;
         Ok(self.installed_status(
             &record,
-            LauncherPhase::Running,
-            "Population mise à jour",
-            true,
+            if running {
+                LauncherPhase::Running
+            } else {
+                LauncherPhase::Ready
+            },
+            if running {
+                "Population et présence mises à jour"
+            } else {
+                "Population et présence enregistrées"
+            },
+            running,
         ))
     }
 
@@ -3141,6 +3659,7 @@ impl<R: CommandRunner> LauncherService<R> {
             bot_count: record.bot_count,
             requested_bot_count: self.world_preferences(Some(record)).requested_bot_count,
             applied_bot_count: record.bot_count,
+            bot_presence: self.world_preferences(Some(record)).bot_presence,
             ai_enabled: record.ai_enabled,
             ai_model: record.ai_model.clone(),
             dialogue_chattiness: self.dialogue_chattiness(),
@@ -3179,6 +3698,7 @@ fn missing_status() -> LauncherStatus {
         bot_count: default_bot_count(),
         requested_bot_count: default_bot_count(),
         applied_bot_count: default_bot_count(),
+        bot_presence: BotPresence::default(),
         ai_enabled: false,
         ai_model: None,
         dialogue_chattiness: DialogueChattiness::default(),
@@ -3894,10 +4414,36 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     file.sync_all().map_err(|error| error.to_string())?;
 
     #[cfg(windows)]
-    if path.exists() {
-        fs::remove_file(path).map_err(|error| error.to_string())?;
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+
+        let source = temporary
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let destination = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let moved = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        Ok(())
     }
 
+    #[cfg(not(windows))]
     fs::rename(temporary, path).map_err(|error| error.to_string())
 }
 
@@ -4162,35 +4708,209 @@ fn install_realmbox_presence_config(addon_source: &Path, server_root: &Path) -> 
     )
 }
 
-fn write_realmbox_presence_config(server_root: &Path, enabled: bool) -> Result<(), String> {
+fn install_mmaps_config(addon_source: &Path, server_root: &Path) -> Result<(), String> {
+    let resource_root = realmbox_resource_root(addon_source)?;
+    copy_file_preserving(
+        &resource_root.join("runtime/mmaps-config.yaml"),
+        &server_root.join("mmaps-config.yaml"),
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BotPresenceTuning {
+    relocation_enabled: bool,
+    scan_interval_ms: &'static str,
+    target_fraction: &'static str,
+    minimum_per_player: &'static str,
+    maximum_per_player: &'static str,
+    nearby_radius: &'static str,
+    spawn_min_radius: &'static str,
+    spawn_max_radius: &'static str,
+    bot_cooldown_seconds: &'static str,
+    autonomy_return_seconds: &'static str,
+    active_alone_percent: &'static str,
+    active_radius: &'static str,
+    force_active_in_zone: &'static str,
+    real_player_weight: &'static str,
+    minimum_native_teleport: &'static str,
+    maximum_native_teleport: &'static str,
+}
+
+fn bot_presence_tuning(profile: BotPresence) -> BotPresenceTuning {
+    match profile {
+        BotPresence::Dispersed => BotPresenceTuning {
+            relocation_enabled: false,
+            scan_interval_ms: "5000",
+            target_fraction: "0.0",
+            minimum_per_player: "0",
+            maximum_per_player: "0",
+            nearby_radius: "300.0",
+            spawn_min_radius: "160.0",
+            spawn_max_radius: "280.0",
+            bot_cooldown_seconds: "600",
+            autonomy_return_seconds: "60",
+            active_alone_percent: "5",
+            active_radius: "325",
+            force_active_in_zone: "0",
+            real_player_weight: "1.0",
+            minimum_native_teleport: "3600",
+            maximum_native_teleport: "18000",
+        },
+        BotPresence::Natural => BotPresenceTuning {
+            relocation_enabled: true,
+            scan_interval_ms: "2000",
+            target_fraction: "0.30",
+            minimum_per_player: "3",
+            maximum_per_player: "15",
+            nearby_radius: "220.0",
+            spawn_min_radius: "90.0",
+            spawn_max_radius: "180.0",
+            bot_cooldown_seconds: "300",
+            autonomy_return_seconds: "600",
+            active_alone_percent: "10",
+            active_radius: "250",
+            force_active_in_zone: "0",
+            real_player_weight: "5.0",
+            minimum_native_teleport: "1800",
+            maximum_native_teleport: "7200",
+        },
+        BotPresence::Close => BotPresenceTuning {
+            relocation_enabled: true,
+            scan_interval_ms: "1000",
+            target_fraction: "0.60",
+            minimum_per_player: "4",
+            maximum_per_player: "30",
+            nearby_radius: "150.0",
+            spawn_min_radius: "50.0",
+            spawn_max_radius: "110.0",
+            bot_cooldown_seconds: "60",
+            autonomy_return_seconds: "900",
+            active_alone_percent: "10",
+            active_radius: "300",
+            force_active_in_zone: "1",
+            real_player_weight: "15.0",
+            minimum_native_teleport: "900",
+            maximum_native_teleport: "3600",
+        },
+    }
+}
+
+fn write_realmbox_presence_config(
+    server_root: &Path,
+    bots_enabled: bool,
+    profile: BotPresence,
+) -> Result<(), String> {
+    let tuning = bot_presence_tuning(profile);
+    ensure_module_config_key_from_dist(
+        server_root,
+        "realmbox-presence.conf",
+        "RealmBoxPresence.AutonomyReturnSeconds",
+    )?;
     write_module_config(
         server_root,
         REALMBOX_PRESENCE_MODULE,
         "realmbox-presence.conf",
         &[
-            ("RealmBoxPresence.Enabled", u8::from(enabled).to_string()),
-            ("RealmBoxPresence.ScanIntervalMs", "1000".into()),
+            (
+                "RealmBoxPresence.Enabled",
+                u8::from(bots_enabled && tuning.relocation_enabled).to_string(),
+            ),
+            (
+                "RealmBoxPresence.ScanIntervalMs",
+                tuning.scan_interval_ms.into(),
+            ),
             ("RealmBoxPresence.PlayerCooldownSeconds", "0".into()),
-            ("RealmBoxPresence.TargetFraction", "0.60".into()),
-            ("RealmBoxPresence.MinBotsPerPlayer", "4".into()),
-            ("RealmBoxPresence.MaxBotsPerPlayer", "30".into()),
-            ("RealmBoxPresence.NearbyRadius", "150.0".into()),
-            ("RealmBoxPresence.SpawnMinRadius", "30.0".into()),
-            ("RealmBoxPresence.SpawnMaxRadius", "90.0".into()),
+            (
+                "RealmBoxPresence.TargetFraction",
+                tuning.target_fraction.into(),
+            ),
+            (
+                "RealmBoxPresence.MinBotsPerPlayer",
+                tuning.minimum_per_player.into(),
+            ),
+            (
+                "RealmBoxPresence.MaxBotsPerPlayer",
+                tuning.maximum_per_player.into(),
+            ),
+            ("RealmBoxPresence.NearbyRadius", tuning.nearby_radius.into()),
+            (
+                "RealmBoxPresence.SpawnMinRadius",
+                tuning.spawn_min_radius.into(),
+            ),
+            (
+                "RealmBoxPresence.SpawnMaxRadius",
+                tuning.spawn_max_radius.into(),
+            ),
             ("RealmBoxPresence.MaxMovesPerScan", "1".into()),
-            ("RealmBoxPresence.BotCooldownSeconds", "10".into()),
+            (
+                "RealmBoxPresence.BotCooldownSeconds",
+                tuning.bot_cooldown_seconds.into(),
+            ),
+            (
+                "RealmBoxPresence.AutonomyReturnSeconds",
+                tuning.autonomy_return_seconds.into(),
+            ),
             ("RealmBoxPresence.ReleasedBotGraceSeconds", "300".into()),
         ],
     )
+}
+
+fn ensure_module_config_key_from_dist(
+    server_root: &Path,
+    filename: &str,
+    key: &str,
+) -> Result<(), String> {
+    let destination = server_root.join("env/dist/etc/modules").join(filename);
+    if !destination.is_file() {
+        return Ok(());
+    }
+
+    let prefix = format!("{key} =");
+    let mut config = fs::read_to_string(&destination).map_err(|error| error.to_string())?;
+    let existing = config
+        .lines()
+        .filter(|line| line.starts_with(&prefix))
+        .count();
+    if existing == 1 {
+        return Ok(());
+    }
+    if existing > 1 {
+        return Err(format!(
+            "la configuration gérée contient plusieurs clés {key} ; mise à jour refusée"
+        ));
+    }
+
+    let distributed = destination.with_file_name(format!("{filename}.dist"));
+    let distributed_config = fs::read_to_string(&distributed).map_err(|error| error.to_string())?;
+    let mut candidates = distributed_config
+        .lines()
+        .filter(|line| line.starts_with(&prefix));
+    let line = candidates.next().ok_or_else(|| {
+        format!("la nouvelle configuration épinglée ne contient pas la clé {key}")
+    })?;
+    if candidates.next().is_some() {
+        return Err(format!(
+            "la nouvelle configuration épinglée contient plusieurs clés {key}"
+        ));
+    }
+
+    if !config.ends_with('\n') {
+        config.push('\n');
+    }
+    config.push_str(line);
+    config.push('\n');
+    write_atomic(&destination, config.as_bytes())
 }
 
 fn write_playerbots_config(
     server_root: &Path,
     enabled: bool,
     requested_count: usize,
+    presence: BotPresence,
 ) -> Result<(), String> {
     let value = if enabled { 1 } else { 0 };
     let count = if enabled { requested_count.max(1) } else { 0 };
+    let tuning = bot_presence_tuning(presence);
     write_module_config(
         server_root,
         "mod-playerbots",
@@ -4210,12 +4930,18 @@ fn write_playerbots_config(
                 "AiPlayerbot.DisabledWithoutRealPlayerLogoutDelay",
                 "60".to_string(),
             ),
-            ("AiPlayerbot.BotActiveAlone", "10".to_string()),
+            (
+                "AiPlayerbot.BotActiveAlone",
+                tuning.active_alone_percent.to_string(),
+            ),
             (
                 "AiPlayerbot.BotActiveAloneForceWhenInRadius",
-                "300".to_string(),
+                tuning.active_radius.to_string(),
             ),
-            ("AiPlayerbot.BotActiveAloneForceWhenInZone", "1".to_string()),
+            (
+                "AiPlayerbot.BotActiveAloneForceWhenInZone",
+                tuning.force_active_in_zone.to_string(),
+            ),
             ("AiPlayerbot.BotActiveAloneForceWhenInMap", "0".to_string()),
             ("AiPlayerbot.LevelBrackets.Enabled", value.to_string()),
             ("AiPlayerbot.LevelBrackets.CheckFrequency", "60".to_string()),
@@ -4225,7 +4951,7 @@ fn write_playerbots_config(
             ),
             (
                 "AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight",
-                "15.0".to_string(),
+                tuning.real_player_weight.to_string(),
             ),
             (
                 "AiPlayerbot.LevelBrackets.Dynamic.SyncFactions",
@@ -4236,11 +4962,11 @@ fn write_playerbots_config(
             ("AiPlayerbot.RandomBotTeleHigherLevel", "3".to_string()),
             (
                 "AiPlayerbot.MinRandomBotTeleportInterval",
-                "600".to_string(),
+                tuning.minimum_native_teleport.to_string(),
             ),
             (
                 "AiPlayerbot.MaxRandomBotTeleportInterval",
-                "1800".to_string(),
+                tuning.maximum_native_teleport.to_string(),
             ),
             ("AiPlayerbot.ProbTeleToBankers", "0.25".to_string()),
         ],
@@ -4260,6 +4986,61 @@ fn ensure_worldserver_console(compose_path: &Path) -> Result<(), String> {
     let service_header = &updated[worldserver..environment];
     if !service_header.contains("    stdin_open: true\n") {
         updated.insert_str(environment, "    stdin_open: true\n");
+    }
+    if updated == source {
+        Ok(())
+    } else {
+        write_atomic(compose_path, updated.as_bytes())
+    }
+}
+
+fn ensure_mmaps_config_mount(compose_path: &Path) -> Result<(), String> {
+    const MOUNT: &str =
+        "      - ./mmaps-config.yaml:/azerothcore/env/dist/bin/mmaps-config.yaml:ro\n";
+    let source = fs::read_to_string(compose_path).map_err(|error| error.to_string())?;
+    if source.contains(MOUNT) {
+        return Ok(());
+    }
+    const ANCHOR: &str = "      - realmbox-server-data:/work\n";
+    if source.matches(ANCHOR).count() != 1 {
+        return Err("configuration server-data-init non reconnue".into());
+    }
+    let updated = source.replacen(ANCHOR, &format!("{ANCHOR}{MOUNT}"), 1);
+    write_atomic(compose_path, updated.as_bytes())
+}
+
+fn ensure_restartable_server_data_extraction(compose_path: &Path) -> Result<(), String> {
+    const LEGACY_CLEANUPS: [&str; 2] = [
+        "          rm -rf /work/vmaps /work/mmaps;\n",
+        "          rm -rf /work/Buildings /work/vmaps /work/mmaps;\n",
+    ];
+    const CLEANUPS: [(&str, &str); 3] = [
+        (
+            "          rm -rf /work/Buildings;\n",
+            "          /azerothcore/env/dist/bin/vmap4_extractor;\n",
+        ),
+        (
+            "          rm -rf /work/vmaps;\n",
+            "          mkdir -p /work/vmaps;\n",
+        ),
+        (
+            "          rm -rf /work/mmaps;\n",
+            "          /azerothcore/env/dist/bin/mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent;\n",
+        ),
+    ];
+    let source = fs::read_to_string(compose_path).map_err(|error| error.to_string())?;
+    let mut updated = source.clone();
+    for legacy in LEGACY_CLEANUPS {
+        updated = updated.replace(legacy, "");
+    }
+    for (cleanup, anchor) in CLEANUPS {
+        if updated.contains(cleanup) {
+            continue;
+        }
+        if updated.matches(anchor).count() != 1 {
+            return Err("commande d’extraction des données serveur non reconnue".into());
+        }
+        updated = updated.replacen(anchor, &format!("{cleanup}{anchor}"), 1);
     }
     if updated == source {
         Ok(())
@@ -4343,12 +5124,22 @@ fn filtered_log_entries(logs: &Path, limit: usize) -> Result<Vec<String>, String
 }
 
 fn is_diagnostic_line(line: &str) -> bool {
-    let lowercase = line.to_ascii_lowercase();
-    [
-        "error", "failed", "failure", "fatal", "panic", "warning", "warn", "erreur", "échec",
-    ]
-    .iter()
-    .any(|needle| lowercase.contains(needle))
+    line.to_lowercase()
+        .split(|character: char| !character.is_alphabetic())
+        .any(|word| {
+            matches!(
+                word,
+                "error"
+                    | "failed"
+                    | "failure"
+                    | "fatal"
+                    | "panic"
+                    | "warning"
+                    | "warn"
+                    | "erreur"
+                    | "échec"
+            )
+        })
 }
 
 fn redact_diagnostic_line(line: &str) -> String {
@@ -4403,7 +5194,10 @@ fn diagnose_entries(entries: &[String], installed: bool) -> (&'static str, Strin
         "bots"
     } else if combined.contains("ollama") || combined.contains("model") {
         "ai"
-    } else if combined.contains("worldserver") || combined.contains("authserver") {
+    } else if combined.contains("worldserver")
+        || combined.contains("authserver")
+        || combined.contains("server-data")
+    {
         "server"
     } else {
         "launcher"
@@ -4416,11 +5210,61 @@ fn diagnose_entries(entries: &[String], installed: bool) -> (&'static str, Strin
     (component, summary)
 }
 
+fn game_data_has_locale(game_data_root: &Path, locale: &str) -> bool {
+    find_directory_case_insensitive(&game_data_root.join("Data"), locale).is_some()
+}
+
+fn dialogue_language_for_game_data(game_data_root: &Path) -> DialogueLanguage {
+    if game_data_has_locale(game_data_root, "frFR") {
+        DialogueLanguage::French
+    } else {
+        DialogueLanguage::English
+    }
+}
+
+fn dialogue_language_for_record(record: &InstallationRecord) -> DialogueLanguage {
+    if game_data_has_locale(&record.game_data_root, "frFR")
+        || game_data_has_locale(&record.runtime_root.join("game"), "frFR")
+    {
+        DialogueLanguage::French
+    } else {
+        DialogueLanguage::English
+    }
+}
+
+fn local_dialogue_download_required(record: &InstallationRecord, model: &str) -> bool {
+    record.ai_model.as_deref() != Some(model)
+        || record
+            .ollama_executable
+            .as_ref()
+            .is_none_or(|executable| !executable.is_file())
+}
+
+fn dialogue_prompts(
+    language: DialogueLanguage,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    match language {
+        DialogueLanguage::French => (
+            OLLAMA_DIALOGUE_SYSTEM_PROMPT_FR,
+            OLLAMA_RANDOM_PROMPT_FR,
+            OLLAMA_RANDOM_VARIATIONS_FR,
+            OLLAMA_EVENT_PROMPT_FR,
+        ),
+        DialogueLanguage::English => (
+            OLLAMA_DIALOGUE_SYSTEM_PROMPT_EN,
+            OLLAMA_RANDOM_PROMPT_EN,
+            OLLAMA_RANDOM_VARIATIONS_EN,
+            OLLAMA_EVENT_PROMPT_EN,
+        ),
+    }
+}
+
 fn write_ollama_chat_config(
     server_root: &Path,
     enabled: bool,
     model: Option<&str>,
     chattiness: DialogueChattiness,
+    language: DialogueLanguage,
 ) -> Result<(), String> {
     let source_exists = server_root
         .join("modules/mod-ollama-chat/conf/mod_ollama_chat.conf.dist")
@@ -4443,13 +5287,13 @@ fn write_ollama_chat_config(
     let model = model.unwrap_or("llama3.2:1b");
     let chatter = match chattiness {
         DialogueChattiness::Quiet => (
-            "0", "1", "4", "1", "35", "0", "0", "60", "30", "2", "4", "180", "360", "1", "25",
+            "0", "0", "0", "0", "100", "0", "0", "60", "0", "2", "4", "180", "360", "1", "100",
         ),
         DialogueChattiness::Balanced => (
             "1", "20", "8", "1", "100", "20", "50", "90", "0", "2", "4", "90", "180", "2", "100",
         ),
         DialogueChattiness::Lively => (
-            "1", "50", "15", "3", "100", "50", "100", "60", "0", "4", "6", "20", "60", "2", "100",
+            "1", "35", "10", "2", "100", "35", "100", "60", "0", "4", "6", "30", "90", "2", "100",
         ),
     };
     let (
@@ -4469,6 +5313,8 @@ fn write_ollama_chat_config(
         max_chain_depth,
         chain_chance_decay,
     ) = chatter;
+    let (system_prompt, random_prompt, random_variations, event_prompt) =
+        dialogue_prompts(language);
     write_module_config(
         server_root,
         "mod-ollama-chat",
@@ -4485,10 +5331,7 @@ fn write_ollama_chat_config(
             ("OllamaChat.Temperature", "0".into()),
             ("OllamaChat.TopP", "0.9".into()),
             ("OllamaChat.NumCtx", "3072".into()),
-            (
-                "OllamaChat.SystemPrompt",
-                OLLAMA_DIALOGUE_SYSTEM_PROMPT.into(),
-            ),
+            ("OllamaChat.SystemPrompt", system_prompt.into()),
             (
                 "OllamaChat.ChatPromptTemplate",
                 OLLAMA_DIALOGUE_CHAT_PROMPT.into(),
@@ -4500,6 +5343,13 @@ fn write_ollama_chat_config(
             ("OllamaChat.ThinkModeEnableForModule", "0".into()),
             ("OllamaChat.DebugEnabled", "0".into()),
             ("OllamaChat.DebugShowFullPrompt", "0".into()),
+            ("OllamaChat.EnableChatHistory", "0".into()),
+            ("OllamaChat.ConversationHistorySaveInterval", "0".into()),
+            ("OllamaChat.EnableChatBotSnapshotTemplate", "0".into()),
+            ("OllamaChat.Memory.Enable", "0".into()),
+            ("OllamaChat.Relationship.Enable", "0".into()),
+            ("OllamaChat.EnableRAG", "0".into()),
+            ("OllamaChat.EnableEmoteReactions", "0".into()),
             (
                 "OllamaChat.PlayerReplyChance.Say",
                 player_reply_chance.into(),
@@ -4552,6 +5402,14 @@ fn write_ollama_chat_config(
             ("OllamaChat.MaxRandomInterval", max_random_interval.into()),
             ("OllamaChat.RandomChatterRealPlayerDistance", "150.0".into()),
             (
+                "OllamaChat.RandomChatterPromptTemplate",
+                random_prompt.into(),
+            ),
+            (
+                "OllamaChat.RandomChatterPromptVariations",
+                random_variations.into(),
+            ),
+            (
                 "OllamaChat.RandomChatterBotCommentChance",
                 random_chance.into(),
             ),
@@ -4566,6 +5424,7 @@ fn write_ollama_chat_config(
                 event_self_chance.into(),
             ),
             ("OllamaChat.EventChatterMaxBotsPerPlayer", "1".into()),
+            ("OllamaChat.EventChatterPromptTemplate", event_prompt.into()),
             ("OllamaChat.DisableRepliesInCombat", "1".into()),
             ("OllamaChat.DisableForCustomChannels", "1".into()),
             ("OllamaChat.DisableForGuild", "1".into()),
@@ -4721,9 +5580,29 @@ fn runtime_release_id() -> String {
     format!("{}-schema-{INSTALL_SCHEMA}", env!("CARGO_PKG_VERSION"))
 }
 
+fn pending_runtime_release_id(target_release: &str) -> String {
+    format!("pending:{target_release}")
+}
+
 fn migration_backup_stem(source_release: &str, target_release: &str) -> String {
     let digest = Sha256::digest(format!("{source_release}\0{target_release}"));
     format!("pre-migration-{}", &format!("{digest:x}")[..16])
+}
+
+fn runtime_update_transition(
+    source_release: &str,
+    target_release: &str,
+    attempt: u32,
+) -> Result<String, String> {
+    if attempt == 0 {
+        return Err("numéro de tentative de mise à jour invalide".into());
+    }
+    let base = migration_backup_stem(source_release, target_release);
+    Ok(if attempt == 1 {
+        base
+    } else {
+        format!("{base}-attempt-{attempt}")
+    })
 }
 
 fn validate_database_backup(path: &Path) -> Result<(), String> {
@@ -4752,6 +5631,152 @@ fn validate_database_backup(path: &Path) -> Result<(), String> {
     Err("la sauvegarde SQL ne contient pas toutes les bases RealmBox ; migration annulée".into())
 }
 
+fn validate_database_backup_pair(backup: PathBuf) -> Result<DatabaseBackup, String> {
+    let stem = backup
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .filter(|stem| stem.starts_with("pre-migration-") || stem.starts_with("manual-backup-"))
+        .ok_or_else(|| "nom de sauvegarde RealmBox invalide".to_string())?
+        .to_owned();
+    let checksum = backup.with_extension("sha256");
+    if !checksum.is_file() {
+        return Err(format!("somme SHA-256 absente pour {stem}"));
+    }
+    let expected = fs::read_to_string(&checksum).map_err(|error| error.to_string())?;
+    verify_sha256(&backup, expected.trim())?;
+    validate_database_backup(&backup)?;
+    Ok(DatabaseBackup { stem, backup })
+}
+
+fn find_latest_database_backup(app_data: &Path) -> Result<DatabaseBackup, String> {
+    let root = app_data.join(PLAYER_DATA_BACKUP_DIRECTORY);
+    if !root.is_dir() {
+        return Err("aucune sauvegarde locale des personnages n’est disponible".into());
+    }
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.path().extension() != Some(OsStr::new("sql")) {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        candidates.push((modified, entry.path()));
+    }
+    candidates.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    for (_, candidate) in candidates {
+        if let Ok(backup) = validate_database_backup_pair(candidate) {
+            return Ok(backup);
+        }
+    }
+    Err("aucune sauvegarde complète et vérifiée des personnages n’est disponible".into())
+}
+
+fn realm_backup_summary(backup: &Path) -> Result<RealmBackupSummary, String> {
+    let metadata = fs::metadata(backup).map_err(|error| error.to_string())?;
+    let created_at_unix_ms = metadata
+        .modified()
+        .map_err(|error| error.to_string())?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "date de sauvegarde RealmBox invalide".to_string())?
+        .as_millis()
+        .try_into()
+        .map_err(|_| "date de sauvegarde RealmBox hors limites".to_string())?;
+    Ok(RealmBackupSummary {
+        created_at_unix_ms,
+        size_bytes: metadata.len(),
+    })
+}
+
+fn latest_realm_backup_summary(app_data: &Path) -> Result<Option<RealmBackupSummary>, String> {
+    let root = app_data.join(PLAYER_DATA_BACKUP_DIRECTORY);
+    if !root.is_dir() {
+        return Ok(None);
+    }
+    let mut has_backup = false;
+    for entry in fs::read_dir(&root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.path().extension() == Some(OsStr::new("sql")) {
+            has_backup = true;
+            break;
+        }
+    }
+    if !has_backup {
+        return Ok(None);
+    }
+    let backup = find_latest_database_backup(app_data)?;
+    realm_backup_summary(&backup.backup).map(Some)
+}
+
+fn next_manual_backup_stem(app_data: &Path) -> Result<String, String> {
+    let backup_root = app_data.join(PLAYER_DATA_BACKUP_DIRECTORY);
+    fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "horloge système invalide pour la sauvegarde".to_string())?
+        .as_millis();
+    let base = format!("manual-backup-{timestamp}");
+    for attempt in 1_u32.. {
+        let stem = if attempt == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{attempt}")
+        };
+        if !["sql", "sha256", "partial"]
+            .iter()
+            .any(|extension| backup_root.join(&stem).with_extension(extension).exists())
+        {
+            return Ok(stem);
+        }
+    }
+    unreachable!("u32 manual backup namespace exhausted")
+}
+
+fn prepare_docker_recovery(
+    app_data: &Path,
+    database_volume_missing: bool,
+) -> Result<Option<DatabaseBackup>, String> {
+    let marker = app_data.join(DOCKER_RECOVERY_FILE);
+    if marker.is_file() {
+        let record: DockerRecoveryRecord =
+            serde_json::from_slice(&fs::read(&marker).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("marqueur de récupération Docker illisible: {error}"))?;
+        if record.schema_version != 1 {
+            return Err(
+                "version inconnue du marqueur de récupération Docker ; les données sont conservées"
+                    .into(),
+            );
+        }
+        let backup = app_data
+            .join(PLAYER_DATA_BACKUP_DIRECTORY)
+            .join(format!("{}.sql", record.backup_stem));
+        let backup = validate_database_backup_pair(backup)?;
+        if backup.stem != record.backup_stem {
+            return Err("marqueur de récupération Docker incohérent".into());
+        }
+        return Ok(Some(backup));
+    }
+    if !database_volume_missing {
+        return Ok(None);
+    }
+    let backup = find_latest_database_backup(app_data).map_err(|error| {
+        format!(
+            "le volume Docker des personnages a disparu et {error} ; reconstruction arrêtée pour ne pas créer un royaume vide"
+        )
+    })?;
+    let record = DockerRecoveryRecord {
+        schema_version: 1,
+        backup_stem: backup.stem.clone(),
+    };
+    write_atomic(
+        &marker,
+        &serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?,
+    )?;
+    Ok(Some(backup))
+}
+
 fn create_pre_migration_backup<R: CommandRunner>(
     runner: &R,
     app_data: &Path,
@@ -4761,16 +5786,40 @@ fn create_pre_migration_backup<R: CommandRunner>(
     target_release: &str,
     error_log: &Path,
 ) -> Result<PathBuf, String> {
+    create_database_backup(
+        runner,
+        app_data,
+        compose_file,
+        server_root,
+        &migration_backup_stem(source_release, target_release),
+        error_log,
+    )
+}
+
+fn create_database_backup<R: CommandRunner>(
+    runner: &R,
+    app_data: &Path,
+    compose_file: &Path,
+    server_root: &Path,
+    stem: &str,
+    error_log: &Path,
+) -> Result<PathBuf, String> {
+    if !(stem.starts_with("pre-migration-") || stem.starts_with("manual-backup-"))
+        || !stem
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err("nom de sauvegarde RealmBox invalide".into());
+    }
     let backup_root = app_data.join(PLAYER_DATA_BACKUP_DIRECTORY);
     fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
-    let stem = migration_backup_stem(source_release, target_release);
     let backup = backup_root.join(format!("{stem}.sql"));
     let checksum = backup_root.join(format!("{stem}.sha256"));
 
     if backup.exists() || checksum.exists() {
         if !backup.is_file() || !checksum.is_file() {
             return Err(
-                "une sauvegarde de migration incomplète existe déjà ; elle est conservée et la migration est annulée"
+                "une sauvegarde RealmBox incomplète existe déjà ; elle est conservée et l’opération est annulée"
                     .into(),
             );
         }
@@ -4882,6 +5931,107 @@ fn find_latest_recovery_point(app_data: &Path) -> Result<RecoveryPoint, String> 
         .ok_or_else(|| "aucun état fonctionnel complet et vérifié n’est disponible".into())
 }
 
+fn archive_recovery_directory(rollback_root: &Path, stem: &str) -> Result<PathBuf, String> {
+    let parent = rollback_root
+        .parent()
+        .ok_or_else(|| "dossier parent du rollback introuvable".to_string())?;
+    let base = format!("restored-{stem}");
+    for attempt in 1_u32.. {
+        let name = if attempt == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{attempt}")
+        };
+        let destination = parent.join(name);
+        if destination.exists() {
+            continue;
+        }
+        fs::rename(rollback_root, &destination).map_err(|error| error.to_string())?;
+        return Ok(destination);
+    }
+    unreachable!("u32 recovery archive namespace exhausted")
+}
+
+fn archive_consumed_runtime_rollback(
+    app_data: &Path,
+    rollback_root: &Path,
+    expected: &RecoveryMetadata,
+) -> Result<PathBuf, String> {
+    if rollback_root.join("server").exists() {
+        return Err(
+            "un rollback complet de mise à jour existe déjà ; RealmBox refuse de l’écraser".into(),
+        );
+    }
+    let metadata: RecoveryMetadata = serde_json::from_slice(
+        &fs::read(rollback_root.join("recovery.json")).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("métadonnées du rollback consommé illisibles: {error}"))?;
+    if &metadata != expected {
+        return Err(
+            "rollback consommé ambigu ; RealmBox le conserve et refuse de le réutiliser".into(),
+        );
+    }
+    validate_database_backup_pair(
+        app_data
+            .join(PLAYER_DATA_BACKUP_DIRECTORY)
+            .join(format!("{}.sql", expected.stem)),
+    )?;
+    archive_recovery_directory(rollback_root, &expected.stem)
+}
+
+fn validate_prepared_runtime_update(
+    app_data: &Path,
+    record: &InstallationRecord,
+    images: &ServerImages,
+    target_release: &str,
+) -> Result<(), String> {
+    if record.runtime_release.as_deref()
+        != Some(pending_runtime_release_id(target_release).as_str())
+    {
+        return Err("état de mise à jour serveur inattendu".into());
+    }
+    let compose = fs::read_to_string(&record.compose_file).map_err(|error| error.to_string())?;
+    for (service, expected) in [
+        ("server-data-init", images.tools.as_str()),
+        ("db-import", images.db_import.as_str()),
+        ("authserver", images.authserver.as_str()),
+        ("worldserver", images.worldserver.as_str()),
+    ] {
+        if compose_service_image(&compose, service).as_deref() != Some(expected) {
+            return Err(format!(
+                "runtime préparé invalide : l’image immuable de {service} ne correspond pas à la release"
+            ));
+        }
+    }
+
+    let rollback_root = app_data.join(RUNTIME_ROLLBACK_DIRECTORY);
+    let entries = fs::read_dir(&rollback_root).map_err(|_| {
+        "runtime préparé invalide : aucun rollback vérifiable n’est disponible".to_string()
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            continue;
+        }
+        let Ok(point) = validate_recovery_point(app_data, entry.path()) else {
+            continue;
+        };
+        if point.metadata.as_ref().is_some_and(|metadata| {
+            metadata.target_runtime_release == target_release && metadata.stem == point.stem
+        }) {
+            return Ok(());
+        }
+    }
+    Err(
+        "runtime préparé invalide : sauvegarde complète et rollback de cette release introuvables"
+            .into(),
+    )
+}
+
 fn restore_database_backup<R: CommandRunner>(
     runner: &R,
     compose_file: &Path,
@@ -4931,6 +6081,100 @@ fn validate_live_database_after_restore<R: CommandRunner>(
     )?;
     validate_database_backup(&validation)?;
     fs::remove_file(&validation).map_err(|error| error.to_string())
+}
+
+fn docker_volume_exists<R: CommandRunner>(runner: &R, name: &str) -> bool {
+    runner
+        .run(
+            "docker",
+            &["volume".into(), "inspect".into(), name.into()],
+            None,
+        )
+        .is_ok()
+}
+
+fn compose_service_image(source: &str, service: &str) -> Option<String> {
+    let service_header = format!("  {service}:");
+    let mut in_service = false;
+    for line in source.lines() {
+        if line == service_header {
+            in_service = true;
+            continue;
+        }
+        if in_service && line.starts_with("  ") && !line.starts_with("    ") {
+            break;
+        }
+        if in_service && let Some(image) = line.trim().strip_prefix("image:") {
+            return Some(image.trim().to_owned());
+        }
+    }
+    None
+}
+
+fn runtime_server_matches_images(
+    server_root: &Path,
+    images: &ServerImages,
+) -> Result<bool, String> {
+    let compose = fs::read_to_string(server_root.join("compose.realmbox.yaml"))
+        .map_err(|error| error.to_string())?;
+    Ok([
+        ("server-data-init", images.tools.as_str()),
+        ("db-import", images.db_import.as_str()),
+        ("authserver", images.authserver.as_str()),
+        ("worldserver", images.worldserver.as_str()),
+    ]
+    .into_iter()
+    .all(|(service, expected)| {
+        compose_service_image(&compose, service).as_deref() == Some(expected)
+    }))
+}
+
+fn repair_missing_local_server_image<R: CommandRunner>(
+    runner: &R,
+    record: &InstallationRecord,
+) -> Result<bool, String> {
+    let images = embedded_server_images()?;
+    repair_missing_local_server_image_with(runner, record, images.as_ref())
+}
+
+fn repair_missing_local_server_image_with<R: CommandRunner>(
+    runner: &R,
+    record: &InstallationRecord,
+    replacement: Option<&ServerImages>,
+) -> Result<bool, String> {
+    let source = fs::read_to_string(&record.compose_file).map_err(|error| error.to_string())?;
+    let Some(current_worldserver) = compose_service_image(&source, "worldserver") else {
+        return Ok(false);
+    };
+    if validate_immutable_server_image(&current_worldserver).is_ok()
+        || runner
+            .run(
+                "docker",
+                &[
+                    "image".into(),
+                    "inspect".into(),
+                    current_worldserver.clone().into(),
+                ],
+                None,
+            )
+            .is_ok()
+    {
+        return Ok(false);
+    }
+    let images = replacement.ok_or_else(|| {
+        format!(
+            "l’image locale {current_worldserver} a disparu et ce build de développement ne contient pas de remplacement immuable"
+        )
+    })?;
+    let repaired = compose_file(
+        "1000",
+        "1000",
+        &record.game_data_root,
+        DEFAULT_DOCKER_BUILD_JOBS,
+        Some(images),
+    );
+    write_atomic(&record.compose_file, repaired.as_bytes())?;
+    Ok(true)
 }
 
 fn compose_args(compose_file: &Path, trailing: &[&str]) -> Vec<OsString> {
@@ -5235,6 +6479,7 @@ __TOOLS_SOURCE__
     volumes:
       - __GAME_DATA_MOUNT__
       - realmbox-server-data:/work
+      - ./mmaps-config.yaml:/azerothcore/env/dist/bin/mmaps-config.yaml:ro
     command:
       - bash
       - -c
@@ -5243,9 +6488,12 @@ __TOOLS_SOURCE__
         if ! grep -Fxq "REALMBOX_SOURCE_ID=$${REALMBOX_SOURCE_ID}" /work/extraction-version 2>/dev/null; then
           ln -sfn /client-data /work/Data;
           /azerothcore/env/dist/bin/map_extractor;
+          rm -rf /work/Buildings;
           /azerothcore/env/dist/bin/vmap4_extractor;
+          rm -rf /work/vmaps;
           mkdir -p /work/vmaps;
           /azerothcore/env/dist/bin/vmap4_assembler /work/Buildings /work/vmaps;
+          rm -rf /work/mmaps;
           /azerothcore/env/dist/bin/mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent;
           rm -f /work/Data;
           echo "REALMBOX_SOURCE_ID=$${REALMBOX_SOURCE_ID}" > /work/extraction-version;
@@ -5351,6 +6599,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn docker_child_path_includes_desktop_credential_helpers() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let desktop_bin = temporary.path().join("Docker.app/Contents/Resources/bin");
+        let docker = desktop_bin.join("docker");
+        fs::create_dir_all(&desktop_bin).expect("docker resources");
+        fs::write(&docker, b"docker fixture").expect("docker fixture");
+        fs::write(
+            desktop_bin.join("docker-credential-desktop"),
+            b"credential helper fixture",
+        )
+        .expect("credential helper fixture");
+
+        let path = docker_support_path(
+            Some(OsStr::new("/usr/bin:/bin")),
+            &docker,
+            std::slice::from_ref(&docker),
+        )
+        .expect("child path");
+        let directories = env::split_paths(&path).collect::<Vec<_>>();
+
+        assert_eq!(directories.first(), Some(&desktop_bin));
+        assert!(directories.contains(&PathBuf::from("/usr/bin")));
+        assert!(directories.contains(&PathBuf::from("/bin")));
+    }
+
     fn write_mpq(path: &Path) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("MPQ parent");
@@ -5378,7 +6652,7 @@ mod tests {
         }
         fs::write(
             path,
-            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.WorkerThreads = 4\nOllamaChat.MaxQueueDepth = 64\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.BotConversation.MaxChainDepth = 3\nOllamaChat.BotConversation.ChanceDecayPct = 50\nOllamaChat.BotConversation.RequireRecentHuman = 1\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.MinRandomInterval = 45\nOllamaChat.MaxRandomInterval = 180\nOllamaChat.RandomChatterRealPlayerDistance = 200.0\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.DisableRepliesInCombat = 0\nOllamaChat.DisableForCustomChannels = 0\nOllamaChat.DisableForGuild = 0\nOllamaChat.DisableForParty = 0\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
+            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.WorkerThreads = 4\nOllamaChat.MaxQueueDepth = 64\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.EnableChatHistory = 1\nOllamaChat.ConversationHistorySaveInterval = 10\nOllamaChat.EnableChatBotSnapshotTemplate = 1\nOllamaChat.Memory.Enable = 1\nOllamaChat.Relationship.Enable = 1\nOllamaChat.EnableRAG = 1\nOllamaChat.EnableEmoteReactions = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.BotConversation.MaxChainDepth = 3\nOllamaChat.BotConversation.ChanceDecayPct = 50\nOllamaChat.BotConversation.RequireRecentHuman = 1\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.MinRandomInterval = 45\nOllamaChat.MaxRandomInterval = 180\nOllamaChat.RandomChatterRealPlayerDistance = 200.0\nOllamaChat.RandomChatterPromptTemplate = \"test random\"\nOllamaChat.RandomChatterPromptVariations = \"test one|test two\"\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EventChatterPromptTemplate = \"test event\"\nOllamaChat.DisableRepliesInCombat = 0\nOllamaChat.DisableForCustomChannels = 0\nOllamaChat.DisableForGuild = 0\nOllamaChat.DisableForParty = 0\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
         )
         .expect("module config");
     }
@@ -5390,11 +6664,47 @@ mod tests {
         )
     }
 
+    fn save_test_installation<R: CommandRunner>(service: &LauncherService<R>, root: &Path) {
+        let runtime_root = root.join(RUNTIME_DIRECTORY);
+        let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
+        fs::write(&compose_file, "services: {}\n").expect("compose");
+        fs::write(&client_executable, "binary").expect("client");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: root.join("game-source"),
+                runtime_root,
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file,
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+                runtime_release: Some(runtime_release_id()),
+            })
+            .expect("record");
+    }
+
     #[derive(Default)]
     struct RecordingRunner {
         commands: Mutex<Vec<String>>,
         fail_next_input: Mutex<bool>,
+        fail_next_ps: Mutex<bool>,
+        empty_next_ps: Mutex<bool>,
         docker_memory: Mutex<Option<String>>,
+        docker_volumes_present: Mutex<Option<bool>>,
+        docker_images_present: Mutex<Option<bool>>,
+        running_services: Mutex<Vec<String>>,
     }
 
     impl CommandRunner for RecordingRunner {
@@ -5418,7 +6728,58 @@ mod tests {
                 return Ok("00".repeat(32));
             }
             if program == "docker" && args.iter().any(|arg| arg == "ps") {
+                let mut fail_next_ps = self.fail_next_ps.lock().expect("ps failure");
+                if *fail_next_ps {
+                    *fail_next_ps = false;
+                    return Err("injected docker ps failure".into());
+                }
+                let mut empty_next_ps = self.empty_next_ps.lock().expect("empty ps");
+                if *empty_next_ps {
+                    *empty_next_ps = false;
+                    return Ok(String::new());
+                }
+                if args.iter().any(|argument| argument == "--services") {
+                    let service = args
+                        .last()
+                        .map(|argument| argument.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    return Ok(
+                        if self
+                            .running_services
+                            .lock()
+                            .expect("running services")
+                            .contains(&service)
+                        {
+                            service
+                        } else {
+                            String::new()
+                        },
+                    );
+                }
                 return Ok("realmbox-worldserver-container".into());
+            }
+            if program == "docker"
+                && args.first() == Some(&OsString::from("volume"))
+                && args.get(1) == Some(&OsString::from("inspect"))
+            {
+                return if *self.docker_volumes_present.lock().expect("docker volumes")
+                    == Some(false)
+                {
+                    Err("volume absent".into())
+                } else {
+                    Ok("{}".into())
+                };
+            }
+            if program == "docker"
+                && args.first() == Some(&OsString::from("image"))
+                && args.get(1) == Some(&OsString::from("inspect"))
+            {
+                return if *self.docker_images_present.lock().expect("docker images") == Some(false)
+                {
+                    Err("image absente".into())
+                } else {
+                    Ok("{}".into())
+                };
             }
             if program == "docker" && args.iter().any(|arg| arg == "inspect") {
                 return Ok("true false".into());
@@ -5601,6 +6962,24 @@ mod tests {
         let inspection = inspect_game_data_root(&root).expect("inspection");
         assert_eq!(inspection.locale, "frFR");
         assert!(inspection.detail.contains("build 12340"));
+    }
+
+    #[test]
+    fn ambient_dialogue_language_follows_the_client_locale() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let french = temporary.path().join("French");
+        let english = temporary.path().join("English");
+        write_complete_game_data(&french, "frFR");
+        write_complete_game_data(&english, "enGB");
+
+        assert_eq!(
+            dialogue_language_for_game_data(&french),
+            DialogueLanguage::French
+        );
+        assert_eq!(
+            dialogue_language_for_game_data(&english),
+            DialogueLanguage::English
+        );
     }
 
     #[test]
@@ -5960,7 +7339,13 @@ mod tests {
         assert!(compose.contains("Dockerfile.realmbox"));
         assert!(compose.contains("REALMBOX_BUILD_JOBS: 3"));
         assert!(compose.contains(&expected_mount));
+        assert!(
+            compose.contains("./mmaps-config.yaml:/azerothcore/env/dist/bin/mmaps-config.yaml:ro")
+        );
         assert!(compose.contains("map_extractor"));
+        assert!(compose.contains("rm -rf /work/Buildings;"));
+        assert!(compose.contains("rm -rf /work/vmaps;"));
+        assert!(compose.contains("rm -rf /work/mmaps;"));
         assert!(compose.contains("mmaps_generator"));
         assert!(compose.contains(
             "mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent"
@@ -5990,6 +7375,76 @@ mod tests {
         let updated = fs::read_to_string(compose_path).expect("updated compose");
         assert_eq!(updated.matches("    stdin_open: true\n").count(), 1);
         assert_eq!(updated.matches("    tty: true\n").count(), 0);
+    }
+
+    #[test]
+    fn legacy_compose_receives_the_pinned_mmaps_configuration_mount() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let compose_path = temporary.path().join("compose.realmbox.yaml");
+        let legacy = compose_file("501", "20", Path::new("/Games/Wrath"), 2, None).replace(
+            "      - ./mmaps-config.yaml:/azerothcore/env/dist/bin/mmaps-config.yaml:ro\n",
+            "",
+        );
+        fs::write(&compose_path, legacy).expect("legacy compose");
+
+        ensure_mmaps_config_mount(&compose_path).expect("migration");
+        ensure_mmaps_config_mount(&compose_path).expect("idempotent migration");
+
+        let updated = fs::read_to_string(compose_path).expect("updated compose");
+        assert_eq!(
+            updated
+                .matches("./mmaps-config.yaml:/azerothcore/env/dist/bin/mmaps-config.yaml:ro")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn interrupted_server_data_extraction_is_made_restartable() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let compose_path = temporary.path().join("compose.realmbox.yaml");
+        let legacy = compose_file("501", "20", Path::new("/Games/Wrath"), 2, None)
+            .replace("          rm -rf /work/Buildings;\n", "")
+            .replace("          rm -rf /work/vmaps;\n", "")
+            .replace("          rm -rf /work/mmaps;\n", "");
+        fs::write(&compose_path, legacy).expect("legacy compose");
+
+        ensure_restartable_server_data_extraction(&compose_path).expect("migration");
+        ensure_restartable_server_data_extraction(&compose_path).expect("idempotent migration");
+
+        let updated = fs::read_to_string(compose_path).expect("updated compose");
+        let buildings = updated.find("rm -rf /work/Buildings").expect("buildings");
+        let extractor = updated.find("vmap4_extractor").expect("extractor");
+        let vmaps = updated.find("rm -rf /work/vmaps").expect("vmaps");
+        let assembler = updated.find("vmap4_assembler").expect("assembler");
+        let mmaps = updated.find("rm -rf /work/mmaps").expect("mmaps");
+        let generator = updated.find("mmaps_generator").expect("generator");
+        assert!(buildings < extractor);
+        assert!(vmaps < assembler);
+        assert!(mmaps < generator);
+    }
+
+    #[test]
+    fn partial_restart_cleanup_is_upgraded_to_include_buildings() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let compose_path = temporary.path().join("compose.realmbox.yaml");
+        let partial = compose_file("501", "20", Path::new("/Games/Wrath"), 2, None)
+            .replace("          rm -rf /work/Buildings;\n", "")
+            .replace("          rm -rf /work/vmaps;\n", "")
+            .replace("          rm -rf /work/mmaps;\n", "")
+            .replace(
+                "          /azerothcore/env/dist/bin/vmap4_extractor;\n",
+                "          rm -rf /work/vmaps /work/mmaps;\n          /azerothcore/env/dist/bin/vmap4_extractor;\n",
+            );
+        fs::write(&compose_path, partial).expect("partial cleanup compose");
+
+        ensure_restartable_server_data_extraction(&compose_path).expect("upgrade cleanup");
+
+        let updated = fs::read_to_string(compose_path).expect("updated compose");
+        assert!(updated.contains("rm -rf /work/Buildings;"));
+        assert!(updated.contains("rm -rf /work/vmaps;"));
+        assert!(updated.contains("rm -rf /work/mmaps;"));
+        assert!(!updated.contains("          rm -rf /work/vmaps /work/mmaps;\n"));
     }
 
     #[test]
@@ -6036,6 +7491,72 @@ mod tests {
                 .is_some(),
             AUTH_SERVER_IMAGE.is_some()
         );
+    }
+
+    #[test]
+    fn missing_local_worldserver_image_is_replaced_by_the_immutable_release_set() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let compose_path = temporary.path().join("server/compose.realmbox.yaml");
+        fs::create_dir_all(compose_path.parent().expect("server")).expect("server");
+        fs::write(
+            &compose_path,
+            compose_file(
+                "1000",
+                "1000",
+                Path::new("/Games/Wrath"),
+                2,
+                Some(&ServerImages {
+                    authserver: format!("ghcr.io/realmbox/auth@sha256:{}", "a".repeat(64)),
+                    worldserver: format!("ghcr.io/realmbox/world@sha256:{}", "b".repeat(64)),
+                    db_import: format!("ghcr.io/realmbox/db@sha256:{}", "c".repeat(64)),
+                    tools: format!("ghcr.io/realmbox/tools@sha256:{}", "d".repeat(64)),
+                }),
+            )
+            .replace(
+                &format!("ghcr.io/realmbox/world@sha256:{}", "b".repeat(64)),
+                "realmbox/worldserver:local",
+            ),
+        )
+        .expect("local compose");
+        let replacement = ServerImages {
+            authserver: format!("ghcr.io/realmbox/auth@sha256:{}", "1".repeat(64)),
+            worldserver: format!("ghcr.io/realmbox/world@sha256:{}", "2".repeat(64)),
+            db_import: format!("ghcr.io/realmbox/db@sha256:{}", "3".repeat(64)),
+            tools: format!("ghcr.io/realmbox/tools@sha256:{}", "4".repeat(64)),
+        };
+        let record = InstallationRecord {
+            schema_version: INSTALL_SCHEMA,
+            game_data_root: PathBuf::from("/Games/Wrath"),
+            runtime_root: temporary.path().to_path_buf(),
+            client_executable: temporary.path().join("client"),
+            client_choice: ClientChoice::ManagedOpenWow,
+            compose_file: compose_path.clone(),
+            bots_enabled: true,
+            bot_count: 50,
+            ai_enabled: false,
+            ai_model: None,
+            ollama_executable: None,
+            client_sha256: None,
+            ollama_sha256: None,
+            server_commit: SERVER_COMMIT.into(),
+            playerbots_commit: PLAYERBOTS_COMMIT.into(),
+            ollama_chat_commit: None,
+            runtime_release: Some(runtime_release_id()),
+        };
+        let runner = RecordingRunner {
+            docker_images_present: Mutex::new(Some(false)),
+            ..Default::default()
+        };
+
+        assert!(
+            repair_missing_local_server_image_with(&runner, &record, Some(&replacement))
+                .expect("compose repair")
+        );
+        let repaired = fs::read_to_string(compose_path).expect("repaired compose");
+        assert!(repaired.contains(&replacement.worldserver));
+        assert!(repaired.contains(&replacement.authserver));
+        assert!(!repaired.contains("realmbox/worldserver:local"));
+        assert!(!repaired.contains("build:"));
     }
 
     #[test]
@@ -6108,7 +7629,8 @@ mod tests {
             playerbots_fixture(false, 0, "AiPlayerbot.UnmanagedDefault = 42\n"),
         )
         .expect("source config");
-        write_playerbots_config(temporary.path(), true, 50).expect("playerbots config");
+        write_playerbots_config(temporary.path(), true, 50, BotPresence::Natural)
+            .expect("playerbots config");
         let config = fs::read_to_string(
             temporary
                 .path()
@@ -6120,12 +7642,13 @@ mod tests {
         assert!(config.contains("AiPlayerbot.RandomBotGuildCount = 0"));
         assert!(config.contains("AiPlayerbot.DisabledWithoutRealPlayer = 1"));
         assert!(config.contains("AiPlayerbot.BotActiveAlone = 10"));
-        assert!(config.contains("AiPlayerbot.BotActiveAloneForceWhenInZone = 1"));
+        assert!(config.contains("AiPlayerbot.BotActiveAloneForceWhenInZone = 0"));
         assert!(config.contains("AiPlayerbot.LevelBrackets.Enabled = 1"));
         assert!(config.contains("AiPlayerbot.LevelBrackets.CheckFrequency = 60"));
-        assert!(config.contains("AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight = 15.0"));
+        assert!(config.contains("AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight = 5.0"));
         assert!(config.contains("AiPlayerbot.AutoTeleportForLevel = 1"));
-        assert!(config.contains("AiPlayerbot.MinRandomBotTeleportInterval = 600"));
+        assert!(config.contains("AiPlayerbot.MinRandomBotTeleportInterval = 1800"));
+        assert!(config.contains("AiPlayerbot.MaxRandomBotTeleportInterval = 7200"));
         assert!(config.contains("AiPlayerbot.UnmanagedDefault = 42"));
         assert!(
             !temporary
@@ -6140,7 +7663,8 @@ mod tests {
         let temporary = tempfile::tempdir().expect("tempdir");
         install_realmbox_presence_config(&temporary.path().join("addon"), temporary.path())
             .expect("presence dist");
-        write_realmbox_presence_config(temporary.path(), true).expect("presence config");
+        write_realmbox_presence_config(temporary.path(), true, BotPresence::Close)
+            .expect("presence config");
 
         let config = fs::read_to_string(
             temporary
@@ -6154,11 +7678,144 @@ mod tests {
         assert!(config.contains("RealmBoxPresence.TargetFraction = 0.60"));
         assert!(config.contains("RealmBoxPresence.MaxBotsPerPlayer = 30"));
         assert!(config.contains("RealmBoxPresence.NearbyRadius = 150.0"));
-        assert!(config.contains("RealmBoxPresence.SpawnMinRadius = 30.0"));
-        assert!(config.contains("RealmBoxPresence.SpawnMaxRadius = 90.0"));
+        assert!(config.contains("RealmBoxPresence.SpawnMinRadius = 50.0"));
+        assert!(config.contains("RealmBoxPresence.SpawnMaxRadius = 110.0"));
         assert!(config.contains("RealmBoxPresence.MaxMovesPerScan = 1"));
-        assert!(config.contains("RealmBoxPresence.BotCooldownSeconds = 10"));
+        assert!(config.contains("RealmBoxPresence.BotCooldownSeconds = 60"));
+        assert!(config.contains("RealmBoxPresence.AutonomyReturnSeconds = 900"));
         assert!(config.contains("RealmBoxPresence.ReleasedBotGraceSeconds = 300"));
+    }
+
+    #[test]
+    fn presence_profiles_keep_population_and_relocation_independent() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let source = temporary.path().join("modules/mod-playerbots/conf");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::write(
+            source.join("playerbots.conf.dist"),
+            playerbots_fixture(false, 0, ""),
+        )
+        .expect("source config");
+        install_realmbox_presence_config(&temporary.path().join("addon"), temporary.path())
+            .expect("presence dist");
+
+        write_playerbots_config(temporary.path(), true, 100, BotPresence::Dispersed)
+            .expect("dispersed playerbots config");
+        write_realmbox_presence_config(temporary.path(), true, BotPresence::Dispersed)
+            .expect("dispersed presence config");
+        let playerbots = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/playerbots.conf"),
+        )
+        .expect("playerbots config");
+        let presence = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/realmbox-presence.conf"),
+        )
+        .expect("presence config");
+        assert!(playerbots.contains("AiPlayerbot.MaxRandomBots = 100"));
+        assert!(playerbots.contains("AiPlayerbot.BotActiveAlone = 5"));
+        assert!(playerbots.contains("AiPlayerbot.LevelBrackets.Dynamic.RealPlayerWeight = 1.0"));
+        assert!(presence.contains("RealmBoxPresence.Enabled = 0"));
+        assert!(presence.contains("RealmBoxPresence.TargetFraction = 0.0"));
+        assert!(presence.contains("RealmBoxPresence.AutonomyReturnSeconds = 60"));
+
+        write_playerbots_config(temporary.path(), true, 100, BotPresence::Natural)
+            .expect("natural playerbots config");
+        write_realmbox_presence_config(temporary.path(), true, BotPresence::Natural)
+            .expect("natural presence config");
+        let presence = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/realmbox-presence.conf"),
+        )
+        .expect("presence config");
+        assert!(presence.contains("RealmBoxPresence.Enabled = 1"));
+        assert!(presence.contains("RealmBoxPresence.TargetFraction = 0.30"));
+        assert!(presence.contains("RealmBoxPresence.MinBotsPerPlayer = 3"));
+        assert!(presence.contains("RealmBoxPresence.MaxBotsPerPlayer = 15"));
+        assert!(presence.contains("RealmBoxPresence.AutonomyReturnSeconds = 600"));
+    }
+
+    #[test]
+    fn presence_config_upgrade_adds_the_new_key_once_without_overwriting_preferences() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        install_realmbox_presence_config(&temporary.path().join("addon"), temporary.path())
+            .expect("presence dist");
+        let destination = temporary
+            .path()
+            .join("env/dist/etc/modules/realmbox-presence.conf");
+        let distributed = fs::read_to_string(destination.with_extension("conf.dist"))
+            .expect("presence dist contents");
+        let legacy = distributed
+            .lines()
+            .filter(|line| !line.starts_with("RealmBoxPresence.AutonomyReturnSeconds ="))
+            .map(|line| {
+                if line.starts_with("RealmBoxPresence.MaxLevelDelta =") {
+                    "RealmBoxPresence.MaxLevelDelta = 7"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&destination, legacy).expect("legacy config");
+
+        write_realmbox_presence_config(temporary.path(), true, BotPresence::Natural)
+            .expect("upgraded config");
+        write_realmbox_presence_config(temporary.path(), true, BotPresence::Natural)
+            .expect("idempotent upgraded config");
+        let upgraded = fs::read_to_string(destination).expect("upgraded config contents");
+        assert_eq!(
+            upgraded
+                .lines()
+                .filter(|line| line.starts_with("RealmBoxPresence.AutonomyReturnSeconds ="))
+                .count(),
+            1
+        );
+        assert!(upgraded.contains("RealmBoxPresence.AutonomyReturnSeconds = 600"));
+        assert!(upgraded.contains("RealmBoxPresence.MaxLevelDelta = 7"));
+    }
+
+    #[test]
+    fn fresh_worlds_default_to_natural_presence_and_legacy_preferences_stay_close() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        assert_eq!(
+            service.world_preferences(None).bot_presence,
+            BotPresence::Natural
+        );
+
+        fs::write(
+            temporary.path().join("world-preferences.json"),
+            r#"{"botsEnabled":true,"requestedBotCount":100}"#,
+        )
+        .expect("legacy preferences");
+        let legacy = service.world_preferences(None);
+        assert!(legacy.bots_enabled);
+        assert_eq!(legacy.requested_bot_count, 100);
+        assert_eq!(legacy.bot_presence, BotPresence::Close);
+    }
+
+    #[test]
+    fn mmaps_configuration_is_copied_from_the_pinned_resource() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        install_mmaps_config(&temporary.path().join("addon"), temporary.path())
+            .expect("mmaps config");
+        let config =
+            fs::read_to_string(temporary.path().join("mmaps-config.yaml")).expect("copied config");
+        assert!(config.contains(SERVER_COMMIT));
+        assert!(config.contains("verticesPerMapEdge: 2000"));
+        assert!(config.contains("walkableSlopeAngle: 45"));
+        assert!(config.contains("debugOutput: false"));
     }
 
     #[test]
@@ -6172,7 +7829,8 @@ mod tests {
         )
         .expect("image dist config");
 
-        write_playerbots_config(temporary.path(), true, 5).expect("prebuilt config");
+        write_playerbots_config(temporary.path(), true, 5, BotPresence::Natural)
+            .expect("prebuilt config");
 
         let config = fs::read_to_string(modules.join("playerbots.conf")).expect("config");
         assert!(config.contains("AiPlayerbot.Enabled = 1"));
@@ -6190,6 +7848,7 @@ mod tests {
             true,
             Some("qwen3:8b"),
             DialogueChattiness::Balanced,
+            DialogueLanguage::English,
         )
         .expect("valid model");
         let config = fs::read_to_string(
@@ -6216,7 +7875,19 @@ mod tests {
         assert!(config.contains("exactly the language of the quoted player message"));
         assert!(config.contains("<player_message>{player_message}</player_message>"));
         assert!(config.contains("An English message requires an English answer"));
+        assert!(config.contains("If there is no quoted player message, write only in English"));
+        assert!(config.contains("OllamaChat.RandomChatterPromptTemplate = \"You are"));
+        assert!(config.contains("World of Warcraft remark in English"));
+        assert!(config.contains("OllamaChat.EventChatterPromptTemplate = \"You are"));
+        assert!(config.contains("React only to this event in natural English"));
         assert!(config.contains("OllamaChat.Temperature = 0"));
+        assert!(config.contains("OllamaChat.EnableChatHistory = 0"));
+        assert!(config.contains("OllamaChat.ConversationHistorySaveInterval = 0"));
+        assert!(config.contains("OllamaChat.EnableChatBotSnapshotTemplate = 0"));
+        assert!(config.contains("OllamaChat.Memory.Enable = 0"));
+        assert!(config.contains("OllamaChat.Relationship.Enable = 0"));
+        assert!(config.contains("OllamaChat.EnableRAG = 0"));
+        assert!(config.contains("OllamaChat.EnableEmoteReactions = 0"));
         let chat_prompt = config
             .lines()
             .find(|line| line.starts_with("OllamaChat.ChatPromptTemplate ="))
@@ -6229,6 +7900,7 @@ mod tests {
             true,
             Some("qwen3:8b"),
             DialogueChattiness::Lively,
+            DialogueLanguage::English,
         )
         .expect("lively dialogue");
         let lively = fs::read_to_string(
@@ -6238,16 +7910,17 @@ mod tests {
         )
         .expect("lively config");
         assert!(lively.contains("OllamaChat.EnableRandomChatter = 1"));
-        assert!(lively.contains("OllamaChat.EventChatterBotCommentChance = 15"));
-        assert!(lively.contains("OllamaChat.RandomChatterBotCommentChance = 50"));
-        assert!(lively.contains("OllamaChat.BotReplyChance.Say = 50"));
+        assert!(lively.contains("OllamaChat.EventChatterBotCommentChance = 10"));
+        assert!(lively.contains("OllamaChat.EventChatterBotSelfCommentChance = 2"));
+        assert!(lively.contains("OllamaChat.RandomChatterBotCommentChance = 35"));
+        assert!(lively.contains("OllamaChat.BotReplyChance.Say = 35"));
         assert!(lively.contains("OllamaChat.BotReplyChance.Party = 100"));
         assert!(lively.contains("OllamaChat.Cooldown.PerBotSeconds = 60"));
         assert!(lively.contains("OllamaChat.Cooldown.PerScopeSeconds = 0"));
         assert!(lively.contains("OllamaChat.RateLimit.ScopePerMinute = 4"));
         assert!(lively.contains("OllamaChat.RateLimit.GlobalPerMinute = 6"));
-        assert!(lively.contains("OllamaChat.MinRandomInterval = 20"));
-        assert!(lively.contains("OllamaChat.MaxRandomInterval = 60"));
+        assert!(lively.contains("OllamaChat.MinRandomInterval = 30"));
+        assert!(lively.contains("OllamaChat.MaxRandomInterval = 90"));
         assert!(lively.contains("OllamaChat.RandomChatterRealPlayerDistance = 150.0"));
         assert!(lively.contains("OllamaChat.BotConversation.MaxChainDepth = 2"));
         write_ollama_chat_config(
@@ -6255,6 +7928,7 @@ mod tests {
             true,
             Some("qwen3:8b"),
             DialogueChattiness::Quiet,
+            DialogueLanguage::English,
         )
         .expect("quiet dialogue");
         let quiet = fs::read_to_string(
@@ -6264,8 +7938,31 @@ mod tests {
         )
         .expect("quiet config");
         assert!(quiet.contains("OllamaChat.EnableRandomChatter = 0"));
+        assert!(quiet.contains("OllamaChat.EnableEventChatter = 0"));
+        assert!(quiet.contains("OllamaChat.PlayerReplyChance.Say = 100"));
+        assert!(quiet.contains("OllamaChat.PlayerReplyChance.Party = 100"));
         assert!(quiet.contains("OllamaChat.BotReplyChance.Say = 0"));
         assert!(quiet.contains("OllamaChat.BotReplyChance.Party = 0"));
+        assert!(quiet.contains("OllamaChat.BotConversation.MaxChainDepth = 1"));
+
+        write_ollama_chat_config(
+            temporary.path(),
+            true,
+            Some("qwen3:8b"),
+            DialogueChattiness::Balanced,
+            DialogueLanguage::French,
+        )
+        .expect("French dialogue");
+        let french = fs::read_to_string(
+            temporary
+                .path()
+                .join("env/dist/etc/modules/mod_ollama_chat.conf"),
+        )
+        .expect("French config");
+        assert!(french.contains("If there is no quoted player message, write only in French"));
+        assert!(french.contains("une seule remarque naturelle et crédible en français"));
+        assert!(french.contains("Réagis uniquement à cet événement"));
+        assert!(french.contains("Reply directly to that message in the same language"));
         let environment = ollama_environment(Path::new("/managed/ai/models"), true);
         assert!(environment.contains(&(OsString::from("OLLAMA_NO_CLOUD"), OsString::from("true"))));
         assert!(environment.contains(&(OsString::from("OLLAMA_MAX_QUEUE"), OsString::from("8"))));
@@ -6275,6 +7972,7 @@ mod tests {
                 true,
                 Some("remote.example/model:latest"),
                 DialogueChattiness::Balanced,
+                DialogueLanguage::English,
             )
             .is_err()
         );
@@ -6283,8 +7981,14 @@ mod tests {
     #[test]
     fn ollama_configuration_is_optional_when_the_module_was_not_installed() {
         let temporary = tempfile::tempdir().expect("tempdir");
-        write_ollama_chat_config(temporary.path(), false, None, DialogueChattiness::Balanced)
-            .expect("disabled module");
+        write_ollama_chat_config(
+            temporary.path(),
+            false,
+            None,
+            DialogueChattiness::Balanced,
+            DialogueLanguage::English,
+        )
+        .expect("disabled module");
         assert!(!temporary.path().join("env/dist/etc/modules").exists());
     }
 
@@ -6321,8 +8025,8 @@ mod tests {
             compose_file,
             bots_enabled: true,
             bot_count: 50,
-            ai_enabled: false,
-            ai_model: None,
+            ai_enabled: true,
+            ai_model: Some("llama3.2:3b".into()),
             ollama_executable: None,
             client_sha256: Some("test-openwow-sha256".into()),
             ollama_sha256: None,
@@ -6341,7 +8045,7 @@ mod tests {
         };
 
         service
-            .prepare_dialogue_runtime(&mut record, &images, &mut |_| {})
+            .prepare_server_runtime_update(&mut record, &images, &mut |_| {})
             .expect("runtime update");
 
         assert!(server_root.join("compose.realmbox.yaml").is_file());
@@ -6369,7 +8073,20 @@ mod tests {
                 .any(|entry| entry.expect("backup entry").path().extension()
                     == Some(OsStr::new("sql")))
         );
-        assert_eq!(record.runtime_release, None);
+        assert_eq!(
+            record.runtime_release,
+            Some(pending_runtime_release_id(&runtime_release_id()))
+        );
+        assert!(
+            fs::read_to_string(server_root.join("env/dist/etc/modules/mod_ollama_chat.conf"))
+                .expect("dialogue config")
+                .contains("OllamaChat.Enable = 1")
+        );
+        assert!(
+            fs::read_to_string(server_root.join("env/dist/etc/modules/mod_ollama_chat.conf"))
+                .expect("dialogue config")
+                .contains("OllamaChat.Model = llama3.2:3b")
+        );
         let commands = service.runner.commands.lock().expect("commands");
         let backup_index = commands
             .iter()
@@ -6384,6 +8101,274 @@ mod tests {
             command.contains("/azerothcore/env/ref/etc/modules/mod_ollama_chat.conf.dist")
         }));
         assert!(!commands.iter().any(|command| command.contains("--volumes")));
+        drop(commands);
+
+        service
+            .prepare_server_runtime_update(&mut record, &images, &mut |_| {})
+            .expect("prepared runtime retry");
+        assert_eq!(
+            service
+                .runner
+                .commands
+                .lock()
+                .expect("commands")
+                .iter()
+                .filter(|command| command.contains("mysqldump"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn interrupted_runtime_publication_resumes_without_a_second_backup() {
+        for topology in ["before-rename", "after-first-rename", "after-publish"] {
+            let temporary = tempfile::tempdir().expect("tempdir");
+            let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+            let current_server = runtime_root.join("server");
+            let client_executable = runtime_root.join("client/openwow-client");
+            fs::create_dir_all(client_executable.parent().expect("client")).expect("client dir");
+            fs::write(&client_executable, "binary").expect("client");
+            let source_release = "0.3.4-schema-3";
+            let target_release = runtime_release_id();
+            let transition = migration_backup_stem(source_release, &target_release);
+            let staging_root = temporary.path().join(format!(".{transition}-staging"));
+            let staged_server = staging_root.join("server");
+            let rollback_root = temporary
+                .path()
+                .join(RUNTIME_ROLLBACK_DIRECTORY)
+                .join(&transition);
+            let rollback_server = rollback_root.join("server");
+            let digest = "a".repeat(64);
+            let images = ServerImages {
+                authserver: format!("ghcr.io/example/auth@sha256:{digest}"),
+                worldserver: format!("ghcr.io/example/world@sha256:{digest}"),
+                db_import: format!("ghcr.io/example/db@sha256:{digest}"),
+                tools: format!("ghcr.io/example/tools@sha256:{digest}"),
+            };
+            let write_old_server = |root: &Path| {
+                fs::create_dir_all(root).expect("old server dir");
+                fs::write(
+                    root.join("compose.realmbox.yaml"),
+                    "services: {}\n# old-runtime\n",
+                )
+                .expect("old compose");
+            };
+            let write_new_server = |root: &Path| {
+                fs::create_dir_all(root).expect("new server dir");
+                fs::write(
+                    root.join("compose.realmbox.yaml"),
+                    compose_file(
+                        "1000",
+                        "1000",
+                        temporary.path().join("game-source").as_path(),
+                        DEFAULT_DOCKER_BUILD_JOBS,
+                        Some(&images),
+                    ),
+                )
+                .expect("new compose");
+            };
+            match topology {
+                "before-rename" => {
+                    write_old_server(&current_server);
+                    write_new_server(&staged_server);
+                }
+                "after-first-rename" => {
+                    write_old_server(&rollback_server);
+                    write_new_server(&staged_server);
+                }
+                "after-publish" => {
+                    write_old_server(&rollback_server);
+                    write_new_server(&current_server);
+                }
+                _ => unreachable!(),
+            }
+
+            let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+            fs::create_dir_all(&backup_root).expect("backup root");
+            let backup = backup_root.join(format!("{transition}.sql"));
+            fs::write(
+                &backup,
+                "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
+            )
+            .expect("backup");
+            fs::write(
+                backup.with_extension("sha256"),
+                format!("{}\n", sha256_file(&backup).expect("checksum")),
+            )
+            .expect("checksum file");
+            let recovery = RecoveryMetadata {
+                schema_version: 1,
+                stem: transition.clone(),
+                source_runtime_release: Some(source_release.into()),
+                target_runtime_release: target_release.clone(),
+                ai_enabled: false,
+                ai_model: None,
+                ollama_chat_commit: None,
+            };
+            let transaction = RuntimeUpdateTransaction {
+                schema_version: 1,
+                transition: transition.clone(),
+                attempt: 1,
+                phase: RuntimeUpdatePhase::Staged,
+                images: images.clone(),
+                recovery,
+            };
+            fs::write(
+                temporary.path().join(RUNTIME_UPDATE_FILE),
+                serde_json::to_vec_pretty(&transaction).expect("transaction"),
+            )
+            .expect("transaction marker");
+
+            let mut service = LauncherService::new(
+                temporary.path().to_path_buf(),
+                temporary.path().join("addon"),
+                RecordingRunner::default(),
+            )
+            .expect("service");
+            let mut record = InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable: client_executable.clone(),
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file: current_server.join("compose.realmbox.yaml"),
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+                runtime_release: Some(source_release.into()),
+            };
+            service.save_record(&record).expect("record");
+
+            if topology == "after-first-rename" {
+                let status = service.bootstrap(|_| {}).expect("public bootstrap resume");
+                assert_eq!(status.phase, LauncherPhase::Ready);
+                record = service.load_record().expect("record").expect("installed");
+            } else {
+                assert!(
+                    service
+                        .resume_runtime_update_if_needed(&mut record)
+                        .expect("resume")
+                );
+            }
+            assert!(runtime_server_matches_images(&current_server, &images).expect("images"));
+            assert!(rollback_server.join("compose.realmbox.yaml").is_file());
+            assert_eq!(
+                record.runtime_release,
+                Some(pending_runtime_release_id(&target_release))
+            );
+            validate_prepared_runtime_update(temporary.path(), &record, &images, &target_release)
+                .expect("prepared runtime validation");
+            assert!(!temporary.path().join(RUNTIME_UPDATE_FILE).exists());
+            assert_eq!(
+                service
+                    .runner
+                    .commands
+                    .lock()
+                    .expect("commands")
+                    .iter()
+                    .filter(|command| command.contains("mysqldump"))
+                    .count(),
+                0,
+                "{topology}"
+            );
+            assert!(
+                service
+                    .runner
+                    .commands
+                    .lock()
+                    .expect("commands")
+                    .iter()
+                    .all(|command| !command.contains(" up "))
+            );
+        }
+    }
+
+    #[test]
+    fn forged_runtime_transaction_stem_is_rejected_before_path_construction() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let current_server = runtime_root.join("server");
+        fs::create_dir_all(&current_server).expect("server");
+        fs::write(
+            current_server.join("compose.realmbox.yaml"),
+            "services: {}\n",
+        )
+        .expect("compose");
+        let digest = "a".repeat(64);
+        let images = ServerImages {
+            authserver: format!("ghcr.io/example/auth@sha256:{digest}"),
+            worldserver: format!("ghcr.io/example/world@sha256:{digest}"),
+            db_import: format!("ghcr.io/example/db@sha256:{digest}"),
+            tools: format!("ghcr.io/example/tools@sha256:{digest}"),
+        };
+        let forged = "../../outside";
+        let recovery = RecoveryMetadata {
+            schema_version: 1,
+            stem: forged.into(),
+            source_runtime_release: Some("0.3.4-schema-3".into()),
+            target_runtime_release: runtime_release_id(),
+            ai_enabled: false,
+            ai_model: None,
+            ollama_chat_commit: None,
+        };
+        fs::write(
+            temporary.path().join(RUNTIME_UPDATE_FILE),
+            serde_json::to_vec_pretty(&RuntimeUpdateTransaction {
+                schema_version: 1,
+                transition: forged.into(),
+                attempt: 1,
+                phase: RuntimeUpdatePhase::Staged,
+                images,
+                recovery,
+            })
+            .expect("marker"),
+        )
+        .expect("marker file");
+        let mut record = InstallationRecord {
+            schema_version: INSTALL_SCHEMA,
+            game_data_root: temporary.path().join("game-source"),
+            runtime_root,
+            client_executable: temporary.path().join("client"),
+            client_choice: ClientChoice::ManagedOpenWow,
+            compose_file: current_server.join("compose.realmbox.yaml"),
+            bots_enabled: true,
+            bot_count: 50,
+            ai_enabled: false,
+            ai_model: None,
+            ollama_executable: None,
+            client_sha256: None,
+            ollama_sha256: None,
+            server_commit: SERVER_COMMIT.into(),
+            playerbots_commit: PLAYERBOTS_COMMIT.into(),
+            ollama_chat_commit: None,
+            runtime_release: Some("0.3.4-schema-3".into()),
+        };
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+
+        let error = service
+            .resume_runtime_update_if_needed(&mut record)
+            .expect_err("forged transaction must fail");
+        assert!(error.contains("incohérent"));
+        assert!(
+            !temporary
+                .path()
+                .parent()
+                .expect("parent")
+                .join("outside")
+                .exists()
+        );
     }
 
     #[test]
@@ -6434,6 +8419,16 @@ mod tests {
         );
         assert!(!commands.iter().any(|command| command.contains(" up ")));
         assert_eq!(service.client_process_id(), None);
+        drop(commands);
+
+        *service
+            .runner
+            .docker_volumes_present
+            .lock()
+            .expect("docker volumes") = Some(false);
+        let purged = service.bootstrap(|_| {}).expect("purged bootstrap");
+        assert_eq!(purged.phase, LauncherPhase::Ready);
+        assert!(purged.message.contains("seront reconstruites"));
     }
 
     #[test]
@@ -6448,6 +8443,47 @@ mod tests {
         let error = verify_ollama_model_manifest(temporary.path(), "llama3.2:3b")
             .expect_err("mutable manifest must be rejected");
         assert!(error.contains("modèle épinglé"));
+    }
+
+    #[test]
+    fn start_refuses_a_second_owned_client_before_any_runtime_or_docker_action() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable: runtime_root.join("client/openwow-client"),
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file: runtime_root.join("server/compose.realmbox.yaml"),
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: None,
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+                runtime_release: Some(runtime_release_id()),
+            })
+            .expect("record");
+        service.client_process_id = Some(42);
+
+        let error = service
+            .start(None, None, None, None, |_| {})
+            .expect_err("second start must fail");
+        assert!(error.contains("déjà lancé"));
+        assert_eq!(service.client_process_id(), Some(42));
+        assert!(service.runner.commands.lock().expect("commands").is_empty());
     }
 
     #[test]
@@ -6493,6 +8529,9 @@ mod tests {
                 runtime_release: Some(runtime_release_id()),
             })
             .expect("record");
+        let saved = service.load_record().expect("record").expect("installed");
+        assert!(!local_dialogue_download_required(&saved, "llama3.2:3b"));
+        assert!(local_dialogue_download_required(&saved, "qwen2.5:3b"));
 
         let enabled = service
             .configure_local_dialogue(true, Some("llama3.2:3b".into()), |_| {})
@@ -6626,6 +8665,130 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn manual_backup_is_complete_verified_unique_and_stops_only_its_database() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+
+        let first = service.create_realm_backup().expect("first backup");
+        let second = service.create_realm_backup().expect("second backup");
+        assert!(first.size_bytes > 0);
+        assert!(second.size_bytes > 0);
+        assert!(
+            service
+                .inspect_realm_backup()
+                .expect("backup inspection")
+                .is_some()
+        );
+
+        let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+        let backups = fs::read_dir(&backup_root)
+            .expect("backup root")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension() == Some(OsStr::new("sql")))
+            .count();
+        assert_eq!(backups, 2);
+        let commands = service.runner.commands.lock().expect("commands");
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.contains(" up -d --wait --wait-timeout 120 database"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.contains(" stop database"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.contains("mysqldump"))
+                .count(),
+            2
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains("--volumes") || command.contains(" -v "))
+        );
+    }
+
+    #[test]
+    fn manual_backup_keeps_an_already_running_database_online() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner {
+            running_services: Mutex::new(vec!["database".into()]),
+            ..Default::default()
+        };
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+
+        service.create_realm_backup().expect("running backup");
+
+        let commands = service.runner.commands.lock().expect("commands");
+        assert!(commands.iter().any(|command| command.contains("mysqldump")));
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains(" up -d --wait")
+                    || command.contains(" stop database"))
+        );
+    }
+
+    #[test]
+    fn docker_purge_selects_a_verified_manual_backup_and_resumes_from_its_marker() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+        fs::create_dir_all(&backup_root).expect("backup root");
+        let backup = backup_root.join("manual-backup-dockerpurge.sql");
+        fs::write(
+            &backup,
+            "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
+        )
+        .expect("backup");
+        fs::write(
+            backup.with_extension("sha256"),
+            format!("{}\n", sha256_file(&backup).expect("checksum")),
+        )
+        .expect("checksum");
+
+        let selected = prepare_docker_recovery(temporary.path(), true)
+            .expect("purge recovery")
+            .expect("selected backup");
+        assert_eq!(selected.stem, "manual-backup-dockerpurge");
+        assert!(temporary.path().join(DOCKER_RECOVERY_FILE).is_file());
+
+        let resumed = prepare_docker_recovery(temporary.path(), false)
+            .expect("resume recovery")
+            .expect("marked backup");
+        assert_eq!(resumed, selected);
+    }
+
+    #[test]
+    fn docker_purge_without_a_verified_backup_fails_closed() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let error = prepare_docker_recovery(temporary.path(), true)
+            .expect_err("missing player backup must block an empty realm");
+        assert!(error.contains("volume Docker des personnages a disparu"));
+        assert!(error.contains("ne pas créer un royaume vide"));
+        assert!(!temporary.path().join(DOCKER_RECOVERY_FILE).exists());
     }
 
     #[test]
@@ -7117,6 +9280,101 @@ mod tests {
     }
 
     #[test]
+    fn legacy_start_restores_a_missing_database_then_fails_closed_without_release_images() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        let addon = temporary.path().join("addon");
+        fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
+        fs::create_dir_all(&addon).expect("addon");
+        fs::write(&compose_file, "services: {}\n# legacy-runtime\n").expect("compose");
+        fs::write(&client_executable, "binary").expect("client");
+        for filename in [
+            "RealmBoxCompanions.lua",
+            "RealmBoxCompanions.toc",
+            "RealmBoxCompanions.xml",
+        ] {
+            fs::write(addon.join(filename), format!("fixture {filename}")).expect("addon fixture");
+        }
+        let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+        fs::create_dir_all(&backup_root).expect("backup root");
+        let backup = backup_root.join("pre-migration-before-legacy-update.sql");
+        fs::write(
+            &backup,
+            "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
+        )
+        .expect("backup");
+        fs::write(
+            backup.with_extension("sha256"),
+            format!("{}\n", sha256_file(&backup).expect("checksum")),
+        )
+        .expect("checksum");
+        let runner = RecordingRunner {
+            docker_volumes_present: Mutex::new(Some(false)),
+            ..Default::default()
+        };
+        let mut service =
+            LauncherService::new(temporary.path().to_path_buf(), addon, runner).expect("service");
+        let source_release = "0.3.4-schema-3";
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable,
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file,
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: None,
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+                runtime_release: Some(source_release.into()),
+            })
+            .expect("record");
+
+        let error = service
+            .start(None, None, None, None, |_| {})
+            .expect_err("development build must not promote a legacy runtime");
+        assert!(error.contains("images serveur immuables"));
+        assert_eq!(
+            service
+                .load_record()
+                .expect("record")
+                .expect("installed")
+                .runtime_release
+                .as_deref(),
+            Some(source_release)
+        );
+        let commands = service.runner.commands.lock().expect("commands");
+        let restore_index = commands
+            .iter()
+            .position(|command| {
+                command.contains("exec mysql")
+                    && command.contains("pre-migration-before-legacy-update.sql")
+            })
+            .expect("database restore");
+        assert!(
+            commands[..restore_index]
+                .iter()
+                .any(|command| command.contains("up -d --wait --wait-timeout 120 database"))
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| command.contains("run --rm db-import"))
+        );
+        assert!(!commands.iter().any(|command| command.contains("--volumes")));
+    }
+
+    #[test]
     fn managed_openwow_starts_from_its_writable_game_root() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
@@ -7143,7 +9401,7 @@ mod tests {
             .expect("module config");
         fs::write(
             &compose_file,
-            "services:\n  worldserver:\n    environment:\n      TEST: value\n",
+            "services:\n  server-data-init:\n    volumes:\n      - realmbox-server-data:/work\n    command:\n      - >-\n          /azerothcore/env/dist/bin/vmap4_extractor;\n          mkdir -p /work/vmaps;\n          /azerothcore/env/dist/bin/vmap4_assembler /work/Buildings /work/vmaps;\n          /azerothcore/env/dist/bin/mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent;\n  worldserver:\n    environment:\n      TEST: value\n",
         )
         .expect("compose");
         fs::write(&client_executable, "binary").expect("client");
@@ -7172,11 +9430,13 @@ mod tests {
                 server_commit: SERVER_COMMIT.into(),
                 playerbots_commit: PLAYERBOTS_COMMIT.into(),
                 ollama_chat_commit: None,
-                runtime_release: None,
+                runtime_release: Some(runtime_release_id()),
             })
             .expect("record");
 
-        let status = service.start(None, None, None, |_| {}).expect("start");
+        let status = service
+            .start(None, None, None, None, |_| {})
+            .expect("start");
         assert_eq!(status.phase, LauncherPhase::Running);
         assert_eq!(service.client_process_id(), Some(42));
         assert_eq!(
@@ -7185,10 +9445,6 @@ mod tests {
             "fresh RealmBoxCompanions.lua"
         );
         let commands = service.runner.commands.lock().expect("commands");
-        let backup_index = commands
-            .iter()
-            .position(|command| command.contains("mysqldump"))
-            .expect("pre-migration backup");
         let migration_index = commands
             .iter()
             .position(|command| command.contains("run --rm db-import"))
@@ -7205,7 +9461,7 @@ mod tests {
             .iter()
             .position(|command| command.starts_with(&client_executable.display().to_string()))
             .expect("client launch");
-        assert!(backup_index < migration_index);
+        assert!(!commands.iter().any(|command| command.contains("mysqldump")));
         assert!(migration_index < auth_ready_index);
         assert!(auth_ready_index < world_ready_index);
         assert!(world_ready_index < client_index);
@@ -7222,6 +9478,118 @@ mod tests {
                 .expect("installed")
                 .runtime_release,
             Some(runtime_release_id())
+        );
+    }
+
+    #[test]
+    fn start_rebuilds_purged_docker_resources_from_the_verified_player_backup() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+        let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+        let client_executable = runtime_root.join("client/openwow-client");
+        let managed_game = runtime_root.join("game");
+        let addon = temporary.path().join("addon");
+        fs::create_dir_all(compose_file.parent().expect("server")).expect("server");
+        fs::create_dir_all(client_executable.parent().expect("client")).expect("client");
+        fs::create_dir_all(&managed_game).expect("managed game");
+        fs::create_dir_all(&addon).expect("addon");
+        for filename in [
+            "RealmBoxCompanions.lua",
+            "RealmBoxCompanions.toc",
+            "RealmBoxCompanions.xml",
+        ] {
+            fs::write(addon.join(filename), format!("fresh {filename}")).expect("addon fixture");
+        }
+        fs::write(
+            &compose_file,
+            "services:\n  server-data-init:\n    volumes:\n      - realmbox-server-data:/work\n    command:\n      - >-\n          /azerothcore/env/dist/bin/vmap4_extractor;\n          mkdir -p /work/vmaps;\n          /azerothcore/env/dist/bin/vmap4_assembler /work/Buildings /work/vmaps;\n          /azerothcore/env/dist/bin/mmaps_generator --config /azerothcore/env/dist/bin/mmaps-config.yaml --silent;\n  worldserver:\n    environment:\n      TEST: value\n",
+        )
+        .expect("compose");
+        fs::write(&client_executable, "binary").expect("client");
+        let playerbots_config = runtime_root.join("server/env/dist/etc/modules/playerbots.conf");
+        fs::create_dir_all(playerbots_config.parent().expect("module config"))
+            .expect("module config");
+        fs::write(playerbots_config, playerbots_fixture(false, 0, "")).expect("playerbots config");
+
+        let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
+        fs::create_dir_all(&backup_root).expect("backup root");
+        let backup = backup_root.join("pre-migration-beforepurge.sql");
+        fs::write(
+            &backup,
+            "-- Current Database: `acore_auth`\n-- Current Database: `acore_characters`\n-- Current Database: `acore_playerbots`\n-- Current Database: `acore_world`\n",
+        )
+        .expect("backup");
+        fs::write(
+            backup.with_extension("sha256"),
+            format!("{}\n", sha256_file(&backup).expect("checksum")),
+        )
+        .expect("checksum");
+
+        let runner = RecordingRunner {
+            docker_volumes_present: Mutex::new(Some(false)),
+            ..Default::default()
+        };
+        let mut service =
+            LauncherService::new(temporary.path().to_path_buf(), addon, runner).expect("service");
+        service
+            .save_record(&InstallationRecord {
+                schema_version: INSTALL_SCHEMA,
+                game_data_root: temporary.path().join("game-source"),
+                runtime_root: runtime_root.clone(),
+                client_executable: client_executable.clone(),
+                client_choice: ClientChoice::ManagedOpenWow,
+                compose_file,
+                bots_enabled: true,
+                bot_count: 50,
+                ai_enabled: false,
+                ai_model: None,
+                ollama_executable: None,
+                client_sha256: Some("test-openwow-sha256".into()),
+                ollama_sha256: None,
+                server_commit: SERVER_COMMIT.into(),
+                playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                ollama_chat_commit: None,
+                runtime_release: Some(runtime_release_id()),
+            })
+            .expect("record");
+
+        let mut progress = Vec::new();
+        let status = service
+            .start(None, None, None, None, |event| progress.push(event))
+            .expect("purged Docker recovery");
+
+        assert_eq!(status.phase, LauncherPhase::Running);
+        assert!(!temporary.path().join(DOCKER_RECOVERY_FILE).exists());
+        assert!(progress.iter().any(|event| {
+            event.phase == LauncherPhase::Recovering
+                && event.message == "Restauration des personnages"
+        }));
+        let commands = service.runner.commands.lock().expect("commands");
+        let database_start = commands
+            .iter()
+            .position(|command| command.contains("up -d --wait --wait-timeout 120 database"))
+            .expect("database reconstruction");
+        let restore = commands
+            .iter()
+            .position(|command| {
+                command.contains("exec mysql") && command.contains("pre-migration-beforepurge.sql")
+            })
+            .expect("player backup restore");
+        let migration = commands
+            .iter()
+            .position(|command| command.contains("run --rm db-import"))
+            .expect("database migration");
+        let client = commands
+            .iter()
+            .position(|command| command.starts_with(&client_executable.display().to_string()))
+            .expect("client launch");
+        assert!(database_start < restore);
+        assert!(restore < migration);
+        assert!(migration < client);
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("--volumes"))
         );
     }
 
@@ -7269,7 +9637,7 @@ mod tests {
             })
             .expect("record");
         let status = service
-            .update_playerbot_population(true, 150)
+            .update_playerbot_population(true, 150, BotPresence::Natural)
             .expect("hot update");
         assert_eq!(status.phase, LauncherPhase::Running);
         assert_eq!(status.bot_count, 100);
@@ -7286,6 +9654,89 @@ mod tests {
                 && command.contains("playerbots rndbot reload")
                 && command.contains("playerbots rndbot update")
         }));
+    }
+
+    #[test]
+    fn playerbot_update_never_treats_docker_errors_or_a_missing_owned_world_as_stopped() {
+        for scenario in ["ps-error", "owned-client-without-world"] {
+            let temporary = tempfile::tempdir().expect("tempdir");
+            let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
+            let compose_file = runtime_root.join("server/compose.realmbox.yaml");
+            let module_root = runtime_root.join("server/env/dist/etc/modules");
+            fs::create_dir_all(&module_root).expect("module root");
+            fs::write(&compose_file, "services: {}\n").expect("compose");
+            fs::write(
+                module_root.join("playerbots.conf.dist"),
+                playerbots_fixture(true, 50, ""),
+            )
+            .expect("playerbots dist");
+            let managed_config = module_root.join("playerbots.conf");
+            fs::write(&managed_config, "original-config\n").expect("managed config");
+            let runner = RecordingRunner::default();
+            if scenario == "ps-error" {
+                *runner.fail_next_ps.lock().expect("ps failure") = true;
+            } else {
+                *runner.empty_next_ps.lock().expect("empty ps") = true;
+            }
+            let mut service = LauncherService::new(
+                temporary.path().to_path_buf(),
+                temporary.path().join("addon"),
+                runner,
+            )
+            .expect("service");
+            service
+                .save_record(&InstallationRecord {
+                    schema_version: INSTALL_SCHEMA,
+                    game_data_root: temporary.path().join("game-source"),
+                    runtime_root: runtime_root.clone(),
+                    client_executable: runtime_root.join("client/openwow-client"),
+                    client_choice: ClientChoice::ManagedOpenWow,
+                    compose_file,
+                    bots_enabled: true,
+                    bot_count: 50,
+                    ai_enabled: false,
+                    ai_model: None,
+                    ollama_executable: None,
+                    client_sha256: None,
+                    ollama_sha256: None,
+                    server_commit: SERVER_COMMIT.into(),
+                    playerbots_commit: PLAYERBOTS_COMMIT.into(),
+                    ollama_chat_commit: None,
+                    runtime_release: Some(runtime_release_id()),
+                })
+                .expect("record");
+            service.client_process_id = Some(42);
+            let record_before =
+                fs::read(temporary.path().join("installation.json")).expect("record before update");
+
+            let error = service
+                .update_playerbot_population(true, 100, BotPresence::Close)
+                .expect_err("ambiguous Docker state must fail");
+            if scenario == "ps-error" {
+                assert!(error.contains("état du monde Docker indisponible"));
+            } else {
+                assert!(error.contains("client est ouvert"));
+            }
+            assert_eq!(
+                fs::read_to_string(&managed_config).expect("managed config"),
+                "original-config\n"
+            );
+            assert_eq!(
+                fs::read(temporary.path().join("installation.json")).expect("record after update"),
+                record_before
+            );
+            assert!(!temporary.path().join("world-preferences.json").exists());
+            assert_eq!(service.client_process_id(), Some(42));
+            assert!(
+                service
+                    .runner
+                    .commands
+                    .lock()
+                    .expect("commands")
+                    .iter()
+                    .all(|command| !command.contains("exec -T worldserver"))
+            );
+        }
     }
 
     #[test]
@@ -7340,7 +9791,7 @@ mod tests {
         )
         .expect("updated config");
         assert!(config.contains("OllamaChat.EnableRandomChatter = 1"));
-        assert!(config.contains("OllamaChat.BotReplyChance.Say = 50"));
+        assert!(config.contains("OllamaChat.BotReplyChance.Say = 35"));
         assert!(config.contains("OllamaChat.RateLimit.GlobalPerMinute = 6"));
         let commands = service.runner.commands.lock().expect("commands");
         assert!(commands.iter().any(|command| {
@@ -7375,5 +9826,7 @@ mod tests {
                 .any(|entry| entry.contains("ligne sensible masquée"))
         );
         assert_eq!(diagnose_entries(&entries, true).0, "bots");
+        assert!(is_diagnostic_line("ERROR: failed to start"));
+        assert!(!is_diagnostic_line("Converting Warningtree.m2"));
     }
 }

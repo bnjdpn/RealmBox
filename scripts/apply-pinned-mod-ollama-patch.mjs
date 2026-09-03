@@ -10,11 +10,18 @@ const PATCH_PATH = fileURLToPath(
 );
 const PATCHED_FILES = [
   "src/mod-ollama-chat_command.cpp",
+  "src/mod-ollama-chat_dispatch.cpp",
+  "src/mod-ollama-chat_dispatch.h",
+  "src/mod-ollama-chat_events.cpp",
+  "src/mod-ollama-chat_governor.cpp",
+  "src/mod-ollama-chat_handler.cpp",
   "src/mod-ollama-chat_random.cpp",
   "src/mod-ollama-chat_random.h",
 ];
 const CRLF_SOURCE_FILES = [
   "src/mod-ollama-chat_command.cpp",
+  "src/mod-ollama-chat_events.cpp",
+  "src/mod-ollama-chat_handler.cpp",
   "src/mod-ollama-chat_random.cpp",
 ];
 
@@ -32,6 +39,24 @@ function git(sourceDirectory, args) {
     const stderr = error?.stderr?.trim();
     fail(stderr || `git ${args.join(" ")} failed`);
   }
+}
+
+function assertPatchTargets() {
+  const patch = readFileSync(PATCH_PATH, "utf8");
+  const targets = [];
+  for (const match of patch.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)) {
+    if (match[1] !== match[2])
+      fail(`patch renames a source file: ${match[1]} -> ${match[2]}`);
+    targets.push(match[1]);
+  }
+
+  if (targets.length === 0)
+    fail("patch contains no source targets");
+  if (
+    targets.length !== PATCHED_FILES.length ||
+    targets.some((target, index) => target !== PATCHED_FILES[index])
+  )
+    fail("patch targets do not match the reviewed source allowlist");
 }
 
 function assertPinnedCleanTarget(sourceDirectory) {
@@ -61,6 +86,7 @@ function assertPinnedCleanTarget(sourceDirectory) {
   const patchHeader = readFileSync(PATCH_PATH, "utf8").match(/^Upstream-Commit: ([0-9a-f]{40})$/m);
   if (!patchHeader || patchHeader[1] !== PINNED_COMMIT)
     fail("patch metadata does not match the pinned commit");
+  assertPatchTargets();
 
   const dirty = spawnSync(
     "git",
@@ -75,15 +101,15 @@ function assertPinnedCleanTarget(sourceDirectory) {
   return canonicalSource;
 }
 
-function snapshotPinnedSourceLineEndings(sourceDirectory) {
-  return CRLF_SOURCE_FILES.map((relativePath) => ({
+function snapshotPinnedSources(sourceDirectory) {
+  return PATCHED_FILES.map((relativePath) => ({
     relativePath,
     contents: readFileSync(`${sourceDirectory}/${relativePath}`),
   }));
 }
 
 function normalizePinnedSourceLineEndings(sourceDirectory) {
-  // The pinned upstream stores these two files with CRLF bytes in Git. A
+  // The pinned upstream stores these four files with CRLF bytes in Git. A
   // normal LF patch is intentionally kept reviewable in RealmBox, so the
   // helper normalizes the checkout before both `git apply --check` and apply.
   for (const relativePath of CRLF_SOURCE_FILES) {
@@ -115,9 +141,9 @@ function main() {
     fail("usage: apply-pinned-mod-ollama-patch.mjs <checkout-root> [--check]");
 
   const sourceDirectory = assertPinnedCleanTarget(args[0]);
-  const snapshots = snapshotPinnedSourceLineEndings(sourceDirectory);
-  normalizePinnedSourceLineEndings(sourceDirectory);
+  const snapshots = snapshotPinnedSources(sourceDirectory);
   try {
+    normalizePinnedSourceLineEndings(sourceDirectory);
     git(sourceDirectory, ["apply", "--check", PATCH_PATH]);
 
     if (checkOnly) {

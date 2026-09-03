@@ -40,6 +40,7 @@ struct PresenceConfig
     uint32 playerCooldownSeconds = 2;
     uint32 botCooldownSeconds = 120;
     uint32 releasedBotGraceSeconds = 300;
+    uint32 autonomyReturnSeconds = 600;
     uint32 maxLevelDelta = 0;
     bool sameZoneOnly = true;
 };
@@ -74,14 +75,17 @@ public:
 
     void OnUpdate(uint32 diff) override
     {
-        if (!_config.enabled)
-            return;
-
         _elapsedMs += diff;
         if (_elapsedMs < _config.scanIntervalMs)
             return;
 
         _elapsedMs = 0;
+        if (!_config.enabled)
+        {
+            ReleaseAutonomousBots();
+            return;
+        }
+
         RunPresencePass();
     }
 
@@ -110,23 +114,36 @@ private:
         next.playerCooldownSeconds = ReadUInt("RealmBoxPresence.PlayerCooldownSeconds", 2, 0, 3600);
         next.botCooldownSeconds = ReadUInt("RealmBoxPresence.BotCooldownSeconds", 120, 0, 86400);
         next.releasedBotGraceSeconds = ReadUInt("RealmBoxPresence.ReleasedBotGraceSeconds", 300, 0, 86400);
+        next.autonomyReturnSeconds = RealmBoxPresence::ClampAutonomyReturnSeconds(
+            sConfigMgr->GetOption<int32>("RealmBoxPresence.AutonomyReturnSeconds", 600));
         next.maxLevelDelta = ReadUInt("RealmBoxPresence.MaxLevelDelta", 0, 0, 79);
         next.sameZoneOnly = sConfigMgr->GetOption<bool>("RealmBoxPresence.SameZoneOnly", true);
 
         _config = next;
         _elapsedMs = 0;
-        if (!_config.enabled || !wasEnabled)
+        _nextAnchor = 0;
+
+        // A profile reload must not inherit placement delays from the previous profile.
+        // Released-playerbot grace is deliberately retained while enabled so a config reload
+        // cannot immediately recapture a companion that has just left a real player's group.
+        _playerNextMoveAt.clear();
+        _botNextMoveAt.clear();
+        if (!_config.enabled)
         {
-            _playerNextMoveAt.clear();
-            _botNextMoveAt.clear();
+            _releasedUntil.clear();
+            _previouslyControlled.clear();
+        }
+        else if (!wasEnabled)
+        {
             _releasedUntil.clear();
             _previouslyControlled.clear();
         }
 
         LOG_INFO("playerbots",
-            "[RealmBoxPresence] enabled={}, target={}%, nearby={} yd, placement={}..{} yd, max/player={}",
+            "[RealmBoxPresence] enabled={}, target={}%, nearby={} yd, placement={}..{} yd, max/player={}, autonomy-return={}s",
             _config.enabled, static_cast<uint32>(_config.targetFraction * 100.0f), _config.nearbyRadius,
-            _config.spawnMinRadius, _config.spawnMaxRadius, _config.maxBotsPerPlayer);
+            _config.spawnMinRadius, _config.spawnMaxRadius, _config.maxBotsPerPlayer,
+            _config.autonomyReturnSeconds);
     }
 
     static bool IsUsable(Player* player)
@@ -146,13 +163,13 @@ private:
                !player->IsInCombat() && !player->IsInFlight() && !player->GetTransport() && !player->GetVehicle();
     }
 
-    bool IsAutonomousRandomBot(Player* bot) const
+    RealmBoxPresence::AutonomousBotState AutonomousBotStateFor(Player* bot) const
     {
         if (!bot)
-            return false;
+            return {};
 
         PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        return RealmBoxPresence::IsAutonomousBot({
+        return {
             .usable = IsUsable(bot),
             .openWorld = IsOpenWorld(bot),
             .alive = bot->IsAlive(),
@@ -164,15 +181,20 @@ private:
             .inArena = bot->InArena(),
             .queuedForBattleground = bot->InBattlegroundQueue(),
             .inRandomLfgDungeon = bot->inRandomLfgDungeon(),
-        });
+        };
     }
 
-    bool IsSafeToMove(Player* bot, PlayerbotAI* botAI) const
+    bool IsAutonomousRandomBot(Player* bot) const
+    {
+        return RealmBoxPresence::IsAutonomousBot(AutonomousBotStateFor(bot));
+    }
+
+    RealmBoxPresence::MoveSafetyState MoveSafetyStateFor(Player* bot, PlayerbotAI* botAI) const
     {
         if (!bot || !botAI)
-            return false;
+            return {};
 
-        return RealmBoxPresence::IsSafeToMove({
+        return {
             .hasAI = true,
             .inCombat = bot->IsInCombat(),
             .inFlight = bot->IsInFlight(),
@@ -180,7 +202,12 @@ private:
             .inVehicle = bot->GetVehicle() != nullptr,
             .canMove = botAI->CanMove(),
             .lfgIdle = sLFGMgr->GetState(bot->GetGUID()) == lfg::LFG_STATE_NONE,
-        });
+        };
+    }
+
+    bool IsSafeToMove(Player* bot, PlayerbotAI* botAI) const
+    {
+        return RealmBoxPresence::IsSafeToMove(MoveSafetyStateFor(bot, botAI));
     }
 
     static bool DeadlineActive(DeadlineMap const& deadlines, LowGuid guid, uint64 now)
@@ -222,6 +249,52 @@ private:
         _previouslyControlled.swap(currentlyControlled);
     }
 
+    void ReleaseAutonomousBots()
+    {
+        uint64 now = GameTime::GetGameTime().count();
+        PruneDeadlines(_realmBoxPlacedUntil, now);
+        if (_realmBoxPlacedUntil.empty())
+            return;
+
+        PlayerBotMap bots = sRandomPlayerbotMgr.GetAllBots();
+        for (auto const& [guid, bot] : bots)
+        {
+            if (!bot)
+                continue;
+
+            LowGuid lowGuid = guid.GetCounter();
+            auto tracked = _realmBoxPlacedUntil.find(lowGuid);
+            if (tracked == _realmBoxPlacedUntil.end())
+                continue;
+
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+            bool visibleToRealPlayer = _config.disappearanceGuardRadius > 0.0f && botAI &&
+                                       botAI->HasPlayerNearby(_config.disappearanceGuardRadius);
+            if (!RealmBoxPresence::CanScheduleAutonomyReturn({
+                    .bot = AutonomousBotStateFor(bot),
+                    .movement = MoveSafetyStateFor(bot, botAI),
+                    .trackedByThisInstance = true,
+                    .visibleToRealPlayer = visibleToRealPlayer,
+                }))
+                continue;
+
+            // Never replace an already-earlier deadline. Ownership is deliberately memory-only:
+            // Playerbots exposes no public metadata that can distinguish RealmBox's old SetValue
+            // event from a native event with the same value and lifetime.
+            if (!RealmBoxPresence::WouldAccelerateAutonomyReturn(
+                    tracked->second, now, _config.autonomyReturnSeconds))
+            {
+                _realmBoxPlacedUntil.erase(tracked);
+                continue;
+            }
+
+            sRandomPlayerbotMgr.ScheduleTeleport(lowGuid, _config.autonomyReturnSeconds);
+            _realmBoxPlacedUntil.erase(tracked);
+            LOG_DEBUG("playerbots", "[RealmBoxPresence] returned autonomous bot {} to its native travel schedule",
+                bot->GetName());
+        }
+    }
+
     bool BuildPlacement(Player* anchor, WorldPosition& target) const
     {
         Map* map = anchor->GetMap();
@@ -255,7 +328,7 @@ private:
         return false;
     }
 
-    bool TeleportAutonomousBot(Player* bot, PlayerbotAI* botAI, WorldPosition const& target) const
+    bool TeleportAutonomousBot(Player* bot, PlayerbotAI* botAI, WorldPosition const& target, uint64 now)
     {
         bot->GetMotionMaster()->Clear();
         botAI->Reset(true);
@@ -264,9 +337,12 @@ private:
         if (!bot->TeleportTo(target))
             return false;
 
-        // Keep RandomPlayerbotMgr's own scheduled random teleport from immediately undoing
-        // this placement. This updates the module's public cached/persisted event state.
-        sRandomPlayerbotMgr.SetValue(bot, "teleport", 1);
+        // Give the bot a bounded stay near the player, then hand its travel lifecycle back to
+        // RandomPlayerbotMgr. ScheduleTeleport persists the real deadline instead of using the
+        // generic SetValue API, whose validity is the full max-in-world duration.
+        LowGuid lowGuid = bot->GetGUID().GetCounter();
+        sRandomPlayerbotMgr.ScheduleTeleport(lowGuid, _config.autonomyReturnSeconds);
+        _realmBoxPlacedUntil[lowGuid] = now + _config.autonomyReturnSeconds;
         bot->SendMovementFlagUpdate();
         return true;
     }
@@ -347,7 +423,7 @@ private:
         {
             Player* bot = candidates[(start + offset) % candidates.size()];
             PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-            if (!TeleportAutonomousBot(bot, botAI, target))
+            if (!TeleportAutonomousBot(bot, botAI, target, now))
                 continue;
 
             _botNextMoveAt[bot->GetGUID().GetCounter()] = now + _config.botCooldownSeconds;
@@ -402,6 +478,7 @@ private:
     DeadlineMap _playerNextMoveAt;
     DeadlineMap _botNextMoveAt;
     DeadlineMap _releasedUntil;
+    DeadlineMap _realmBoxPlacedUntil;
     std::unordered_set<LowGuid> _previouslyControlled;
 };
 } // namespace realmbox presence internals

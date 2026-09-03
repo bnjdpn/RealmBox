@@ -2,6 +2,6 @@
 ## Title: RealmBox Companions
 ## Notes: Contrôles bornés pour les compagnons RealmBox
 ## Author: RealmBox contributors
-## Version: 0.3.3-dev
+## Version: 0.4.0-dev
 ## SavedVariables: RealmBoxCompanionsDB
 RealmBoxCompanions.xml

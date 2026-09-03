@@ -12,7 +12,12 @@ Les données des joueurs ont priorité sur la disponibilité d’une mise à jou
 - Toute version distribuée doit incrémenter la version du package Cargo desktop : ce numéro déclenche la sauvegarde obligatoire, même si le schéma SQL annoncé reste identique.
 - Le dump doit nommer `acore_auth`, `acore_characters`, `acore_playerbots` et `acore_world`. Un dump vide ou incomplet bloque la migration.
 - Chaque dump est conservé dans `player-data-backups`, hors de `runtime-v3`, avec son SHA-256. Une sauvegarde existante n’est jamais écrasée ; elle est relue et revérifiée avant réutilisation.
+- La vue joueur **Protection** réutilise exactement ce contrat complet pour les points créés à la demande. Elle produit toujours un nouveau couple `.sql`/`.sha256`. Si la base est arrêtée, RealmBox démarre et arrête uniquement le service `database` ; si elle tourne déjà avec le monde, la transaction cohérente s’effectue sans interrompre la partie.
 - Le marqueur de version migrée n’est enregistré qu’après la réussite de `db-import`. Un échec laisse donc la sauvegarde et l’ancien marqueur intacts.
+- Si Docker Desktop a été purgé hors de RealmBox, la disparition du volume `realmbox-v3_realmbox-database` déclenche une récupération dédiée. RealmBox sélectionne la sauvegarde SQL complète et vérifiée la plus récente, écrit un marqueur de reprise hors de Docker, recrée les ressources puis restaure et revalide les quatre bases avant toute migration ou ouverture du client.
+- Une récupération Docker interrompue reprend depuis son marqueur. Si aucun dump vérifié n’est disponible, le lancement échoue fermé : un manifeste existant n’est jamais transformé en royaume vide.
+- La reconstruction des données serveur utilise la configuration MMaps embarquée depuis le commit AzerothCore épinglé. RealmBox ajoute automatiquement son montage aux anciens fichiers Compose sans changer les volumes ni le nom du projet.
+- Tant que `extraction-version` n’est pas publié, une reprise régénère l’intermédiaire `Buildings` et les répertoires VMaps/MMaps dérivés qui peuvent être partiels. Cette opération reste confinée au volume de données serveur remplaçable et ne touche jamais au volume `realmbox-database`.
 
 ## Ordre imposé au démarrage après mise à jour
 
@@ -32,4 +37,4 @@ Le manifeste ne marque pas la migration comme terminée pendant ce remplacement.
 
 ## Portée actuelle
 
-Ces garde-fous protègent une installation existante lors d’un changement de version du lanceur, avant les migrations de démarrage et pendant la mise à niveau serveur requise par les dialogues. Le rollback est conservé localement ; sa restauration automatique depuis l’interface n’est pas encore revendiquée.
+Ces garde-fous protègent une installation existante lors d’un changement de version du lanceur, avant les migrations de démarrage et pendant la mise à niveau serveur requise par les dialogues. Ils permettent aussi au joueur de créer un point vérifié supplémentaire, qui devient éligible à la récupération Docker s’il est le plus récent. Le rollback est conservé localement ; sa restauration automatique depuis l’interface n’est pas encore revendiquée.

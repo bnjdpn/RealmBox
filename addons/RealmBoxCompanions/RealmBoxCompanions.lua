@@ -1,5 +1,7 @@
 local ADDON_NAME = "RealmBoxCompanions"
 local MINIMAP_RADIUS = 80
+local BEHAVIOR_REAPPLY_DELAY = 1.5
+local BEHAVIOR_REAPPLY_TIMEOUT = 30
 
 local COMMANDS = {
   follow = "follow",
@@ -58,10 +60,13 @@ local STRINGS = {
     stay = "Attendre ici",
     regroup = "Se regrouper",
     leave = "Libérer l'équipe",
-    behaviorEscort = "Comportement : escorte",
-    behaviorGuard = "Comportement : garde",
-    behaviorAutonomous = "Comportement : autonomes",
-    behaviorHelp = "Change à la volée les stratégies non-combat de l'équipe. L'état affiché est la dernière préférence envoyée.",
+    behavior = "Comportement",
+    behaviorEscort = "Escorte",
+    behaviorGuard = "Garde",
+    behaviorAutonomous = "Libres",
+    behaviorHelp = "Applique une stratégie non-combat bornée. La sélection indique uniquement la dernière préférence envoyée, sans accusé du serveur.",
+    behaviorSent = "Préférence envoyée : %s",
+    behaviorReapplied = "Préférence réappliquée : %s",
     released = "Équipe libérée · les bots reprennent leurs activités",
     boostDefault = "Capacités fortes : serveur",
     boostOn = "Capacités fortes : demandées",
@@ -97,10 +102,13 @@ local STRINGS = {
     stay = "Stay here",
     regroup = "Regroup",
     leave = "Release party",
-    behaviorEscort = "Behavior: escort",
-    behaviorGuard = "Behavior: guard",
-    behaviorAutonomous = "Behavior: autonomous",
-    behaviorHelp = "Changes the party's non-combat strategies live. The displayed state is the last preference sent.",
+    behavior = "Behavior",
+    behaviorEscort = "Escort",
+    behaviorGuard = "Guard",
+    behaviorAutonomous = "Free",
+    behaviorHelp = "Applies one bounded non-combat strategy. The selection only shows the last preference sent, without server acknowledgement.",
+    behaviorSent = "Preference sent: %s",
+    behaviorReapplied = "Preference reapplied: %s",
     released = "Party released · bots resume their activities",
     boostDefault = "Strong abilities: server",
     boostOn = "Strong abilities: requested",
@@ -134,6 +142,11 @@ local partyQueue = {}
 local partyQueueElapsed = 0
 local initialized = false
 local minimapDragging = false
+local behaviorReapplyPending = false
+local behaviorReapplyElapsed = 0
+local behaviorReapplyAge = 0
+local behaviorReapplyMinimumMembers = 1
+local enteringWorldHandled = false
 
 local function CurrentLanguage()
   if RealmBoxCompanionsDB and RealmBoxCompanionsDB.language == "en" then
@@ -256,12 +269,16 @@ local function ApplyTranslations()
   RealmBoxCompanionsFrameAttack:SetText(Text("attack"))
   RealmBoxCompanionsFrameStay:SetText(Text("stay"))
   RealmBoxCompanionsFrameRegroup:SetText(Text("regroup"))
+  RealmBoxCompanionsFrameBehaviorLabel:SetText(Text("behavior"))
+  RealmBoxCompanionsFrameBehaviorEscort:SetText(Text("behaviorEscort"))
+  RealmBoxCompanionsFrameBehaviorGuard:SetText(Text("behaviorGuard"))
+  RealmBoxCompanionsFrameBehaviorFree:SetText(Text("behaviorAutonomous"))
   RealmBoxCompanionsFrameLeave:SetText(Text("leave"))
   RealmBoxCompanionsFrameLanguage:SetText(Text("language"))
 end
 
-local function BehaviorText()
-  local behavior = RealmBoxCompanionsDB.behaviorPreference
+local function BehaviorText(behavior)
+  behavior = behavior or RealmBoxCompanionsDB.behaviorPreference
   if behavior == "guard" then
     return Text("behaviorGuard")
   end
@@ -269,6 +286,70 @@ local function BehaviorText()
     return Text("behaviorAutonomous")
   end
   return Text("behaviorEscort")
+end
+
+local function SetButtonSelected(button, selected)
+  if selected then
+    button:LockHighlight()
+  else
+    button:UnlockHighlight()
+  end
+end
+
+local function CancelBehaviorReapply()
+  behaviorReapplyPending = false
+  behaviorReapplyElapsed = 0
+  behaviorReapplyAge = 0
+  behaviorReapplyMinimumMembers = 1
+end
+
+local function ScheduleBehaviorReapply(minimumMembers)
+  if not RealmBoxCompanionsDB or not BEHAVIOR_COMMANDS[RealmBoxCompanionsDB.behaviorPreference] then
+    CancelBehaviorReapply()
+    return
+  end
+  behaviorReapplyPending = true
+  behaviorReapplyElapsed = 0
+  behaviorReapplyAge = 0
+  behaviorReapplyMinimumMembers = minimumMembers or 1
+end
+
+local function TryReapplyBehavior(elapsed)
+  if not behaviorReapplyPending then
+    return
+  end
+
+  behaviorReapplyAge = behaviorReapplyAge + elapsed
+  if behaviorReapplyAge > BEHAVIOR_REAPPLY_TIMEOUT then
+    CancelBehaviorReapply()
+    return
+  end
+  if table.getn(partyQueue) > 0 then
+    return
+  end
+
+  local _, _, connectedCount, offlineNames = PartySnapshot()
+  local partyCount = GetNumPartyMembers()
+  if partyCount < behaviorReapplyMinimumMembers
+      or connectedCount ~= partyCount
+      or table.getn(offlineNames) > 0 then
+    behaviorReapplyElapsed = 0
+    return
+  end
+
+  behaviorReapplyElapsed = behaviorReapplyElapsed + elapsed
+  if behaviorReapplyElapsed < BEHAVIOR_REAPPLY_DELAY then
+    return
+  end
+
+  local behavior = RealmBoxCompanionsDB.behaviorPreference
+  local command = BEHAVIOR_COMMANDS[behavior]
+  CancelBehaviorReapply()
+  if not command then
+    return
+  end
+  SendChatMessage(command, "PARTY")
+  SetStatus(string.format(Text("behaviorReapplied"), BehaviorText(behavior)))
 end
 
 local function UpdateGroupState()
@@ -300,10 +381,15 @@ local function UpdateGroupState()
   SetButtonEnabled(RealmBoxCompanionsFrameAttack, hasParty and IsAttackableTarget())
   SetButtonEnabled(RealmBoxCompanionsFrameStay, hasParty)
   SetButtonEnabled(RealmBoxCompanionsFrameRegroup, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameBehavior, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameBehaviorEscort, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameBehaviorGuard, hasParty)
+  SetButtonEnabled(RealmBoxCompanionsFrameBehaviorFree, hasParty)
   SetButtonEnabled(RealmBoxCompanionsFrameBoost, hasParty)
   SetButtonEnabled(RealmBoxCompanionsFrameLeave, hasParty)
-  RealmBoxCompanionsFrameBehavior:SetText(BehaviorText())
+  local behavior = RealmBoxCompanionsDB.behaviorPreference
+  SetButtonSelected(RealmBoxCompanionsFrameBehaviorEscort, behavior == "escort")
+  SetButtonSelected(RealmBoxCompanionsFrameBehaviorGuard, behavior == "guard")
+  SetButtonSelected(RealmBoxCompanionsFrameBehaviorFree, behavior == "autonomous")
 
   if RealmBoxCompanionsDB.boostPreference == true then
     RealmBoxCompanionsFrameBoost:SetText(Text("boostOn"))
@@ -348,6 +434,10 @@ local function Initialize()
   if type(RealmBoxCompanionsDB.minimapAngle) ~= "number" then
     RealmBoxCompanionsDB.minimapAngle = 225
   end
+  if RealmBoxCompanionsDB.behaviorPreference ~= nil
+      and not BEHAVIOR_COMMANDS[RealmBoxCompanionsDB.behaviorPreference] then
+    RealmBoxCompanionsDB.behaviorPreference = nil
+  end
   if firstRun then
     RealmBoxCompanionsDB.panelShown = true
   end
@@ -384,28 +474,32 @@ function RealmBoxCompanions_OnEvent(frame, event, argument)
     return
   end
   if initialized then
+    if event == "PLAYER_ENTERING_WORLD" and not enteringWorldHandled then
+      enteringWorldHandled = true
+      ScheduleBehaviorReapply(1)
+    elseif event == "PARTY_MEMBERS_CHANGED" and behaviorReapplyPending then
+      behaviorReapplyElapsed = 0
+    end
     UpdateGroupState()
   end
 end
 
 function RealmBoxCompanions_OnUpdate(frame, elapsed)
-  if table.getn(partyQueue) == 0 then
-    return
-  end
+  if table.getn(partyQueue) > 0 then
+    partyQueueElapsed = partyQueueElapsed + elapsed
+    if partyQueueElapsed >= 0.8 then
+      partyQueueElapsed = 0
 
-  partyQueueElapsed = partyQueueElapsed + elapsed
-  if partyQueueElapsed < 0.8 then
-    return
+      local command = table.remove(partyQueue, 1)
+      SendChatMessage(command, "SAY")
+      if table.getn(partyQueue) == 0 then
+        SetStatus(Text("regrouping"))
+      else
+        SetStatus(string.format(Text("remaining"), table.getn(partyQueue)))
+      end
+    end
   end
-  partyQueueElapsed = 0
-
-  local command = table.remove(partyQueue, 1)
-  SendChatMessage(command, "SAY")
-  if table.getn(partyQueue) == 0 then
-    SetStatus(Text("regrouping"))
-  else
-    SetStatus(string.format(Text("remaining"), table.getn(partyQueue)))
-  end
+  TryReapplyBehavior(elapsed)
 end
 
 function RealmBoxCompanions_OnShow()
@@ -449,6 +543,7 @@ function RealmBoxCompanions_FormParty()
   local connectedClasses, _, connectedCount, offlineNames = PartySnapshot()
 
   if connectedCount >= 4 and table.getn(offlineNames) == 0 then
+    ScheduleBehaviorReapply(4)
     SetStatus(Text("complete"))
     return
   end
@@ -470,10 +565,12 @@ function RealmBoxCompanions_FormParty()
   end
 
   if table.getn(partyQueue) == 0 then
+    ScheduleBehaviorReapply(4)
     SetStatus(Text("complete"))
     return
   end
 
+  ScheduleBehaviorReapply(4)
   partyQueueElapsed = 0.8
   if table.getn(offlineNames) > 0 then
     SetStatus(Text("reconnecting"))
@@ -496,11 +593,8 @@ function RealmBoxCompanions_Run(action)
     SetStatus(Text("noTarget"))
     return
   end
-  if action == "follow" then
-    RealmBoxCompanionsDB.behaviorPreference = "escort"
-  elseif action == "stay" then
-    RealmBoxCompanionsDB.behaviorPreference = "guard"
-  elseif action == "leave" then
+  if action == "leave" then
+    CancelBehaviorReapply()
     RealmBoxCompanionsDB.behaviorPreference = "autonomous"
     SendChatMessage(BEHAVIOR_COMMANDS.autonomous, "PARTY")
     SendChatMessage(command, "PARTY")
@@ -513,12 +607,28 @@ function RealmBoxCompanions_Run(action)
   UpdateGroupState()
 end
 
-function RealmBoxCompanions_CycleBehavior()
+function RealmBoxCompanions_SetBehavior(behavior)
+  local command = BEHAVIOR_COMMANDS[behavior]
+  if not command then
+    DEFAULT_CHAT_FRAME:AddMessage(Text("actionRefused"))
+    return
+  end
   if GetNumPartyMembers() == 0 then
     SetStatus(Text("noParty"))
     return
   end
 
+  CancelBehaviorReapply()
+  RealmBoxCompanionsDB.behaviorPreference = behavior
+  SendChatMessage(command, "PARTY")
+  if table.getn(partyQueue) > 0 then
+    ScheduleBehaviorReapply(4)
+  end
+  SetStatus(string.format(Text("behaviorSent"), BehaviorText(behavior)))
+  UpdateGroupState()
+end
+
+function RealmBoxCompanions_CycleBehavior()
   local current = RealmBoxCompanionsDB.behaviorPreference
   local nextBehavior = "escort"
   if current == "escort" or current == nil then
@@ -526,10 +636,7 @@ function RealmBoxCompanions_CycleBehavior()
   elseif current == "guard" then
     nextBehavior = "autonomous"
   end
-  RealmBoxCompanionsDB.behaviorPreference = nextBehavior
-  SendChatMessage(BEHAVIOR_COMMANDS[nextBehavior], "PARTY")
-  SetStatus(string.format(Text("commandSent"), BehaviorText()))
-  UpdateGroupState()
+  RealmBoxCompanions_SetBehavior(nextBehavior)
 end
 
 function RealmBoxCompanions_ToggleBoost()
@@ -607,6 +714,17 @@ function RealmBoxCompanions_Action_OnEnter(button, action)
     GameTooltip:AddLine(Text("boostHelp"), 0.8, 0.8, 0.8, true)
   else
     GameTooltip:AddLine(Text("available"), 0.8, 0.8, 0.8)
+  end
+  GameTooltip:Show()
+end
+
+function RealmBoxCompanions_Behavior_OnEnter(button, behavior)
+  GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+  GameTooltip:SetText(BehaviorText(behavior))
+  if GetNumPartyMembers() == 0 then
+    GameTooltip:AddLine(Text("noParty"), 1, 0.35, 0.35)
+  else
+    GameTooltip:AddLine(Text("behaviorHelp"), 0.8, 0.8, 0.8, true)
   end
   GameTooltip:Show()
 end

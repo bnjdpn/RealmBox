@@ -12,10 +12,10 @@ RealmBox is an open-source desktop launcher for playing World of Warcraft locall
 
 - one player-oriented application for setup, start, stop, configuration, and diagnostics;
 - a local AzerothCore authentication and world server with MySQL;
-- autonomous Playerbots that quickly gather a same-faction majority within sight of active players, plus a controllable companion party in game;
+- autonomous Playerbots with separate population and proximity controls, plus a controllable companion party in game;
 - managed OpenWoW on Apple Silicon macOS, plus `Wow.exe` or OpenWoW on Windows x64;
-- optional, rate-limited local player-to-bot and bot-to-bot dialogue powered by a RealmBox-managed Ollama runtime;
-- atomic installation, immutable server images, persistent character data, and verified pre-migration backups.
+- optional, rate-limited local dialogue with direct, immersive, and lively conversation modes powered by a RealmBox-managed Ollama runtime;
+- atomic installation, immutable server images, persistent character data, and complete verified backups, either automatic before migrations or created on demand.
 
 RealmBox contains no World of Warcraft client, MPQ archive, extracted map, credential, character database, or other proprietary game data. Those files are read from the player's own compatible copy and remain local.
 
@@ -77,13 +77,30 @@ The bot ceiling follows the memory assigned to Docker, not total system memory:
 | 20–27 GiB | 100 |
 | 28 GiB or more | 150 |
 
+## Bot experience
+
+RealmBox does not infer one bot choice from another. The world dimension contains two separate controls—population and presence—and remains independent from in-game party behavior and local dialogue.
+
+| Control | Choices | Effect |
+| --- | --- | --- |
+| Population | **5**, **25**, **50**, **100**, or **150** | Sets the requested number of autonomous adventurers; RealmBox still applies the safe Docker-memory ceiling. |
+| Presence | **Dispersed**, **Natural** (recommended), or **Always nearby** | Chooses whether native Playerbots travel stays in charge, a smaller passing population visits the player's area, or the policy requests a denser nearby target. |
+| In-game party | **Escort**, **Guard**, or **Free** | Applies only to the four companions controlled through the addon: follow, hold position, or resume autonomous activities. |
+| Conversation | **Direct**, **Immersive**, or **Lively** | Allows only player-directed replies, occasional contextual exchanges, or more frequent but still bounded conversations. |
+
+Fresh installations start with **Natural** presence. An installation older than 0.4.0 with no saved presence choice starts with **Always nearby**, preserving its previous dense behavior until the player changes it. Population and presence can be applied while the managed worldserver is running; otherwise they are saved for the next game.
+
+Eligible player messages have a configured 100% reply chance, are placed ahead of queued ambient work, and have one queue slot that ambient chatter cannot occupy. This reduces starvation but does not guarantee a reply: a queue already full of player requests, a local-model failure, or a destination that disappears can still prevent delivery. Ambient Party and Raid budgets are isolated per group, with a global cap shared across ambient exchanges. Eligible player requests bypass this ambient governor, but not the queue, model, or destination checks.
+
+None of the three modes keeps conversation history, evolving memory or relationships, and RealmBox enables neither RAG nor generated emotes. For a direct reply, the prompt asks the model to answer in the language of the latest player message. Ambient dialogue uses French prompts for a `frFR` client copy and English prompts for the other supported locales; this automated selection has not yet been qualified in OpenWoW.
+
 ## Installation
 
 1. Install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Download the compatible WoW data from the [French](https://chromiecraft.com/fr/telechargements/) or [English](https://chromiecraft.com/en/downloads/) ChromieCraft page.
 3. Download RealmBox from [GitHub Releases](https://github.com/bnjdpn/RealmBox/releases) and compare the artifact with `SHA256SUMS.txt`.
 4. Open RealmBox and select the folder containing `Data`.
-5. Choose the bot population and optional local dialogue, then select **Install**.
+5. Choose the bot population, presence, and optional local dialogue, then select **Install**.
 6. Select **Play** when RealmBox reports that Azeroth is ready.
 
 Current distributed binaries are not signed or notarized. Do not bypass an operating-system warning unless the downloaded artifact's SHA-256 matches the published checksum. See the [complete installation guide](docs/INSTALLATION.md) for platform details.
@@ -100,7 +117,11 @@ Before the first migration performed by each desktop version, RealmBox:
 4. applies the migration;
 5. advances the migrated-version marker only after success.
 
+After installation, **Settings → Protection** can also create a new complete, verified restore point on demand. If the world is open, RealmBox takes the consistent backup without stopping it. If it is closed, RealmBox starts only the database and stops it again afterwards. These restore points stay outside the replaceable runtime, are never overwritten, and can be used for recovery after a Docker purge.
+
 An unknown installation schema, an incomplete backup, or a failed migration stops the update. The launcher never turns an existing realm into a fresh installation and never invokes `docker compose down --volumes` or `-v`.
+
+If Docker Desktop is purged outside RealmBox, the launcher detects the missing volumes. The next **Play** action downloads the immutable images again, rebuilds the server resources, and restores the newest complete, verified player backup before migrations. Without a valid backup, it stops instead of silently creating an empty realm.
 
 ## Repository layout
 
@@ -147,6 +168,9 @@ cargo xtask release check
 - [Security](docs/SECURITY.md)
 - [Building](docs/BUILDING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Playerbots population, presence, and party behavior](docs/PLAYERBOTS_INTEGRATION.md)
+- [Local dialogue](docs/OLLAMA_CHAT_INTEGRATION.md)
+- [Review of the solo and bot projects studied](docs/ECOSYSTEM_REVIEW_2026-09-03.md)
 - [Distribution and licenses](docs/LEGAL_AND_DISTRIBUTION.md)
 
 ## License and independence
