@@ -16,9 +16,12 @@ const scriptPath = fileURLToPath(
 
 test("the mod-ollama patch is tied to the immutable upstream commit", () => {
   const patch = readFileSync(patchPath, "utf8");
+  const helper = readFileSync(scriptPath, "utf8");
   assert.match(patch, new RegExp(`^Upstream-Commit: ${expectedCommit}$`, "m"));
   assert.match(patch, /successfulSubmissionsByScope/);
   assert.match(patch, /OllamaRandomChatter_ResetSchedule/);
+  assert.match(helper, /normalizePinnedSourceLineEndings\(sourceDirectory\);/);
+  assert.match(helper, /restorePinnedSourceSnapshots\(sourceDirectory, snapshots\);/);
 });
 
 test("the patch helper fails closed before touching a different checkout", () => {

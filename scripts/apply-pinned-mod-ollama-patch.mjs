@@ -70,10 +70,30 @@ function assertPinnedCleanTarget(sourceDirectory) {
   return canonicalSource;
 }
 
-function preservePinnedSourceLineEndings(sourceDirectory) {
+function snapshotPinnedSourceLineEndings(sourceDirectory) {
+  return CRLF_SOURCE_FILES.map((relativePath) => ({
+    relativePath,
+    contents: readFileSync(`${sourceDirectory}/${relativePath}`),
+  }));
+}
+
+function normalizePinnedSourceLineEndings(sourceDirectory) {
   // The pinned upstream stores these two files with CRLF bytes in Git. A
-  // normal LF patch is intentionally kept reviewable in RealmBox, then the
-  // helper restores the upstream byte convention after `git apply`.
+  // normal LF patch is intentionally kept reviewable in RealmBox, so the
+  // helper normalizes the checkout before both `git apply --check` and apply.
+  for (const relativePath of CRLF_SOURCE_FILES) {
+    const path = `${sourceDirectory}/${relativePath}`;
+    const normalized = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+    writeFileSync(path, normalized);
+  }
+}
+
+function restorePinnedSourceSnapshots(sourceDirectory, snapshots) {
+  for (const { relativePath, contents } of snapshots)
+    writeFileSync(`${sourceDirectory}/${relativePath}`, contents);
+}
+
+function preservePinnedSourceLineEndings(sourceDirectory) {
   for (const relativePath of CRLF_SOURCE_FILES) {
     const path = `${sourceDirectory}/${relativePath}`;
     const normalized = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
@@ -90,15 +110,23 @@ function main() {
     fail("usage: apply-pinned-mod-ollama-patch.mjs <checkout-root> [--check]");
 
   const sourceDirectory = assertPinnedCleanTarget(args[0]);
-  git(sourceDirectory, ["apply", "--check", PATCH_PATH]);
+  const snapshots = snapshotPinnedSourceLineEndings(sourceDirectory);
+  normalizePinnedSourceLineEndings(sourceDirectory);
+  try {
+    git(sourceDirectory, ["apply", "--check", PATCH_PATH]);
 
-  if (checkOnly) {
-    process.stdout.write(`Patch is applicable to ${PINNED_COMMIT}.\n`);
-    return;
+    if (checkOnly) {
+      restorePinnedSourceSnapshots(sourceDirectory, snapshots);
+      process.stdout.write(`Patch is applicable to ${PINNED_COMMIT}.\n`);
+      return;
+    }
+
+    git(sourceDirectory, ["apply", PATCH_PATH]);
+    preservePinnedSourceLineEndings(sourceDirectory);
+  } catch (error) {
+    restorePinnedSourceSnapshots(sourceDirectory, snapshots);
+    throw error;
   }
-
-  git(sourceDirectory, ["apply", PATCH_PATH]);
-  preservePinnedSourceLineEndings(sourceDirectory);
   process.stdout.write(`Applied RealmBox mod-ollama-chat patch to ${PINNED_COMMIT}.\n`);
 }
 
