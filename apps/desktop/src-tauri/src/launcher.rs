@@ -9281,6 +9281,14 @@ mod tests {
 
     #[test]
     fn legacy_start_restores_a_missing_database_then_fails_closed_without_release_images() {
+        // The release workflow deliberately compiles the launcher with all four images.
+        // The no-image path remains covered by the normal validation build.
+        if embedded_server_images()
+            .expect("compile-time image set is valid")
+            .is_some()
+        {
+            return;
+        }
         let temporary = tempfile::tempdir().expect("tempdir");
         let runtime_root = temporary.path().join(RUNTIME_DIRECTORY);
         let compose_file = runtime_root.join("server/compose.realmbox.yaml");
