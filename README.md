@@ -6,7 +6,20 @@
 
 RealmBox is an open-source desktop launcher for playing World of Warcraft locally. Give it the `Data` folder from a compatible WoW client and it prepares a private AzerothCore realm, populates Azeroth with Playerbots, launches the game, and supervises the complete local runtime.
 
-![RealmBox ready to launch World of Warcraft locally](site/public/assets/launcher-ready-fr.webp)
+![RealmBox ready to launch World of Warcraft locally](site/public/assets/launcher-ready-en.webp)
+
+*RealmBox 0.5.0 interface, captured with demonstration data.*
+
+## What’s new in 0.5.0
+
+- **Guided setup:** choose your WoW copy, configure companions, then review the installation. Docker and disk checks must pass before downloading.
+- **Realm shortcuts:** open companions, dialogue, solo profiles, Protection, and the Local guide from the home screen. The population shown is configured, not a live online count.
+- **Your adventure pace:** choose Normal, Comfortable, or Accelerated with an exact preview and a way to restore the previous rules.
+- **Local quest and item lookup:** search the existing world catalogue by name, with up to eight results and visible sources, without AI or access to character data.
+- **Companion squad presets:** three five-player presets, an observed primary companion, explicit party/target scope, and a command preview.
+- **Runtime recovery:** a single-instance guard and a bounded local-dialogue failure recovery patch; the latter requires rebuilt server images.
+
+**Availability, checked 4 September 2026:** [0.5.0 is a public preview](https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0), with no installers attached at the time of this update. Check that page for current assets and `SHA256SUMS.txt` before installing. Full 0.5.0 gameplay qualification is still pending on both platforms; Windows remains experimental. See [validation evidence](STATUS.md) for the distinction between automated tests, builds, and real gameplay.
 
 ## What the project provides
 
@@ -65,7 +78,7 @@ Choose the client or language pack offered on the page you want. RealmBox ultima
 
 ## Requirements
 
-- Apple Silicon Mac or Windows x64 PC;
+- Apple Silicon Mac or Windows x64 PC (experimental);
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running;
 - at least 24 GiB of free disk space, plus space for the optional local dialogue model;
 - a complete compatible WoW `Data` folder;
@@ -99,20 +112,32 @@ None of the three modes keeps conversation history, evolving memory or relations
 
 The current source tree also adds named five-player squad presets, an observed primary companion, explicit party/target scope, and a preview of the exact bounded command. It never removes a group member. Remembered names are observations, not proof of bot identity, so RealmBox deliberately does not promise to recall the same bots until Playerbots provides an atomic typed server contract. See [the addon contract](docs/COMPANION_ADDON.md).
 
-Solo profiles and local lookup are available in the source tree after 0.4.0. They are not yet part of a distributed, gameplay-qualified release. See [their exact values, recovery contract, and limitations](docs/SOLO_PROFILES_AND_LOCAL_GUIDE.md).
+## Solo progression and the Local guide
+
+| Profile | Experience and reputation | Money drops | Primary professions |
+| --- | --- | --- | --- |
+| Normal | ×1 | ×1 | 2 |
+| Comfortable | ×2 | ×1 | 11 |
+| Accelerated | ×3 | ×2 | 11 |
+
+Comfortable and Accelerated also relax instance level and raid-group requirements and allow normal quests in raids. Apply changes with the world stopped, after reviewing the exact values. Restoring the previous rules does not remove rewards or professions already gained. Enemy difficulty does not change.
+
+The Local guide searches quest or item names in the existing world catalogue. It reads no inventory or quest log and provides no personalised progression advice. Results identify their source and whether information is partial or unavailable.
+
+These features are included in the 0.5.0 source; their full gameplay path still needs qualification. See [exact values, recovery, and limits](docs/SOLO_PROFILES_AND_LOCAL_GUIDE.md).
 
 ## Installation
 
 1. Install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Download the compatible WoW data from the [French](https://chromiecraft.com/fr/telechargements/) or [English](https://chromiecraft.com/en/downloads/) ChromieCraft page.
-3. Download RealmBox from [GitHub Releases](https://github.com/bnjdpn/RealmBox/releases) and compare the artifact with `SHA256SUMS.txt`.
+3. Check the [0.5.0 preview assets](https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0). Once the installer for your platform and `SHA256SUMS.txt` are available, download them and compare the checksum.
 4. In **Your copy of WoW**, select the game folder or `Data`; download help is available in the same view.
 5. Choose **Your companions**, then review **Your installation**. Resolve any readiness warning before selecting **Install**.
 6. Select **Play** when RealmBox reports that Azeroth is ready.
 
-Current distributed binaries are not signed or notarized. Do not bypass an operating-system warning unless the downloaded artifact's SHA-256 matches the published checksum. See the [complete installation guide](docs/INSTALLATION.md) for platform details.
+Distribution signing and notarization are not provided. Do not bypass an operating-system warning unless the downloaded artifact's SHA-256 matches the published checksum. See the [complete installation guide](docs/INSTALLATION.md) for platform details.
 
-The guided setup and home shortcuts above describe unreleased source after 0.4.0, not a newly distributed binary. See [the UX and safety contract](docs/SETUP_EXPERIENCE.md).
+These steps describe the 0.5.0 setup assistant. Check the availability note above before downloading. See [the UX and safety contract](docs/SETUP_EXPERIENCE.md).
 
 ## Persistence and update safety
 
@@ -175,6 +200,8 @@ cargo xtask release check
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Installation](docs/INSTALLATION.md)
+- [Guided setup and home screen](docs/SETUP_EXPERIENCE.md)
+- [Changelog](CHANGELOG.md) and [validation status](STATUS.md)
 - [Compatibility](docs/COMPATIBILITY.md)
 - [Updates and backups](docs/UPDATES.md)
 - [Security](docs/SECURITY.md)

@@ -18,10 +18,16 @@ export type SiteCopy = {
     accent: string;
     body: string;
     download: string;
+    availability: string;
     install: string;
     screenshotAsset: string;
     screenshotAlt: string;
     screenshotCaption: string;
+  };
+  updates: {
+    eyebrow: string; title: string; body: string;
+    items: Array<{ title: string; body: string }>;
+    link: ExternalLink;
   };
   promise: {
     eyebrow: string;

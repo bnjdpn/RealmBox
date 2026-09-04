@@ -26,6 +26,20 @@ const base = import.meta.env.BASE_URL;
       </div>
     </section>
 
+    <section class="section updates" id="updates" aria-labelledby="updates-title">
+      <div class="shell">
+        <div class="section-intro">
+          <p class="kicker">{copy.updates.eyebrow}</p>
+          <h2 id="updates-title">{copy.updates.title}</h2>
+          <p>{copy.updates.body}</p>
+        </div>
+        <div class="fact-grid updates-grid">
+          {copy.updates.items.map((item) => <article><h3>{item.title}</h3><p>{item.body}</p></article>)}
+        </div>
+        <a class="updates-link" href={copy.updates.link.href}>{copy.updates.link.label} <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+
     <section class="section promise" id="realmbox" aria-labelledby="promise-title">
       <div class="shell">
         <div class="section-intro wide-intro">
@@ -45,6 +59,7 @@ const base = import.meta.env.BASE_URL;
       <div class="shell feature-layout">
         <figure class="feature-shot">
           <img src={`${base}assets/${copy.companions.screenshotAsset}`} width="1024" height="640" alt={copy.companions.screenshotAlt} loading="lazy" />
+          <figcaption>{copy.hero.screenshotCaption}</figcaption>
         </figure>
         <div class="feature-copy">
           <p class="kicker">{copy.companions.eyebrow}</p>

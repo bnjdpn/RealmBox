@@ -12,11 +12,26 @@ export const en: SiteCopy = {
     title: "Azeroth at home.",
     accent: "Bots by your side.",
     body: "RealmBox turns your compatible World of Warcraft copy into a local solo adventure: AzerothCore runs the world, Playerbots populate it, and the launcher handles the entire setup.",
-    download: "Download RealmBox",
+    download: "View the 0.5.0 preview",
+    availability: "Check GitHub for installer and SHA-256 availability. Windows remains experimental; the full 0.5.0 gameplay path still needs qualification on both platforms.",
     install: "See how to install",
     screenshotAsset: "launcher-ready-en.webp",
     screenshotAlt: "The RealmBox launcher ready to start World of Warcraft locally",
-    screenshotCaption: "The real RealmBox launcher · no game resources are distributed",
+    screenshotCaption: "RealmBox 0.5.0 interface · preview with demonstration data",
+  },
+  updates: {
+    eyebrow: "What’s new · 0.5.0 preview",
+    title: "Prepare your world. Choose your pace.",
+    body: "A home screen with realm shortcuts and new tools for your solo adventure. These views show version 0.5.0; check the preview release for installer availability.",
+    items: [
+      { title: "Setup in three steps", body: "Your WoW copy, your companions, then a summary. RealmBox checks Docker and available disk space before allowing the download." },
+      { title: "Three progression speeds", body: "Normal, Comfortable, or Accelerated: inspect the values before applying them with the world stopped. Previous rules can be restored; enemy difficulty stays the same." },
+      { title: "Find quests and items locally", body: "The Local guide finds up to eight results by name in your world’s catalogue, with their source. No AI or external service, and no access to your character." },
+      { title: "More control over your party", body: "Three five-player squad presets, an observed primary companion, and a preview of party or target commands. Recalling the same bots by name is not guaranteed." },
+      { title: "Protect your progress", body: "Create a complete, verified backup from Protection. Copies stay on your computer, outside the replaceable installation, without overwriting earlier backups." },
+      { title: "Dialogue stays optional", body: "Direct, Immersive, or Lively: adjust conversations independently from population. The new failure-recovery patch depends on server images rebuilt for 0.5.0." },
+    ],
+    link: { href: "https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0", label: "Preview changes and availability" },
   },
   promise: {
     eyebrow: "WoW without server administration",
@@ -32,14 +47,14 @@ export const en: SiteCopy = {
     eyebrow: "Built-in Playerbots",
     title: "Azeroth is no longer empty when you play alone.",
     body: "Meet bots in the world, form a party of four companions, and direct them through the RealmBox addon inside WoW.",
-    points: ["Population matched to your computer’s memory", "Balanced tank, healer, and damage party", "Follow, attack, stay, regroup, or release", "Optional local dialogue through Ollama"],
+    points: ["5, 25, 50, 100, or 150 bots, limited by Docker’s assigned memory", "Separate presence: Dispersed, Natural, or Always nearby", "Your in-game party: Escort, Guard, or Free", "Optional dialogue: Direct, Immersive, or Lively"],
     screenshotAsset: "launcher-companions-en.webp",
     screenshotAlt: "Playerbots population settings in RealmBox",
   },
   install: {
     eyebrow: "Guided installation",
     title: "From zero to Azeroth in five steps.",
-    intro: "RealmBox needs Docker Desktop and the files from a compatible WoW copy. It neither provides nor uploads game data.",
+    intro: "Prepare Docker Desktop and your compatible WoW copy, then follow the 0.5.0 setup assistant. Installers appear on the preview release page when available.",
     steps: [
       {
         title: "Install Docker Desktop",
@@ -56,15 +71,15 @@ export const en: SiteCopy = {
       },
       {
         title: "Download RealmBox",
-        body: "Get the Apple Silicon Mac DMG or the Windows x64 installer from GitHub Releases, then verify the provided SHA-256.",
+        body: "Check the preview assets for the Apple Silicon Mac DMG or experimental Windows x64 installer. Wait until both the installer and SHA256SUMS.txt are available, then compare the SHA-256 checksum.",
         links: [{ href: "https://github.com/bnjdpn/RealmBox/releases", label: "Open RealmBox Releases" }],
       },
-      { title: "Choose the WoW folder", body: "Select the folder containing Data in RealmBox. The launcher checks the files without modifying your source copy." },
-      { title: "Install, then play", body: "Choose the bot population, start installation, and click Play when RealmBox reports that everything is ready." },
+      { title: "Your WoW copy, then your companions", body: "In the assistant, select the game folder or Data, then choose population, presence, and optional dialogue. Game files are checked before you continue." },
+      { title: "Install, then play", body: "Review Your installation and resolve Docker or disk warnings. Click Install after the checks pass, then Play when your world is ready." },
     ],
     requirementsTitle: "System requirements",
     requirements: [
-      { label: "System", value: "Apple Silicon Mac or Windows x64 PC" },
+      { label: "System", value: "Apple Silicon Mac or Windows x64 PC (experimental)" },
       {
         label: "Containers",
         value: "Docker Desktop installed, running, and assigned memory",
@@ -97,8 +112,8 @@ export const en: SiteCopy = {
     facts: [
       { title: "Locally extracted data", body: "maps, vmaps, mmaps, and dbc are produced from your own Data folder." },
       { title: "Isolated services", body: "Game ports stay bound to 127.0.0.1 and MySQL is not exposed on the host." },
-      { title: "Protected updates", body: "A complete, verified character backup is mandatory before any migration." },
-      { title: "Optional dialogue", body: "Ollama and a small local model can power bot replies without cloud access during play." },
+      { title: "Protected updates", body: "Complete, verified backups before migrations and on demand in Protection. If a required backup is missing, the operation stops." },
+      { title: "Optional dialogue", body: "Ollama and a small local model can power bot replies without cloud access during play. The CanIRun compatibility check sends only CPU, core count, and memory information." },
     ],
   },
   local: {
@@ -111,6 +126,9 @@ export const en: SiteCopy = {
     eyebrow: "Frequently asked questions",
     title: "The essentials before starting setup.",
     items: [
+      { question: "Is version 0.5.0 ready to download?", answer: "The preview release page is public. Check its assets for installer and SHA256SUMS.txt availability. Full macOS and Windows gameplay paths still need qualification for this version; Windows is experimental. Distribution signing and notarization are not provided." },
+      { question: "Can I undo a solo profile?", answer: "Yes. With the world stopped, you can restore the previous rules. This does not remove experience, money, or professions already gained, and does not change enemy difficulty." },
+      { question: "Does the Local guide track my progress?", answer: "No. It only searches quest and item names in local references. It reads neither your quest log nor your inventory and generates no AI advice." },
       { question: "Is this actually World of Warcraft?", answer: "RealmBox uses the files from a compatible World of Warcraft: Wrath of the Lich King copy and starts a local Azeroth through AzerothCore. RealmBox contains and distributes no proprietary game files." },
       { question: "Do I need a subscription or an online server?", answer: "RealmBox does not connect to official servers and needs no subscription for its local operation. You must still use a game copy you are authorized to own." },
       { question: "What do the bots do?", answer: "Playerbots populates Azeroth with autonomous characters. The RealmBox addon can also gather four bots near you to form a playable party." },

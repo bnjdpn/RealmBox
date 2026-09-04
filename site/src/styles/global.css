@@ -244,3 +244,14 @@ footer { padding: 3.4rem 0; border-top: 1px solid #68471f; background: radial-gr
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: .01ms !important; }
 }
+
+/* Release details remain readable alongside the primary action. */
+.release-note { max-width: 39rem; margin: 1.2rem 0 0; color: var(--muted); font-size: .86rem; }
+.updates { background: linear-gradient(180deg, #0d1515, #090c0d); }
+.updates .section-intro { max-width: 54rem; }
+.updates-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 2.5rem; }
+.updates-link { display: inline-block; margin-top: 1.8rem; color: var(--ice); text-decoration: underline; text-underline-offset: .2rem; }
+@media (max-width: 1050px) { .updates-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .updates-grid { grid-template-columns: 1fr; } }
+
+.feature-shot figcaption { padding: .6rem; color: var(--muted); text-align: center; font-size: .78rem; }

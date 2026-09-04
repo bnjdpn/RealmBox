@@ -8,9 +8,17 @@ Correction d’orchestration : construction serveur appelée par la release, ima
 
 Validation locale du correctif : `actionlint` réussi pour les deux workflows ; `pnpm verify` réussi avec 52 tests React, 32 tests de scripts (dont les quatre nouveaux), 141 tests desktop Rust et 5 tests xtask. Ce résultat n’est pas une preuve de construction ou publication des images/installateurs distants.
 
-## RealmBox 0.5.0 — préparation de la préversion
+## RealmBox 0.5.0 — préversion publique
 
-La version produit et Cargo est incrémentée à 0.5.0 pour la sauvegarde obligatoire avant migration. La publication visée reste un brouillon de préversion : les nouvelles images serveur, les installateurs CI et le parcours réel doivent être vérifiés séparément. Les preuves ci-dessous restent datées ; elles ne qualifient pas automatiquement cette nouvelle version.
+La version produit et Cargo est incrémentée à 0.5.0 pour la sauvegarde obligatoire avant migration. Relecture GitHub le 4 septembre 2026 à 08:25 UTC : la [préversion 0.5.0](https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0) est publique (`isDraft: false`, `isPrerelease: true`), sans installateur joint à cet instant. Cette publication ne prouve ni les nouvelles images serveur, ni les bundles, ni le parcours réel. Les preuves ci-dessous restent datées et ne qualifient pas automatiquement cette nouvelle version.
+
+## Site et README — 4 septembre 2026
+
+- README principal anglais et français alignés sur l’installation guidée, les raccourcis, les profils solo, le guide local et les commandes d’escouade 0.5.0 ; disponibilité des installateurs séparée de la publication de la préversion.
+- Site Astro FR/EN actualisé avec ces nouveautés, les réglages indépendants de population/présence/dialogue et les sauvegardes à la demande.
+- Six captures du launcher régénérées à 1024 × 640 via le runtime navigateur simulé ; les légendes des captures publiées indiquent les données de démonstration. Aucun lancement du royaume ni accès aux données joueur.
+- `pnpm verify` réussi : 52 tests React, 28 tests de scripts, 141 tests desktop Rust, 5 tests xtask, typage, lint, builds web et contrôles Rust/release. Le contrôle de release examine le manifeste source conservateur ; il ne relit pas la visibilité GitHub.
+- Vérification navigateur locale : français sur ordinateur 1440 × 1000, anglais sur mobile 390 × 844, lecture visuelle des nouveautés et de l’accueil, changement de langue, aucune image cassée ni débordement horizontal sur ces vues. La publication Pages est vérifiée séparément après le push.
 
 ## Installation guidée et accueil — 4 septembre 2026, source non publiée
 
@@ -31,7 +39,7 @@ Le navigateur utilise exclusivement des données de démonstration. L’applicat
 
 Observation historique du 3 septembre : **GO source, build, installation locale et parcours réel pour la récupération Docker RealmBox 0.3.4 : la purge a été détectée, le dump vérifié restauré, Maps/VMaps/MMaps régénérés, le marqueur retiré, le serveur et OpenWoW lancés, les personnages relus et un personnage existant rejoué à Stormwind. Le bundle corrigé était installé dans `/Users/benjamin/Applications/RealmBox.app`; sa relance depuis ce chemin n’avait pas été forcée afin de ne pas interrompre la partie restaurée encore ouverte. Aucune release publique 0.3.4 n’était revendiquée. L’état historique du brouillon GitHub (v0.2.0) n’est pas une relecture actuelle. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
 
-Le workspace courant porte désormais **RealmBox 0.4.0 plus des changements source non publiés**, mais ce rework bots, solo, guide et dialogues reste **NO-GO pour une qualification réelle ou une release** : les sources et contrôles ciblés sont distincts, tandis que l’installation et le parcours de récupération qualifiés ci-dessous concernent le bundle 0.3.4 construit avant ces changements. Aucun nouveau parcours OpenWoW, build complet du worldserver intégrant le coupe-circuit, image serveur, bundle distribué ou release ne prouve encore ce lot.
+Le workspace courant porte **RealmBox 0.5.0** ; ce rework bots, solo, guide et dialogues reste **non qualifié en jeu**, même si la page de préversion est publique : les sources et contrôles ciblés sont distincts, tandis que l’installation et le parcours de récupération qualifiés ci-dessous concernent le bundle 0.3.4 construit avant ces changements. Aucun nouveau parcours OpenWoW ni bundle distribué vérifié dans les preuves ci-dessous ne qualifie encore ce lot.
 
 ## Adaptation de l’écosystème — sources non publiées après 0.4.0
 

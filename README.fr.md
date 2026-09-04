@@ -8,9 +8,23 @@ RealmBox est un launcher desktop libre pour jouer à World of Warcraft entièrem
 
 ![RealmBox prêt à lancer World of Warcraft en local](site/public/assets/launcher-ready-fr.webp)
 
+*Interface RealmBox 0.5.0, capturée avec des données de démonstration.*
+
+## Nouveautés de la version 0.5.0
+
+- **Installation guidée :** choisissez votre copie de WoW, configurez vos compagnons, puis consultez le récapitulatif. Les vérifications Docker et disque doivent réussir avant le téléchargement.
+- **Raccourcis du royaume :** ouvrez les compagnons, les dialogues, les profils solo, Protection et le Guide local depuis l’accueil. La population affichée est celle configurée, pas un compteur de joueurs en ligne.
+- **Rythme de l’aventure :** choisissez Normal, Confort ou Accéléré, avec un aperçu exact et un retour aux règles précédentes.
+- **Recherche locale de quêtes et d’objets :** interrogez le catalogue existant du monde par nom, avec huit résultats maximum et leur source, sans IA ni accès aux personnages.
+- **Préréglages d’escouade :** trois équipes à cinq, un compagnon principal observé, une portée groupe/cible explicite et un aperçu des commandes.
+- **Reprise du runtime :** protection contre deux instances simultanées et correctif de reprise bornée des dialogues après échec ; ce dernier nécessite les nouvelles images serveur.
+
+**Disponibilité vérifiée le 4 septembre 2026 :** [la préversion 0.5.0 est publique](https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0), sans installateur joint au moment de cette mise à jour. Consultez cette page pour les fichiers actuels et `SHA256SUMS.txt` avant d’installer. Le parcours complet 0.5.0 reste à qualifier sur les deux plateformes ; Windows reste expérimental. Voir [les preuves de validation](STATUS.md) pour distinguer tests automatisés, builds et jeu réel.
+
 ## Ce que fournit le projet
 
 - une seule application orientée joueur pour installer, lancer, arrêter, configurer et diagnostiquer ;
+- un assistant en trois étapes avec vérification avant téléchargement, et les raccourcis du royaume sur l’accueil ;
 - un serveur d’authentification et un monde AzerothCore locaux avec MySQL ;
 - des Playerbots autonomes avec des réglages séparés de population et de proximité, ainsi qu’une équipe de compagnons contrôlable en jeu ;
 - OpenWoW géré sur macOS Apple Silicon, ainsi que `Wow.exe` ou OpenWoW sur Windows x64 ;
@@ -67,7 +81,7 @@ Choisissez le client ou le pack de langue proposé sur la page souhaitée. Realm
 
 ## Configuration requise
 
-- Mac Apple Silicon ou PC Windows x64 ;
+- Mac Apple Silicon ou PC Windows x64 (expérimental) ;
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installé et démarré ;
 - au moins 24 Gio d’espace disque libre, plus la taille du modèle de dialogue local facultatif ;
 - un dossier `Data` WoW complet et compatible ;
@@ -101,20 +115,32 @@ Les trois modes ne conservent ni historique de discussion, ni mémoire ou relati
 
 L’arbre source courant ajoute aussi des préréglages d’escouade à cinq, un compagnon principal observé, une portée groupe/cible explicite et l’aperçu de chaque commande bornée. Il n’expulse jamais un membre du groupe. Les noms mémorisés sont des observations, pas une preuve d’identité bot : RealmBox ne promet donc pas de rappeler exactement les mêmes bots sans contrat serveur typé et atomique. Voir [le contrat de l’addon](docs/COMPANION_ADDON.md).
 
-Les profils solo et le guide local sont présents dans les sources après 0.4.0, mais pas encore dans une release distribuée et qualifiée en jeu. Voir [leurs valeurs exactes, leur reprise et leurs limites](docs/SOLO_PROFILES_AND_LOCAL_GUIDE.md).
+## Progression solo et Guide local
+
+| Profil | Expérience et réputation | Argent ramassé | Professions primaires |
+| --- | --- | --- | --- |
+| Normal | ×1 | ×1 | 2 |
+| Confort | ×2 | ×1 | 11 |
+| Accéléré | ×3 | ×2 | 11 |
+
+Confort et Accéléré assouplissent aussi les prérequis de niveau en instance et de groupe en raid, et autorisent les quêtes normales en raid. Appliquez les changements monde arrêté, après avoir consulté les valeurs exactes. Revenir aux règles précédentes ne retire pas les récompenses ou métiers déjà acquis. La difficulté des ennemis ne change pas.
+
+Le Guide local recherche les noms de quêtes ou d’objets dans le catalogue existant du monde. Il ne lit ni l’inventaire ni le journal de quêtes et ne propose pas de conseil de progression personnalisé. Les résultats indiquent leur source et signalent les informations partielles ou indisponibles.
+
+Ces fonctions sont incluses dans la source 0.5.0 ; leur parcours en jeu reste à qualifier. Voir [les valeurs exactes, la reprise et les limites](docs/SOLO_PROFILES_AND_LOCAL_GUIDE.md).
 
 ## Installation
 
 1. Installez et démarrez [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Téléchargez les données WoW compatibles depuis la page ChromieCraft [française](https://chromiecraft.com/fr/telechargements/) ou [anglaise](https://chromiecraft.com/en/downloads/).
-3. Téléchargez RealmBox depuis les [releases GitHub](https://github.com/bnjdpn/RealmBox/releases) et comparez l’artefact avec `SHA256SUMS.txt`.
+3. Consultez les [fichiers de la préversion 0.5.0](https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0). Une fois l’installateur de votre plateforme et `SHA256SUMS.txt` disponibles, téléchargez-les et comparez la somme de contrôle.
 4. Dans **Votre copie de WoW**, sélectionnez le dossier du jeu ou `Data` ; l’aide au téléchargement est disponible dans cette même vue.
 5. Choisissez **Vos compagnons**, puis consultez **Votre installation**. Corrigez les avertissements de préparation avant de cliquer sur **Installer**.
 6. Cliquez sur **Jouer** lorsque RealmBox indique qu’Azeroth est prêt.
 
-Les binaires distribués actuellement ne sont ni signés ni notariés. Ne contournez pas un avertissement du système si le SHA-256 de l’artefact téléchargé ne correspond pas exactement à la somme publiée. Le [guide d’installation complet](docs/INSTALLATION.md) détaille chaque plateforme.
+La signature de distribution et la notarisation ne sont pas fournies. Ne contournez pas un avertissement du système si le SHA-256 de l’artefact téléchargé ne correspond pas exactement à la somme publiée. Le [guide d’installation complet](docs/INSTALLATION.md) détaille chaque plateforme.
 
-L’assistant en trois étapes, ses vérifications avant téléchargement et les raccourcis du royaume sur l’accueil décrivent la source non publiée après 0.4.0, pas un nouveau binaire distribué. Voir [le contrat UX et de sécurité](docs/SETUP_EXPERIENCE.md).
+Ces étapes décrivent l’assistant 0.5.0. Vérifiez la note de disponibilité ci-dessus avant de télécharger. Voir [le contrat UX et de sécurité](docs/SETUP_EXPERIENCE.md).
 
 ## Persistance et sécurité des mises à jour
 
@@ -175,6 +201,8 @@ cargo xtask release check
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Installation](docs/INSTALLATION.md)
+- [Installation guidée et accueil](docs/SETUP_EXPERIENCE.md)
+- [Changelog](CHANGELOG.md) et [état des validations](STATUS.md)
 - [Compatibilité](docs/COMPATIBILITY.md)
 - [Mises à jour et sauvegardes](docs/UPDATES.md)
 - [Sécurité](docs/SECURITY.md)

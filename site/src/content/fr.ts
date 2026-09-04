@@ -12,11 +12,26 @@ export const fr: SiteCopy = {
     title: "Azeroth chez vous.",
     accent: "Des bots à vos côtés.",
     body: "RealmBox transforme votre copie compatible de World of Warcraft en une aventure solo locale : AzerothCore fait tourner le monde, Playerbots le peuple et le launcher s’occupe de toute l’installation.",
-    download: "Télécharger RealmBox",
+    download: "Voir la préversion 0.5.0",
+    availability: "Installateurs et sommes SHA-256 : vérifiez leur disponibilité sur GitHub. Windows reste expérimental ; le parcours en jeu 0.5.0 reste à qualifier sur les deux plateformes.",
     install: "Voir l’installation",
     screenshotAsset: "launcher-ready-fr.webp",
     screenshotAlt: "Le launcher RealmBox prêt à lancer World of Warcraft en local",
-    screenshotCaption: "Le vrai launcher RealmBox · aucune ressource du jeu n’est distribuée",
+    screenshotCaption: "Interface RealmBox 0.5.0 · aperçu avec données de démonstration",
+  },
+  updates: {
+    eyebrow: "Nouveautés · préversion 0.5.0",
+    title: "Préparez votre monde. Choisissez votre rythme.",
+    body: "Un accueil avec les raccourcis de votre royaume et de nouveaux outils pour votre aventure solo. Ces vues présentent la version 0.5.0 ; consultez la préversion pour la disponibilité des installateurs.",
+    items: [
+      { title: "Une installation en trois étapes", body: "Votre copie de WoW, vos compagnons, puis le récapitulatif. RealmBox vérifie Docker et l’espace disponible avant d’autoriser le téléchargement." },
+      { title: "Trois rythmes de progression", body: "Normal, Confort ou Accéléré : inspectez les valeurs avant de les appliquer, monde arrêté. Les règles précédentes peuvent être restaurées ; la difficulté des ennemis ne change pas." },
+      { title: "Quêtes et objets à portée de recherche", body: "Le Guide local retrouve jusqu’à huit résultats par nom dans les références de votre monde, avec leur source. Sans IA ni service externe, sans consulter votre personnage." },
+      { title: "Une équipe plus facile à diriger", body: "Trois préréglages d’escouade à cinq, un compagnon principal observé et un aperçu des commandes de groupe ou de cible. Le rappel des mêmes bots par leur nom n’est pas garanti." },
+      { title: "Votre progression protégée", body: "Créez une sauvegarde complète et vérifiée depuis Protection. Les copies restent sur votre ordinateur, hors de l’installation remplaçable, sans écraser les précédentes." },
+      { title: "Des dialogues toujours facultatifs", body: "Direct, Immersif ou Vivant : réglez les échanges indépendamment de la population. Le nouveau correctif de reprise après échec dépend des images serveur reconstruites pour 0.5.0." },
+    ],
+    link: { href: "https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0", label: "Nouveautés et disponibilité de la préversion" },
   },
   promise: {
     eyebrow: "WoW, sans serveur à administrer",
@@ -32,14 +47,14 @@ export const fr: SiteCopy = {
     eyebrow: "Playerbots intégrés",
     title: "Azeroth n’est plus vide quand vous jouez seul.",
     body: "Croisez des bots dans le monde, formez un groupe de quatre compagnons et donnez-leur des ordres depuis l’addon RealmBox directement dans WoW.",
-    points: ["Population adaptée à la mémoire de votre machine", "Équipe équilibrée : tank, soin et dégâts", "Suivre, attaquer, attendre, regrouper ou libérer", "Dialogues locaux facultatifs avec Ollama"],
+    points: ["5, 25, 50, 100 ou 150 bots, selon la mémoire attribuée à Docker", "Présence indépendante : Dispersés, Naturelle ou Toujours proches", "Votre équipe en jeu : Escorte, Garde ou Libres", "Dialogues facultatifs : Direct, Immersif ou Vivant"],
     screenshotAsset: "launcher-companions-fr.webp",
     screenshotAlt: "Réglage de la population Playerbots dans RealmBox",
   },
   install: {
     eyebrow: "Installation guidée",
     title: "De zéro à Azeroth en cinq étapes.",
-    intro: "RealmBox a besoin de Docker Desktop et des fichiers d’une copie compatible de WoW. Il ne fournit ni ne téléverse les données du jeu.",
+    intro: "Préparez Docker Desktop et votre copie compatible de WoW, puis suivez l’assistant 0.5.0. Les installateurs sont proposés sur la page de préversion lorsqu’ils sont disponibles.",
     steps: [
       {
         title: "Installez Docker Desktop",
@@ -56,15 +71,15 @@ export const fr: SiteCopy = {
       },
       {
         title: "Téléchargez RealmBox",
-        body: "Prenez le DMG pour Mac Apple Silicon ou l’installateur Windows x64 depuis les releases GitHub, puis vérifiez le SHA-256 fourni.",
+        body: "Consultez les fichiers de la préversion : DMG Mac Apple Silicon ou installateur Windows x64 expérimental. Attendez que le fichier et SHA256SUMS.txt soient disponibles, puis comparez la somme SHA-256.",
         links: [{ href: "https://github.com/bnjdpn/RealmBox/releases", label: "Ouvrir les releases RealmBox" }],
       },
-      { title: "Choisissez le dossier WoW", body: "Dans RealmBox, sélectionnez le dossier qui contient Data. Le launcher vérifie les fichiers sans modifier votre copie source." },
-      { title: "Installez, puis jouez", body: "Choisissez la population de bots, lancez l’installation et cliquez sur Jouer lorsque RealmBox affiche que tout est prêt." },
+      { title: "Votre copie de WoW, puis vos compagnons", body: "Dans l’assistant, sélectionnez le dossier du jeu ou Data, puis réglez population, présence et dialogues facultatifs. Les fichiers de jeu sont vérifiés avant de poursuivre." },
+      { title: "Installez, puis jouez", body: "Consultez Votre installation et corrigez les avertissements Docker ou disque. Cliquez sur Installer après validation, puis sur Jouer lorsque votre monde est prêt." },
     ],
     requirementsTitle: "Configuration requise",
     requirements: [
-      { label: "Système", value: "Mac Apple Silicon ou PC Windows x64" },
+      { label: "Système", value: "Mac Apple Silicon ou PC Windows x64 (expérimental)" },
       {
         label: "Conteneurs",
         value: "Docker Desktop installé, démarré et doté de mémoire",
@@ -97,8 +112,8 @@ export const fr: SiteCopy = {
     facts: [
       { title: "Données extraites localement", body: "maps, vmaps, mmaps et dbc sont produits depuis votre propre dossier Data." },
       { title: "Services isolés", body: "Les ports de jeu restent liés à 127.0.0.1 et MySQL n’est pas exposé sur l’hôte." },
-      { title: "Mises à jour protégées", body: "Une sauvegarde complète et vérifiée des personnages est obligatoire avant toute migration." },
-      { title: "Dialogues facultatifs", body: "Ollama et un petit modèle local peuvent alimenter les réponses des bots sans cloud pendant le jeu." },
+      { title: "Mises à jour protégées", body: "Sauvegarde complète vérifiée avant migration et à la demande dans Protection. Si une sauvegarde requise manque, l’opération s’arrête." },
+      { title: "Dialogues facultatifs", body: "Ollama et un petit modèle local peuvent alimenter les réponses des bots sans cloud pendant le jeu. L’analyse de compatibilité CanIRun transmet uniquement le processeur, le nombre de cœurs et la mémoire." },
     ],
   },
   local: {
@@ -111,6 +126,9 @@ export const fr: SiteCopy = {
     eyebrow: "Questions fréquentes",
     title: "L’essentiel avant de lancer l’installation.",
     items: [
+      { question: "La version 0.5.0 est-elle prête à télécharger ?", answer: "La page de préversion est publique. Vérifiez ses fichiers pour savoir si les installateurs et SHA256SUMS.txt sont disponibles. Les parcours complets macOS et Windows restent à qualifier pour cette version ; Windows est expérimental. Aucune signature de distribution ni notarisation n’est fournie." },
+      { question: "Puis-je annuler un profil solo ?", answer: "Oui, monde arrêté, vous pouvez restaurer les règles précédentes. Cela ne retire pas l’expérience, l’argent ou les métiers déjà acquis et ne modifie pas la difficulté des ennemis." },
+      { question: "Le Guide local suit-il ma progression ?", answer: "Non. Il recherche seulement les noms de quêtes et d’objets dans les références locales. Il ne lit ni votre journal de quêtes ni votre inventaire et ne génère aucun conseil par IA." },
       { question: "Est-ce vraiment World of Warcraft ?", answer: "RealmBox utilise les fichiers d’une copie compatible de World of Warcraft: Wrath of the Lich King et lance un Azeroth local avec AzerothCore. RealmBox ne contient et ne distribue aucun fichier propriétaire du jeu." },
       { question: "Ai-je besoin d’un abonnement ou d’un serveur en ligne ?", answer: "RealmBox ne se connecte pas aux serveurs officiels et ne demande aucun abonnement pour son fonctionnement local. Vous devez toutefois utiliser une copie du jeu que vous êtes autorisé à posséder." },
       { question: "À quoi servent les bots ?", answer: "Playerbots peuple Azeroth avec des personnages autonomes. L’addon RealmBox peut aussi réunir quatre bots près de vous pour créer une équipe jouable." },
