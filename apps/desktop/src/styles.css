@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   color: #f2f5f4;
   background: #02070c;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -68,6 +69,76 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   backdrop-filter: blur(10px);
 }
 .settings-button:hover { color: #fff; background: #0b1a25d9; }
+
+.setup-wizard { position: absolute; z-index: 2; inset: 112px 38px 28px 44px; display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 32px; }
+.setup-sidebar { padding-top: 14px; }
+.setup-eyebrow { color: #b9ad91; font-size: 10px; letter-spacing: .12em; line-height: 1.6; }
+.setup-sidebar h1 { margin: 16px 0 28px; font: 400 34px/1.1 Georgia, serif; color: #f4ead1; }
+.setup-sidebar ol { padding: 0; margin: 0 0 28px; list-style: none; }
+.setup-sidebar li + li { margin-top: 12px; }
+.setup-sidebar nav button { display: flex; align-items: center; gap: 12px; padding: 7px 0; border: 0; color: #b8c5ca; background: transparent; font-size: 13px; text-align: left; }
+.setup-sidebar nav button span { display: grid; place-items: center; width: 29px; height: 29px; border: 1px solid #93b2bd55; border-radius: 50%; font-size: 12px; }
+.setup-sidebar nav button[aria-current] { color: #e4f7fa; }
+.setup-sidebar nav button[aria-current] span { background: #234451; border-color: #91cfdf; }
+.setup-sidebar nav button:disabled { cursor: default; color: #85939a; }
+.setup-main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; border: 1px solid #91bac536; border-radius: 6px; background: #07121cee; box-shadow: 0 12px 50px #0007; overflow: hidden; }
+.setup-main > header { padding: 22px 26px 14px; border-bottom: 1px solid var(--line); }
+.setup-main h2 { margin: 0; font: 400 27px/1.1 Georgia, serif; color: #f4ead1; }
+.setup-main h2:focus { outline: none; }
+.setup-main > header p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.setup-scroll { overflow-y: auto; padding: 18px 26px; scrollbar-gutter: stable; }
+.setup-scroll, .panel-content { scrollbar-width: thin; scrollbar-color: #42616b #07121c; }
+.setup-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 26px; border-top: 1px solid var(--line); background: #091621; }
+.setup-footer small { color: #b8c6c8; font-size: 9px; letter-spacing: .09em; }
+.setup-footer-status { flex: 1; color: #d5bc8d; font-size: 11px; text-align: center; }
+.setup-checks .success, .setup-footer-status.success { color: #a9d49a; }
+.setup-checks .error { color: #e8a39b; }
+.setup-footer .primary-action { min-height: 44px; min-width: 160px; font-size: 16px; padding: 0 18px; }
+.setup-folder { padding: 14px; border: 1px solid var(--line); border-radius: 4px; background: #ffffff03; }
+.setup-folder.recognized { border-color: #9dcb8a77; }
+.setup-folder > strong { color: #d9e9e9; font-size: 13px; }
+.setup-folder code { display: block; margin: 9px 0; overflow-wrap: anywhere; color: #bbd7d9; font-size: 11px; }
+.setup-help { margin: 16px 0; font-size: 12px; color: #c4d5d9; }
+.setup-help summary { color: #addce7; cursor: pointer; }
+.setup-help p { font-size: 12px; line-height: 1.5; }
+.setup-controls { min-width: 0; margin: 0; padding: 0; border: 0; }
+.setup-controls > .option-row { margin-top: 0; }
+.population-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.setup-controls .choice-group { margin: 12px 0; }
+.setup-controls .choice-group:not(.population-cards) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.setup-controls .choice-card + .choice-card { margin-top: 0; }
+.setup-controls .choice-card em { display: block; margin-left: 0; margin-top: 4px; }
+.setup-controls .choice-card { padding: 10px 8px; gap: 7px; }
+.setup-controls .choice-card strong { line-height: 1.4; }
+.population-cards .choice-card { margin: 0; min-height: 56px; }
+.setup-ai { margin-top: 20px; padding-top: 3px; border-top: 1px solid var(--line); }
+.setup-summary h3, .setup-checks h3 { margin: 0 0 8px; font-size: 13px; color: #d9e9e9; }
+.setup-summary > p, .setup-checks p { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.setup-summary dl { margin: 12px 0 18px; }
+.setup-summary-path { display: block; overflow-wrap: anywhere; font-size: 11px; color: #b3c9cc; }
+.setup-summary dl > div, .realm-overview > div { display: flex; justify-content: space-between; gap: 20px; margin: 8px 0; font-size: 12px; }
+.setup-summary dt, .realm-overview dt { color: var(--muted); }
+.setup-summary dd, .realm-overview dd { margin: 0; text-align: right; color: #dfeded; }
+.setup-checks { padding-top: 16px; border-top: 1px solid var(--line); }
+.setup-checks ul { list-style: none; padding: 0; margin: 0 0 12px; }
+.setup-checks li { padding: 8px 0; border-bottom: 1px solid #ffffff10; }
+.setup-checks li > div { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.setup-checks li strong { font-weight: 500; }
+.setup-checks li p { margin: 6px 0 0; }
+.setup-checks .text-button { margin: 8px 16px 5px 0; }
+.realm-dashboard, .installation-followup { position: absolute; z-index: 2; right: 38px; top: 144px; width: 322px; padding: 22px; border: 1px solid #91bac536; border-radius: 5px; background: #07121ceb; box-shadow: 0 12px 50px #0006; }
+.realm-dashboard h2, .installation-followup h2 { margin: 0; color: #f4ead1; font: 400 25px Georgia, serif; }
+.realm-dashboard header p { margin: 8px 0 18px; color: var(--muted); font-size: 12px; }
+.realm-overview { padding-bottom: 8px; margin: 0; }
+.realm-dashboard nav { margin-top: 16px; border-top: 1px solid var(--line); }
+.realm-dashboard nav button { display: flex; justify-content: space-between; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: #d3e4e8; font-size: 12px; text-align: left; }
+.realm-dashboard nav button:hover { color: #fff; }
+.installation-followup > strong { display: block; margin-top: 16px; color: #c6e7ec; font-size: 14px; }
+.installation-followup p { font-size: 12px; line-height: 1.65; color: var(--muted); }
+.login-help { margin-top: 20px; font-size: 12px; color: #bbd7de; }
+.login-help summary { cursor: pointer; color: #addce7; }
+.login-help p { max-width: 410px; font-size: 12px; line-height: 1.5; }
+.login-help strong { color: #e1eef0; letter-spacing: .05em; }
 
 .status-card {
   position: absolute;
@@ -205,6 +276,13 @@ select { min-width: 128px; min-height: 36px; padding: 0 9px; border: 1px solid #
 .facts-list > div { display: grid; grid-template-columns: 120px 1fr; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .facts-list dt { color: var(--quiet); font-size: 11px; }
 .facts-list dd { margin: 0; color: #dce4e3; font-size: 11px; overflow-wrap: anywhere; }
+.guide-search { display: grid; gap: 9px; color: #c9d2d3; font-size: 12px; }
+.guide-search input { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #ffffff24; border-radius: 3px; color: #e5eeee; background: #0d1b24; }
+.guide-results { margin-top: 20px; }
+.guide-entry { padding: 15px 0; border-bottom: 1px solid var(--line); }
+.guide-entry h3 { margin: 0; color: #e5eeee; font: 400 18px Georgia, serif; overflow-wrap: anywhere; }
+.guide-entry p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.guide-entry .guide-level { color: var(--quiet); font-size: 10px; }
 .diagnostic-actions { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px; }
 .diagnostic-actions p { flex: 1; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .diagnostic-summary { color: #bcc8ca; font-size: 12px; line-height: 1.5; }

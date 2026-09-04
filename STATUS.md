@@ -1,10 +1,46 @@
 # État factuel
 
-Mis à jour le 3 septembre 2026 sur macOS 26.6.2 arm64.
+Mis à jour le 4 septembre 2026. Les preuves de parcours natif antérieures restent datées séparément ci-dessous.
 
-Décision actuelle : **GO source, build, installation locale et parcours réel pour la récupération Docker RealmBox 0.3.4 : la purge a été détectée, le dump vérifié restauré, Maps/VMaps/MMaps régénérés, le marqueur retiré, le serveur et OpenWoW lancés, les personnages relus et un personnage existant rejoué à Stormwind. Le bundle corrigé est installé dans `/Users/benjamin/Applications/RealmBox.app`; sa relance depuis ce chemin n’a pas été forcée afin de ne pas interrompre la partie restaurée encore ouverte. Aucune release publique 0.3.4 n’est revendiquée. Le brouillon GitHub reste en v0.2.0. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
+## RealmBox 0.5.0 — préparation de la préversion
 
-Le workspace courant porte désormais **RealmBox 0.4.0**, mais ce rework bots et dialogues reste **NO-GO pour une qualification réelle ou une release** : les sources et contrôles ciblés séparent les quatre réglages, tandis que l’installation et le parcours de récupération qualifiés ci-dessous concernent le bundle 0.3.4 construit avant ce changement de version. Aucun nouveau parcours OpenWoW, build unique réunissant les trois modules ni bundle distribué ne prouve encore les modes 0.4.0.
+La version produit et Cargo est incrémentée à 0.5.0 pour la sauvegarde obligatoire avant migration. La publication visée reste un brouillon de préversion : les nouvelles images serveur, les installateurs CI et le parcours réel doivent être vérifiés séparément. Les preuves ci-dessous restent datées ; elles ne qualifient pas automatiquement cette nouvelle version.
+
+## Installation guidée et accueil — 4 septembre 2026, source non publiée
+
+**GO source et vérifications automatisées ; pas de nouveau bundle installé, distribué ou qualifié en jeu.** Le parcours s’inspire de la page App et de la capture publique WOW Legends, pas d’une exécution de son application réservée aux soutiens. Voir [le contrat UX](docs/SETUP_EXPERIENCE.md).
+
+| Élément | Preuve | Résultat |
+|---|---|---|
+| Assistant en trois étapes | tests React avec fakes | copie WoW inspectée avant la suite, cartes de bots, présence indépendante, IA locale opt-in, récapitulatif, retours conservés, annulation du sélecteur et retry sans réinstallation automatique |
+| Préparation avant téléchargement | Rust/fakes + fichiers temporaires | plateforme, destination, espace disque et deux commandes Docker en lecture seule bornées à 10 s chacune ; un lien cassé, un royaume existant, un espace inconnu ou insuffisant ne sont pas déclarés prêts ; aucun démarrage de service ni accès SQL |
+| Limites et concurrence | tests React/Rust | population demandée distincte du plafond prévu ; vérification disque invalidée lors d’un changement de modèle, réponse obsolète ignorée ; destination protégée et modèle arbitraire refusé |
+| Accueil et aide | tests React/axe + navigateur simulé 1024×640 | raccourcis bots/dialogue/solo/protection/guide, population configurée (pas de télémétrie inventée), aide de connexion, progression de l’opération réelle et détails techniques dans Diagnostic |
+| Langues et liens | tests React + catalogue Rust fermé | FR/EN, sélecteur natif titré dans la langue choisie, liens limités à ChromieCraft FR/EN et Docker Desktop ; navigation OS native non exécutée pendant cette validation |
+| Vérification globale | `pnpm verify` réussi | **52 tests React, 28 tests de scripts, 141 tests desktop Rust, 5 tests xtask** ; typecheck, lint, builds Vite/Astro, rustfmt, Clippy strict et cohérence de release réussis |
+
+Le navigateur utilise exclusivement des données de démonstration. L’application installée et les données du royaume n’ont pas été modifiées. Le parcours complet avec sélection native, téléchargement, extraction, démarrage et connexion reste à requalifier sur macOS et Windows. La version Cargo a été incrémentée à 0.5.0 pour préparer la préversion.
+
+## Dernière preuve historique de récupération native
+
+Observation historique du 3 septembre : **GO source, build, installation locale et parcours réel pour la récupération Docker RealmBox 0.3.4 : la purge a été détectée, le dump vérifié restauré, Maps/VMaps/MMaps régénérés, le marqueur retiré, le serveur et OpenWoW lancés, les personnages relus et un personnage existant rejoué à Stormwind. Le bundle corrigé était installé dans `/Users/benjamin/Applications/RealmBox.app`; sa relance depuis ce chemin n’avait pas été forcée afin de ne pas interrompre la partie restaurée encore ouverte. Aucune release publique 0.3.4 n’était revendiquée. L’état historique du brouillon GitHub (v0.2.0) n’est pas une relecture actuelle. NO-GO pour publier une release publique prête pour Windows, signée ou juridiquement validée.**
+
+Le workspace courant porte désormais **RealmBox 0.4.0 plus des changements source non publiés**, mais ce rework bots, solo, guide et dialogues reste **NO-GO pour une qualification réelle ou une release** : les sources et contrôles ciblés sont distincts, tandis que l’installation et le parcours de récupération qualifiés ci-dessous concernent le bundle 0.3.4 construit avant ces changements. Aucun nouveau parcours OpenWoW, build complet du worldserver intégrant le coupe-circuit, image serveur, bundle distribué ou release ne prouve encore ce lot.
+
+## Adaptation de l’écosystème — sources non publiées après 0.4.0
+
+| Fonction | Niveau de preuve | Résultat |
+|---|---|---|
+| Profils solo | tests Rust fichiers temporaires + tests UI | **Normal**, **Confort** et **Accéléré** pilotent uniquement onze clés ; aperçu exact, conservation des lignes non gérées, snapshot privé vérifié, publication non écrasante, journal reprenable et retour ciblé ; aucune donnée personnage réécrite |
+| Coupure et concurrence | tests Rust, dont second processus réel | un journal/snapshot n’est publié qu’après écriture, synchronisation et relecture ; une corruption finale échoue fermée ; une seule instance native pilote le runtime ; le monde reprend d’abord une modification interrompue, même si le catalogue de profils a changé |
+| Guide local | tests unitaires/UI + MySQL 8.4.11 isolé réel | recherche FR/EN de 2–64 caractères, huit quêtes ou objets maximum, provenance et incertitude ; SQL fixe, transaction read-only et délai SQL 2 s ; processus hôtes bornés séparément à 10 s (inspection/recherche), 125 s (démarrage) et 15 s (arrêt) ; l’isolat sans réseau/port/volume refuse réellement un `INSERT` ; aucune base joueur consultée |
+| Escouades et cible | 20 tests Fengari sur le vrai Lua + XML | trois compositions de cinq, préférences par préréglage, compagnon principal observé, portée groupe/cible, aperçu, confirmation 8 s, expiration 30 s, blocage combat et aucune expulsion ; rappel des mêmes bots non promis |
+| Dialogue local résilient | test structurel du patch + compilation/exécution C++17 de la politique | après trois échecs : pause 5 s, sonde unique puis 10/20/40/60 s ; réussite/rechargement réinitialise, réponse d’une génération ancienne ignorée ; ni retry, ni thread, ni sommeil ajouté |
+| Sécurité des opérations | tests Rust + revue ciblée | volume joueurs absent : aucune création par sauvegarde/guide ; base démarrée seulement pour une recherche locale avec `--no-build --pull never --no-deps`, puis arrêt tenté aussi après échec partiel ou timeout ; tuer le CLI possédé ne garantit pas l’arrêt du conteneur si Docker est inaccessible ; aucun repack, dump ou nouvelle dépendance étudiée importé |
+| Interface FR/EN | tests React/axe + aperçu Playwright 1024×640 | navigation Profils solo et Guide local lisible, états complet/vide/partiel/indisponible et erreur de changement incertaine ; captures simulées uniquement, pas le bundle Tauri |
+| Vérification globale | automatisée | `pnpm verify` réussi : typecheck et lint, 38 tests React, 28 tests de scripts, builds Vite et Astro (3 pages), rustfmt, Clippy strict, 135 tests desktop Rust (dont vrais processus pour timeout, sortie volumineuse et descendants), 5 tests `xtask` et cohérence de release ; `pnpm test:guide-sql` réussi séparément sur MySQL isolé, conteneur ensuite absent |
+
+Décision de ce lot : **GO pour la source et les preuves automatisées ciblées ; NO-GO pour distribution et qualification gameplay.** L’application installée, le runtime actif éventuel et les données du joueur n’ont pas été modifiés. La prochaine distribution devra incrémenter la version Cargo avant tout artefact.
 
 ## Rework bots et dialogues 0.4.0
 

@@ -28,6 +28,18 @@ RealmBox appliqué à `mod-ollama-chat`. `cargo xtask release check` refuse une
 release si cette déclaration manque, pointe vers un autre fichier ou si le
 contenu du patch a dérivé.
 
+Le patch courant porte le SHA-256
+`ba630224ffef713130db63daa2b2008e677daa049fbf47434204d081be077666`.
+Il conserve la priorité des réponses aux joueurs et l’invalidation du dialogue
+ambiant périmé, puis ajoute un coupe-circuit partagé à `QueryOllama` : trois
+échecs consécutifs ouvrent une pause de 5 secondes, une seule sonde permet la
+reprise, et les échecs de sonde portent la pause jusqu’à 60 secondes. Un succès
+ou un rechargement explicite remet la politique à zéro ; les réponses tardives
+ne peuvent pas écraser le nouvel état. Cette politique est testée en C++ avec
+horloge injectée, sans nouvelle boucle de retry, temporisation bloquante ou
+thread. Son application aux sources épinglées est vérifiée ; aucune nouvelle
+image serveur n’a été construite ou publiée pour qualifier ce changement.
+
 La décision de redistribuer un binaire upstream reste bloquée tant que ses
 dépendances transitives, notices, sommes de contrôle, signature et provenance
 de build n'ont pas été auditées et publiées.

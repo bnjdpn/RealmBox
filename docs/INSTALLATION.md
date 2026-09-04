@@ -8,6 +8,8 @@ RealmBox distributes no World of Warcraft data. The launcher uses the `Data` fol
 
 ## Français
 
+Le parcours guidé ci-dessous correspond à la source non publiée après 0.4.0. Les binaires précédents présentent encore l’ancien choix de dossier et les options dans Réglages. Voir [les limites de preuve](SETUP_EXPERIENCE.md).
+
 ### Configuration requise
 
 - Mac Apple Silicon ou PC Windows x64 ;
@@ -60,11 +62,11 @@ Les binaires distribués actuellement ne sont ni signés ni notariés. Ne contou
 
 ### 4. Préparer Azeroth
 
-1. Ouvrez RealmBox.
-2. Sélectionnez la racine du client WoW ou son dossier `Data`.
-3. Choisissez la population de bots souhaitée ; RealmBox la borne automatiquement selon la mémoire visible par Docker.
-4. Activez les dialogues locaux uniquement si vous souhaitez télécharger le modèle facultatif proposé.
-5. Cliquez sur **Installer**.
+1. Dans **Votre copie de WoW**, sélectionnez la racine du client ou `Data`. L’aide « Je n’ai pas encore les fichiers de WoW » ouvre la page de téléchargement et explique la décompression.
+2. Cliquez sur **Continuer**, puis choisissez la population et la présence dans **Vos compagnons**. Activez le dialogue local uniquement si vous souhaitez télécharger le modèle facultatif affiché.
+3. Cliquez sur **Vérifier mon installation**. Le récapitulatif vérifie Docker/Compose, la plateforme, l’espace disque et l’absence de royaume existant ; il indique la population prévue selon la mémoire Docker.
+4. Corrigez les points signalés puis utilisez **Vérifier à nouveau**. Aucun serveur n’est démarré ni téléchargé par ces vérifications.
+5. Cliquez sur **Installer** lorsque les contrôles le permettent. Vous pouvez revenir en arrière avant cette confirmation sans perdre vos choix.
 
 Le premier passage vérifie les données, télécharge les composants épinglés, extrait localement `maps`, `vmaps`, `mmaps` et `dbc`, importe les bases, crée le compte local et ne publie le runtime qu’après validation. Cette étape peut être longue ; les lancements suivants réutilisent l’installation locale.
 
@@ -72,9 +74,13 @@ Le premier passage vérifie les données, télécharge les composants épinglés
 
 Cliquez sur **Jouer** lorsque RealmBox indique qu’Azeroth est prêt. Le launcher démarre MySQL, l’authserver, le worldserver et le client dans l’ordre requis. La fermeture du client supervisé arrête les services sans supprimer les volumes de personnages.
 
+L’aide **Se connecter au jeu** sur l’accueil rappelle le compte local. Le panneau **Votre royaume** donne accès aux bots, dialogues, profils solo, sauvegardes et guide ; sa population est celle de la configuration, pas un compteur en ligne.
+
 En cas de problème, utilisez uniquement le diagnostic partageable expurgé puis consultez le [guide de dépannage](TROUBLESHOOTING.md). Ne joignez jamais de MPQ, dump SQL, secret, base utilisateur ou chemin privé non expurgé.
 
 ## English
+
+The guided flow below describes unreleased source after 0.4.0. Earlier binaries still use the folder action and installation options in Settings. See [the evidence boundaries](SETUP_EXPERIENCE.md).
 
 ### System requirements
 
@@ -128,16 +134,18 @@ Current distributed binaries are not signed or notarized. Do not bypass a macOS 
 
 ### 4. Prepare Azeroth
 
-1. Open RealmBox.
-2. Select the WoW client root or its `Data` folder.
-3. Choose the desired bot population; RealmBox automatically caps it against memory visible to Docker.
-4. Enable local dialogue only if you want to download the proposed optional model.
-5. Select **Install**.
+1. In **Your copy of WoW**, select the game root or `Data`. “I don’t have the WoW files yet” opens download help and explains extraction.
+2. Select **Continue**, then choose population and presence in **Your companions**. Enable local dialogue only if you want to download the displayed optional model.
+3. Select **Check my installation**. The review checks Docker/Compose, platform, disk space and the absence of an existing realm; it shows the planned Docker-memory-limited population.
+4. Resolve any warning and select **Check again**. These checks do not start or download a server.
+5. Select **Install** when the checks allow it. Back navigation preserves your choices before confirmation.
 
 The first pass validates the data, downloads pinned components, locally extracts `maps`, `vmaps`, `mmaps`, and `dbc`, imports the databases, creates the local account, and publishes the runtime only after verification. This can take time; later launches reuse the local installation.
 
 ### 5. Play
 
 Select **Play** when RealmBox reports that Azeroth is ready. The launcher starts MySQL, the authserver, worldserver, and client in the required order. Closing the supervised client stops the services without deleting character volumes.
+
+**Log in to the game** on the home screen shows the local account. **Your realm** gives direct access to bots, dialogue, solo profiles, protection and local lookup; its population is configuration, not an online count.
 
 If something fails, use only the redacted shareable diagnostic and see the [troubleshooting guide](TROUBLESHOOTING.md). Never attach an MPQ, SQL dump, secret, user database, or unredacted private path.

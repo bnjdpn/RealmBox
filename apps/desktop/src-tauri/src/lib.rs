@@ -1,5 +1,10 @@
 mod ai;
 mod launcher;
+pub mod local_guide;
+mod runtime_instance;
+mod setup;
+mod solo_profile_store;
+pub mod solo_profiles;
 
 use std::{
     path::Path,
@@ -14,6 +19,10 @@ use launcher::{
     InstallationOptions, LauncherPhase, LauncherProgress, LauncherService, LauncherStatus,
     OperationComponent, OperationStep, RealmBackupSummary, RealmDiagnostics, SystemCommandRunner,
 };
+use local_guide::{LocalGuideQuery, LocalGuideResponse};
+use runtime_instance::RuntimeInstanceGuard;
+use solo_profile_store::SoloProfileView;
+use solo_profiles::SoloProfile;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState(Arc<Mutex<LauncherService<SystemCommandRunner>>>);
@@ -320,6 +329,31 @@ async fn configure_dialogue_chattiness(
 }
 
 #[tauri::command]
+async fn inspect_installation(
+    state: State<'_, AppState>,
+    model: Option<String>,
+) -> Result<setup::InstallationCheck, String> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .inspect_installation(model.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn open_setup_resource(resource: setup::SetupResource) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        setup::open_resource(&SystemCommandRunner::default(), resource)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn inspect_game_data(
     game_data_path: String,
 ) -> Result<GameDataInspection, LauncherCommandError> {
@@ -466,6 +500,84 @@ async fn create_realm_backup(
 }
 
 #[tauri::command]
+async fn query_local_guide(
+    state: State<'_, AppState>,
+    query: LocalGuideQuery,
+) -> Result<LocalGuideResponse, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .query_local_guide(query)
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(
+            error.to_string(),
+            ErrorCode::OperationUnavailable,
+            "database",
+        )
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "database"))
+}
+
+#[tauri::command]
+async fn inspect_solo_profiles(
+    state: State<'_, AppState>,
+) -> Result<SoloProfileView, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .inspect_solo_profiles()
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "server")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "server"))
+}
+
+#[tauri::command]
+async fn configure_solo_profile(
+    state: State<'_, AppState>,
+    profile: SoloProfile,
+) -> Result<SoloProfileView, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .configure_solo_profile(profile)
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "server")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "server"))
+}
+
+#[tauri::command]
+async fn rollback_solo_profile(
+    state: State<'_, AppState>,
+) -> Result<SoloProfileView, LauncherCommandError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        service
+            .lock()
+            .map_err(|_| "état du lanceur indisponible".to_string())?
+            .rollback_solo_profile()
+    })
+    .await
+    .map_err(|error| {
+        LauncherCommandError::new(error.to_string(), ErrorCode::OperationUnavailable, "server")
+    })?
+    .map_err(|error| LauncherCommandError::new(error, ErrorCode::OperationUnavailable, "server"))
+}
+
+#[tauri::command]
 async fn get_realm_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<RealmDiagnostics, LauncherCommandError> {
@@ -493,6 +605,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data = app.path().app_data_dir()?;
+            let instance_guard = RuntimeInstanceGuard::acquire(&app_data)?;
             let resource_dir = app.path().resource_dir()?;
             let bundled_addon = resource_dir.join("addons/RealmBoxCompanions");
             let development_addon =
@@ -504,11 +617,14 @@ pub fn run() {
             };
             let service =
                 LauncherService::new(app_data, addon_source, SystemCommandRunner::default())?;
+            app.manage(instance_guard);
             app.manage(AppState(Arc::new(Mutex::new(service))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap_launcher,
+            inspect_installation,
+            open_setup_resource,
             install_realm,
             start_realm,
             stop_realm,
@@ -516,6 +632,10 @@ pub fn run() {
             update_playerbot_population,
             inspect_realm_backup,
             create_realm_backup,
+            query_local_guide,
+            inspect_solo_profiles,
+            configure_solo_profile,
+            rollback_solo_profile,
             get_realm_diagnostics,
             inspect_ai_capability,
             configure_local_dialogue,

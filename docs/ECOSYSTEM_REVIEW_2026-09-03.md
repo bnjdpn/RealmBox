@@ -333,7 +333,7 @@ Sources principales :
 - Des actions sensibles avec aperçu exact, validation typée, confirmation adaptée au risque et annulation quand l’état a changé.
 - Des profils solo nommés, réversibles et inspectables plutôt que des fichiers de configuration écrasés.
 - Une file de dialogue locale bornée où un humain est prioritaire, avec budgets, délais, repli et mémoire limitée.
-- Une source factuelle locale en lecture seule pour un futur guide, séparée de l’action et incapable de muter le monde.
+- Une source factuelle locale en lecture seule pour le guide, séparée de l’action et incapable de muter le monde.
 - Des dépendances épinglées par SHA complet et des patches qui échouent fermés.
 
 ### Différé
@@ -357,6 +357,20 @@ Chaque élément différé demande un spike isolé, un budget de performance, de
 
 ## Feuille de route RealmBox priorisée
 
+### Mise en œuvre source après 0.4.0
+
+Le lot issu de cette revue adapte désormais les patrons sûrs sans ajouter les huit projets comme dépendances :
+
+- trois profils solo fermés, avec valeurs avant/après, instantanés non écrasants, reprise d’interruption et retour aux seules règles gérées ;
+- trois préréglages d’équipe à cinq, un compagnon principal observé, la portée groupe/cible, l’aperçu exact, les confirmations bornées et l’absence totale d’expulsion par l’addon ;
+- un guide quête/objet local, explicite, FR/EN, borné, en lecture seule et sans IA ni contexte personnage ;
+- un coupe-circuit commun aux appels Ollama, avec seuil, sonde unique, backoff plafonné et génération invalidant les retours anciens ;
+- un verrou inter-processus et des nettoyages d’échec empêchant les nouvelles opérations d’affaiblir le runtime persistant.
+
+Cette mise en œuvre reste **partielle au regard de la liste d’idées**. Le rappel des mêmes bots, un rôle serveur confirmé, l’import/export, le langage naturel, AutoBalance, les raids 10/25/40, Dungeon Clear, le hardcore, la progression par extension et l’autonomie LLM ne sont pas implémentés. Le rappel nominatif a été spécifiquement refusé après audit : la commande Playerbots existante ne garantit pas atomiquement l’identité bot, les droits, la faction, la disponibilité et la capacité du groupe. Une passerelle serveur typée avec résultat relu est requise avant de l’exposer.
+
+Les contrôles automatisés et le MySQL isolé ne constituent ni un nouveau build complet du worldserver, ni une image serveur, ni un bundle distribué, ni une qualification OpenWoW. Aucun royaume réel n’a été modifié pendant cette mise en œuvre.
+
 ### P0 — verrous réalisés et qualification restante
 
 1. **Protection à la demande — implémentée et couverte automatiquement.** L’interface « Protection » crée un nouveau `manual-backup-*`, impose le dump complet des quatre bases, relit son SHA-256, le conserve hors `runtime-v3` sans écrasement et ne coupe pas une base déjà active. Les tests avec fakes couvrent aussi le démarrage puis l’arrêt du seul service `database`. Ce niveau de preuve ne remplace pas une sauvegarde fraîche déclenchée depuis le bundle sur les données réelles, suivie d’une restauration et d’une relecture en jeu.
@@ -365,21 +379,23 @@ Chaque élément différé demande un spike isolé, un budget de performance, de
 
 ### P1 — rendre l’équipe simple et fiable
 
-1. Livrer des préréglages de groupe 5 joueurs : composition par rôles, noms préférés, formation et stratégies essentielles.
-2. Garantir « ne jamais retirer un humain », suspendre les mutations en combat et afficher la raison d’un échec.
-3. Dans l’addon, rendre la portée groupe/cible toujours visible, employer des listes fermées, montrer l’action construite et confirmer les opérations dangereuses.
-4. Ajouter des profils solo réversibles en FR/EN avec aperçu des règles, sans exposer les fichiers serveur dans le flux normal.
+**Complément UX du 4 septembre :** la [page App WOW Legends](https://wow-legends.eu/app) et sa [capture publique du tableau de bord](https://wow-legends.eu/assets/img/screenshots/app_dashboard.webp) ont été relues. L’image montre navigation par groupes, action principale du royaume, synthèses et checklist ; certaines rubriques y sont encore marquées « soon ». L’application réservée aux soutiens n’a pas été exécutée. RealmBox en adapte le parcours regroupé dans un assistant FR/EN en trois étapes, avec vrais contrôles de préparation avant téléchargement, récapitulatif, retours préservés et accès directs au royaume installé. Aucun visuel, repack, IA hébergée ou statistique en ligne non mesurée n’est repris. Contrat complet : [SETUP_EXPERIENCE.md](SETUP_EXPERIENCE.md).
+
+1. **Implémenté en source :** préréglages de groupe 5 joueurs avec intentions de rôles, formation et stratégies essentielles ; les noms restent des observations, pas un rappel garanti.
+2. **Implémenté dans l’addon :** ne jamais retirer un membre, suspendre les mutations en combat et afficher la raison d’un échec.
+3. **Implémenté dans l’addon :** portée groupe/cible visible, listes fermées, action construite et confirmation des opérations dangereuses.
+4. **Implémenté en source :** profils solo réversibles en FR/EN avec aperçu, sans fichier serveur dans le flux normal.
 
 ### P2 — fiabiliser dialogue et compagnon persistant
 
-1. Généraliser la file locale bornée : demandes humaines prioritaires, emplacement réservé, budgets par canal, délai, backoff et coupe-circuit.
-2. Introduire un compagnon principal persistant par personnage avec rôle, formation, rappel/masquage, préférence d’auto-rappel et mémoire bornée effaçable.
+1. **Implémenté en source :** file locale bornée, priorité humaine, emplacement réservé, budgets, délais, backoff et coupe-circuit.
+2. **Partiel :** le compagnon principal et les préférences sont conservés par l’addon ; rôle serveur confirmé, rappel/masquage atomique et auto-rappel restent différés.
 3. Convertir les formulations naturelles en intentions énumérées. Revalider maître, cible, groupe, combat, position et disponibilité juste avant l’action ; ne jamais exécuter du texte libre produit par le modèle.
 4. Tester le parcours français et anglais, seul et en groupe, avec Ollama indisponible, lent, bavard ou incohérent.
 
 ### P3 — expérimenter sans élargir le risque
 
-1. Prototyper un guide factuel en lecture seule sur des données locales autorisées, avec provenance de réponse, incertitude explicite et repli silencieux.
+1. **Implémenté en source :** guide factuel en lecture seule sur le catalogue local, avec provenance, incertitude explicite et repli sans détail privé.
 2. Mesurer un roster 10/25 joueurs et une population répartie par niveaux avant tout format 40 joueurs.
 3. Tester AutoBalance uniquement dans une liste d’instances, avec plafonds, exceptions de boss et bouton de retour au comportement standard.
 4. Évaluer l’autonomie LLM sur un petit nombre de bots dans un environnement jetable, sans accès aux données joueurs réelles.

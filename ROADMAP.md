@@ -8,6 +8,7 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 - [x] Entrer en jeu avec OpenWoW, créer un personnage et prendre la quête de départ.
 - [x] Adapter automatiquement la population Playerbots à la mémoire allouée à Docker.
 - [x] Former depuis l’addon une équipe visible de quatre compagnons au niveau du joueur.
+- [x] Proposer trois préréglages d’équipe à cinq, un compagnon principal observé, une portée groupe/cible et un aperçu des commandes, sans expulser de membre ni inventer de rappel nominatif.
 - [x] Réduire l’addon dans une icône de minimap, conserver son état, afficher la composition du groupe et proposer ses contrôles en français et en anglais.
 - [x] Gérer la population Playerbots à chaud depuis RealmBox, sans redémarrer le client.
 - [x] Séparer les populations proposées `5`, `25`, `50`, `100` et `150` de la présence avec les choix `Dispersés`, `Naturelle` recommandé et `Toujours proches`, applicables à chaud ou enregistrables pour la prochaine partie.
@@ -23,6 +24,11 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 - [ ] Tester le parcours complet sur Windows 11 avec `Wow.exe` et OpenWoW.
 
 ## P1 — Interface du launcher
+
+- [x] Guider la première installation en trois étapes FR/EN, avec aide au téléchargement de WoW, choix explicites de bots et récapitulatif avant téléchargement.
+- [x] Vérifier en lecture seule plateforme, Docker/Compose, destination et espace disque ; bloquer Installer si un contrôle manque, préserver les choix et invalider les résultats obsolètes.
+- [x] Regrouper les raccourcis du royaume sur l’accueil, distinguer population configurée et bots connectés, et expliquer la connexion au compte local.
+- [ ] Qualifier l’assistant dans un nouveau bundle macOS et Windows, du sélecteur natif à l’entrée en jeu ; les tests automatisés et captures navigateur restent des preuves séparées.
 
 - [x] Refaire l’interface avec une identité fantasy originale : cadre, état courant, progression et action principale.
 - [x] Supprimer les slogans et les phrases décoratives. Chaque texte doit indiquer un état, une action, une capacité ou une erreur.
@@ -53,6 +59,17 @@ Cette liste décrit le produit attendu. Elle ne vaut pas preuve de fonctionnemen
 - [x] Sélectionner les prompts ambiants français pour une copie client `frFR` et anglais pour les autres locales prises en charge.
 - [ ] Vérifier en parcours réel la priorité sous charge, deux groupes simultanés, le rebond bot-à-bot et l’absence de flood.
 - [x] Configurer un mode sans réseau pendant le jeu et rendre ce statut visible.
+- [x] Suspendre globalement les appels au modèle après trois échecs, avec sonde unique et backoff plafonné, sans bloquer le monde.
+
+## P4 — Solo et références locales
+
+- [x] Ajouter les profils **Normal**, **Confort** et **Accéléré**, avec aperçu exact de onze réglages, instantanés non écrasants et retour aux règles précédentes.
+- [x] Reprendre atomiquement un changement de profil interrompu avant le lancement du monde et empêcher deux instances de piloter le même runtime.
+- [x] Ajouter une recherche FR/EN de quêtes et d’objets dans le catalogue local, en lecture seule, bornée et sans IA ni contexte personnage.
+- [ ] Qualifier ces profils et le guide sur une copie réelle du monde dans un nouveau bundle, sans toucher aux personnages existants pendant le développement.
+- [ ] Ajouter un compte SQL dédié à `SELECT` derrière une migration versionnée et une sauvegarde pré-migration vérifiée.
+- [ ] Construire une passerelle serveur atomique avant tout rappel nominatif des mêmes bots, puis prouver droits, faction, disponibilité, groupe complet sans conversion en raid et lecture du résultat par bot.
+- [ ] Différer AutoBalance, roster 10/25, compositions par boss, progression par extension, hardcore et autonomie LLM tant que les parcours P0–P4 ne sont pas qualifiés.
 
 ## Choix du client
 

@@ -3,10 +3,10 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -17,9 +17,18 @@ use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use crate::ai::{self, AiCapability};
+use crate::{
+    ai::{self, AiCapability},
+    local_guide::{
+        HexEncodedGuideTerm, LocalGuideLocale, LocalGuideQuery, LocalGuideResponse,
+        LocalGuideSearch, LocalGuideSearchDataSource, LocalGuideTabularSnapshot, LocalProvenance,
+        LocalSourceError, LocalSourceScope,
+    },
+    solo_profile_store::{SoloProfileStore, SoloProfileView},
+    solo_profiles::SoloProfile,
+};
 
-const INSTALL_SCHEMA: u32 = 3;
+pub(crate) const INSTALL_SCHEMA: u32 = 3;
 const RUNTIME_DIRECTORY: &str = "runtime-v3";
 const COMPOSE_PROJECT_NAME: &str = "realmbox-v3";
 const PLAYER_DATA_BACKUP_DIRECTORY: &str = "player-data-backups";
@@ -37,6 +46,13 @@ const OLLAMA_CHAT_COMMIT: &str = "a9d14b0b8955be136e657ac168dd255f5281a535";
 const REALMBOX_PRESENCE_MODULE: &str = "mod-realmbox-presence";
 const REALMBOX_OLLAMA_PATCH: &str = "mod-ollama-chat-realmbox.patch";
 const OLLAMA_PORT: u16 = 11435;
+const LOCAL_GUIDE_SHORT_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+const LOCAL_GUIDE_DATABASE_START_TIMEOUT: Duration = Duration::from_secs(125);
+const LOCAL_GUIDE_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+const LOCAL_GUIDE_DATABASE_STOP_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_BOUNDED_COMMAND_OUTPUT_BYTES: u64 = 64 * 1_024;
+const LOCAL_GUIDE_QUEST_SQL: &str = r#"SET NAMES utf8mb4; START TRANSACTION READ ONLY; SELECT /*+ MAX_EXECUTION_TIME(2000) */ q.ID, HEX(LEFT(COALESCE(NULLIF(l.Title, ''), q.LogTitle, ''), 121)), HEX(LEFT(COALESCE(NULLIF(l.Details, ''), q.QuestDescription, q.LogDescription, ''), 321)), IF(q.QuestLevel BETWEEN 0 AND 1000, q.QuestLevel, '-'), HEX('quest') FROM quest_template q LEFT JOIN quest_template_locale l ON l.ID = q.ID AND l.locale = '__LOCALE__' WHERE LOWER(COALESCE(NULLIF(l.Title, ''), q.LogTitle, '')) LIKE CONCAT('%', LOWER(CONVERT(UNHEX('$REALMBOX_GUIDE_TERM_HEX') USING utf8mb4)), '%') ORDER BY q.QuestLevel, q.ID LIMIT 8; COMMIT;"#;
+const LOCAL_GUIDE_ITEM_SQL: &str = r#"SET NAMES utf8mb4; START TRANSACTION READ ONLY; SELECT /*+ MAX_EXECUTION_TIME(2000) */ i.entry, HEX(LEFT(COALESCE(NULLIF(l.Name, ''), i.name, ''), 121)), HEX(LEFT(COALESCE(NULLIF(l.Description, ''), i.description, ''), 321)), i.RequiredLevel, HEX(CONCAT('iLevel ', i.ItemLevel)) FROM item_template i LEFT JOIN item_template_locale l ON l.ID = i.entry AND l.locale = '__LOCALE__' WHERE LOWER(COALESCE(NULLIF(l.Name, ''), i.name, '')) LIKE CONCAT('%', LOWER(CONVERT(UNHEX('$REALMBOX_GUIDE_TERM_HEX') USING utf8mb4)), '%') ORDER BY i.RequiredLevel, i.entry LIMIT 8; COMMIT;"#;
 const OLLAMA_DIALOGUE_SYSTEM_PROMPT_EN: &str = r#""Reply directly in exactly the language of the quoted player message. An English message requires an English answer. A French message requires a French answer. If there is no quoted player message, write only in English. Keep names and World of Warcraft terms unchanged. If unsure, say so briefly in the required language. Output only the answer.""#;
 const OLLAMA_DIALOGUE_SYSTEM_PROMPT_FR: &str = r#""Reply directly in exactly the language of the quoted player message. An English message requires an English answer. A French message requires a French answer. If there is no quoted player message, write only in French. Keep names and World of Warcraft terms unchanged. If unsure, say so briefly in the required language. Output only the answer.""#;
 const OLLAMA_DIALOGUE_CHAT_PROMPT: &str = r#""You are {bot_name}, a World of Warcraft {bot_class}. Player message: <player_message>{player_message}</player_message>. Reply directly to that message in the same language in under 20 words. Output only the answer, with no name, prefix, narration, classification, or meta-comment.""#;
@@ -464,6 +480,25 @@ pub trait CommandRunner: Send + Sync + 'static {
         current_dir: Option<&Path>,
         log_path: &Path,
     ) -> Result<(), String>;
+    fn run_bounded(
+        &self,
+        _program: &str,
+        _args: &[OsString],
+        _current_dir: Option<&Path>,
+        _timeout: Duration,
+    ) -> Result<String, String> {
+        Err("exécution bornée non prise en charge par ce runner".into())
+    }
+    fn run_long_bounded(
+        &self,
+        _program: &str,
+        _args: &[OsString],
+        _current_dir: Option<&Path>,
+        _log_path: &Path,
+        _timeout: Duration,
+    ) -> Result<(), String> {
+        Err("exécution bornée non prise en charge par ce runner".into())
+    }
     fn run_to_file(
         &self,
         program: &str,
@@ -567,6 +602,71 @@ pub struct SystemCommandRunner {
     job_handles: Mutex<HashMap<u32, isize>>,
 }
 
+struct BoundedCommandCapture {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+impl BoundedCommandCapture {
+    fn new() -> Result<Self, String> {
+        let path = env::temp_dir().join(format!(
+            "realmbox-command-{}.capture",
+            secure_random_hex(16)?
+        ));
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options
+            .open(&path)
+            .map_err(|error| format!("capture de commande impossible: {error}"))?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
+    }
+
+    fn writer(&self) -> Result<File, String> {
+        self.file
+            .as_ref()
+            .ok_or_else(|| "capture de commande fermée".to_string())?
+            .try_clone()
+            .map_err(|error| format!("capture de commande impossible: {error}"))
+    }
+
+    fn read_bounded(&mut self) -> Result<Vec<u8>, String> {
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| "capture de commande fermée".to_string())?;
+        if file.metadata().map_err(|error| error.to_string())?.len()
+            > MAX_BOUNDED_COMMAND_OUTPUT_BYTES
+        {
+            return Err("sortie de commande supérieure à 64 KiB".into());
+        }
+        file.seek(SeekFrom::Start(0))
+            .map_err(|error| error.to_string())?;
+        let mut bytes = Vec::new();
+        file.take(MAX_BOUNDED_COMMAND_OUTPUT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("capture de commande illisible: {error}"))?;
+        if bytes.len() as u64 > MAX_BOUNDED_COMMAND_OUTPUT_BYTES {
+            return Err("sortie de commande supérieure à 64 KiB".into());
+        }
+        Ok(bytes)
+    }
+}
+
+impl Drop for BoundedCommandCapture {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 impl SystemCommandRunner {
     #[cfg(windows)]
     fn assign_job_object(
@@ -616,10 +716,14 @@ impl SystemCommandRunner {
                 std::io::Error::last_os_error()
             ));
         }
-        self.job_handles
-            .lock()
-            .map_err(|_| "registre des Job Objects indisponible".to_string())?
-            .insert(process_id, job as isize);
+        let mut handles = match self.job_handles.lock() {
+            Ok(handles) => handles,
+            Err(_) => {
+                unsafe { CloseHandle(job) };
+                return Err("registre des Job Objects indisponible".to_string());
+            }
+        };
+        handles.insert(process_id, job as isize);
         Ok(())
     }
 
@@ -671,6 +775,165 @@ impl SystemCommandRunner {
             ));
         }
         Ok(())
+    }
+
+    fn spawn_owned_command(
+        &self,
+        command: &mut Command,
+        display_name: &str,
+    ) -> Result<u32, String> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("impossible de lancer {display_name}: {error}"))?;
+        let process_id = child.id();
+        #[cfg(windows)]
+        if let Err(error) = self.assign_job_object(process_id, &child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        let mut owned_processes = match self.owned_processes.lock() {
+            Ok(processes) => processes,
+            Err(_) => {
+                #[cfg(windows)]
+                let _ = self.close_windows_job(process_id);
+                #[cfg(unix)]
+                let _ = Command::new("kill")
+                    .args(["-KILL", &format!("-{process_id}")])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("registre des processus possédés indisponible".to_string());
+            }
+        };
+        if owned_processes.contains_key(&process_id) {
+            #[cfg(windows)]
+            let _ = self.close_windows_job(process_id);
+            #[cfg(unix)]
+            let _ = Command::new("kill")
+                .args(["-KILL", &format!("-{process_id}")])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("collision d’identifiant de processus possédé".into());
+        }
+        owned_processes.insert(process_id, child);
+        Ok(process_id)
+    }
+
+    fn force_terminate_owned_command(&self, process_id: u32) -> Result<(), String> {
+        let mut child = self
+            .owned_processes
+            .lock()
+            .map_err(|_| "registre des processus possédés indisponible".to_string())?
+            .remove(&process_id)
+            .ok_or_else(|| "processus borné non possédé par RealmBox".to_string())?;
+
+        #[cfg(unix)]
+        {
+            let already_exited = child
+                .try_wait()
+                .map_err(|error| format!("inspection du processus borné impossible: {error}"))?
+                .is_some();
+            let group_result = Command::new("kill")
+                .args(["-KILL", &format!("-{process_id}")])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|error| format!("arrêt du groupe de processus borné impossible: {error}"));
+            let direct_result = if already_exited { Ok(()) } else { child.kill() };
+            child
+                .wait()
+                .map_err(|error| format!("attente du processus borné impossible: {error}"))?;
+            if !already_exited {
+                if let Ok(status) = &group_result
+                    && !status.success()
+                    && direct_result.is_err()
+                {
+                    return Err("arrêt du processus borné impossible".into());
+                }
+                group_result?;
+            }
+            return Ok(());
+        }
+
+        #[cfg(windows)]
+        {
+            let job_result = self.close_windows_job(process_id);
+            if job_result.is_err() {
+                let _ = child.kill();
+            }
+            child
+                .wait()
+                .map_err(|error| format!("attente du processus borné impossible: {error}"))?;
+            return job_result;
+        }
+
+        #[allow(unreachable_code)]
+        Err("arrêt de processus borné non pris en charge sur cette plateforme".into())
+    }
+
+    fn wait_owned_command(
+        &self,
+        process_id: u32,
+        display_name: &str,
+        timeout: Duration,
+    ) -> Result<ExitStatus, String> {
+        let started = Instant::now();
+        loop {
+            let status_result = {
+                let mut processes = self
+                    .owned_processes
+                    .lock()
+                    .map_err(|_| "registre des processus possédés indisponible".to_string())?;
+                let child = processes
+                    .get_mut(&process_id)
+                    .ok_or_else(|| "processus borné non possédé par RealmBox".to_string())?;
+                child
+                    .try_wait()
+                    .map_err(|error| format!("inspection de {display_name} impossible: {error}"))
+            };
+            let status = match status_result {
+                Ok(status) => status,
+                Err(error) => {
+                    let _ = self.force_terminate_owned_command(process_id);
+                    return Err(error);
+                }
+            };
+            if let Some(status) = status {
+                // Close the whole owned group/job before reading capture files:
+                // a descendant must not outlive a completed command.
+                self.force_terminate_owned_command(process_id)?;
+                return Ok(status);
+            }
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                let cleanup = self.force_terminate_owned_command(process_id);
+                let timeout_ms = timeout.as_millis();
+                return Err(match cleanup {
+                    Ok(()) => format!(
+                        "{display_name} a dépassé le délai de {timeout_ms} ms et a été arrêté"
+                    ),
+                    Err(error) => format!(
+                        "{display_name} a dépassé le délai de {timeout_ms} ms ; arrêt à vérifier : {error}"
+                    ),
+                });
+            }
+            thread::sleep(
+                timeout
+                    .saturating_sub(elapsed)
+                    .min(Duration::from_millis(20)),
+            );
+        }
     }
 }
 
@@ -847,6 +1110,38 @@ impl CommandRunner for SystemCommandRunner {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    fn run_bounded(
+        &self,
+        program: &str,
+        args: &[OsString],
+        current_dir: Option<&Path>,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        let mut stdout_capture = BoundedCommandCapture::new()?;
+        let mut stderr_capture = BoundedCommandCapture::new()?;
+        let mut command = child_command(program);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout_capture.writer()?))
+            .stderr(Stdio::from(stderr_capture.writer()?));
+        if let Some(directory) = current_dir {
+            command.current_dir(directory);
+        }
+        let process_id = self.spawn_owned_command(&mut command, program)?;
+        drop(command);
+        let status = self.wait_owned_command(process_id, program, timeout)?;
+        let stdout = stdout_capture.read_bounded()?;
+        let stderr = stderr_capture.read_bounded()?;
+        if !status.success() {
+            return Err(format!(
+                "{program} a échoué ({status}): {}",
+                String::from_utf8_lossy(&stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+    }
+
     fn run_long(
         &self,
         program: &str,
@@ -870,6 +1165,41 @@ impl CommandRunner for SystemCommandRunner {
         let status = command
             .status()
             .map_err(|error| format!("impossible de lancer {program}: {error}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{program} a échoué ({status}); voir {}",
+                log_path.display()
+            ))
+        }
+    }
+
+    fn run_long_bounded(
+        &self,
+        program: &str,
+        args: &[OsString],
+        current_dir: Option<&Path>,
+        log_path: &Path,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        if let Some(parent) = log_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let log = File::create(log_path).map_err(|error| error.to_string())?;
+        let errors = log.try_clone().map_err(|error| error.to_string())?;
+        let mut command = child_command(program);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(errors));
+        if let Some(directory) = current_dir {
+            command.current_dir(directory);
+        }
+        let process_id = self.spawn_owned_command(&mut command, program)?;
+        drop(command);
+        let status = self.wait_owned_command(process_id, program, timeout)?;
         if status.success() {
             Ok(())
         } else {
@@ -1038,34 +1368,7 @@ impl CommandRunner for SystemCommandRunner {
             .current_dir(current_dir.unwrap_or_else(|| Path::new(".")))
             .stdout(Stdio::from(log))
             .stderr(Stdio::from(errors));
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("impossible de lancer {}: {error}", program.display()))?;
-        let process_id = child.id();
-        #[cfg(windows)]
-        if let Err(error) = self.assign_job_object(process_id, &child) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-        let mut owned_processes = self
-            .owned_processes
-            .lock()
-            .map_err(|_| "registre des processus possédés indisponible".to_string())?;
-        if owned_processes.contains_key(&process_id) {
-            let _ = child.kill();
-            let _ = child.wait();
-            #[cfg(windows)]
-            let _ = self.close_windows_job(process_id);
-            return Err("collision d’identifiant de processus possédé".into());
-        }
-        owned_processes.insert(process_id, child);
-        Ok(process_id)
+        self.spawn_owned_command(&mut command, &program.display().to_string())
     }
 
     fn terminate(&self, process_id: u32) -> Result<(), String> {
@@ -1434,6 +1737,25 @@ impl<R: CommandRunner> LauncherService<R> {
                 ),
             },
         }
+    }
+
+    pub fn inspect_installation(
+        &self,
+        model: Option<&str>,
+    ) -> Result<crate::setup::InstallationCheck, String> {
+        let extra = match model {
+            Some(model) if ai::is_allowed_ollama_model(model) => ai::model_download_bytes(model)
+                .ok_or_else(|| "taille du modèle inconnue".to_string())?,
+            Some(_) => return Err("modèle local non autorisé".into()),
+            None => 0,
+        };
+        Ok(crate::setup::inspect(
+            &self.runner,
+            self.ensure_fresh_install_target().is_ok(),
+            platform_assets().is_ok(),
+            fs2::available_space(&self.app_data).ok(),
+            BASE_INSTALLATION_DISK_BYTES + extra,
+        ))
     }
 
     pub fn bootstrap<F>(&mut self, progress: F) -> Result<LauncherStatus, String>
@@ -2075,11 +2397,14 @@ impl<R: CommandRunner> LauncherService<R> {
     fn ensure_fresh_install_target(&self) -> Result<(), String> {
         let manifest = self.app_data.join("installation.json");
         let runtime = self.app_data.join(RUNTIME_DIRECTORY);
-        if manifest.exists() || runtime.exists() {
-            return Err(
-                "installation refusée : un royaume existe déjà. RealmBox ne réinstalle jamais par-dessus les personnages ; utilisez uniquement le parcours de mise à jour sécurisé"
-                    .into(),
-            );
+        for path in [&manifest, &runtime] {
+            match fs::symlink_metadata(path) {
+                Ok(_) => return Err(
+                    "installation refusée : un royaume existe déjà. RealmBox ne réinstalle jamais par-dessus les personnages ; utilisez uniquement le parcours de mise à jour sécurisé".into(),
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(format!("état d’installation incertain : {error}")),
+            }
         }
         Ok(())
     }
@@ -2106,6 +2431,7 @@ impl<R: CommandRunner> LauncherService<R> {
         if self.worldserver_is_running(&record)? {
             return Err("le monde RealmBox est déjà lancé".into());
         }
+        self.solo_profile_store(&record)?.resume_pending()?;
         let mut preferences = self.world_preferences(Some(&record));
         if let Some(enabled) = bots_enabled {
             preferences.bots_enabled = enabled;
@@ -2666,12 +2992,178 @@ impl<R: CommandRunner> LauncherService<R> {
         Ok(output.lines().any(|line| line.trim() == service))
     }
 
+    fn compose_service_is_running_bounded(
+        &self,
+        record: &InstallationRecord,
+        service: &str,
+        timeout: Duration,
+    ) -> Result<bool, String> {
+        let server_root = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        let output = self.runner.run_bounded(
+            "docker",
+            &compose_args(
+                &record.compose_file,
+                &["ps", "--status", "running", "--services", service],
+            ),
+            Some(server_root),
+            timeout,
+        )?;
+        Ok(output.lines().any(|line| line.trim() == service))
+    }
+
     fn worldserver_is_running(&self, record: &InstallationRecord) -> Result<bool, String> {
         self.compose_service_is_running(record, "worldserver")
     }
 
     pub fn inspect_realm_backup(&self) -> Result<Option<RealmBackupSummary>, String> {
         latest_realm_backup_summary(&self.app_data)
+    }
+
+    fn solo_profile_store(&self, record: &InstallationRecord) -> Result<SoloProfileStore, String> {
+        let server_root = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        SoloProfileStore::new(
+            &self.app_data,
+            &server_root.join("env/dist/etc/worldserver.conf"),
+            record.schema_version,
+        )
+    }
+
+    pub fn inspect_solo_profiles(&self) -> Result<SoloProfileView, String> {
+        let record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        self.solo_profile_store(&record)?.inspect()
+    }
+
+    fn ensure_solo_change_is_safe(&self, record: &InstallationRecord) -> Result<(), String> {
+        if self.client_process_id.is_some() || self.worldserver_is_running(record)? {
+            return Err("arrêtez le monde avant de modifier le profil solo".into());
+        }
+        if self.app_data.join(RUNTIME_UPDATE_FILE).exists() {
+            return Err(
+                "terminez la récupération du runtime avant de modifier le profil solo".into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub fn configure_solo_profile(
+        &mut self,
+        profile: SoloProfile,
+    ) -> Result<SoloProfileView, String> {
+        let record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        self.ensure_solo_change_is_safe(&record)?;
+        let store = self.solo_profile_store(&record)?;
+        store.resume_pending()?;
+        store.apply(profile)
+    }
+
+    pub fn rollback_solo_profile(&mut self) -> Result<SoloProfileView, String> {
+        let record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        self.ensure_solo_change_is_safe(&record)?;
+        let store = self.solo_profile_store(&record)?;
+        store.resume_pending()?;
+        store.rollback()
+    }
+
+    pub fn query_local_guide(&self, query: LocalGuideQuery) -> Result<LocalGuideResponse, String> {
+        let record = self
+            .load_record()?
+            .ok_or_else(|| "RealmBox n’est pas encore installé".to_string())?;
+        if !docker_volume_exists_bounded(
+            &self.runner,
+            DATABASE_VOLUME,
+            LOCAL_GUIDE_SHORT_COMMAND_TIMEOUT,
+        ) {
+            return Ok(LocalGuideResponse::unavailable());
+        }
+        let server_root = record
+            .compose_file
+            .parent()
+            .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        let database_was_running = self.compose_service_is_running_bounded(
+            &record,
+            "database",
+            LOCAL_GUIDE_SHORT_COMMAND_TIMEOUT,
+        )?;
+        if !database_was_running {
+            let start_result = self.runner.run_long_bounded(
+                "docker",
+                &compose_args(
+                    &record.compose_file,
+                    &[
+                        "up",
+                        "-d",
+                        "--no-build",
+                        "--pull",
+                        "never",
+                        "--no-deps",
+                        "--wait",
+                        "--wait-timeout",
+                        "120",
+                        "database",
+                    ],
+                ),
+                Some(server_root),
+                &record
+                    .runtime_root
+                    .join("logs/local-guide-database-start.log"),
+                LOCAL_GUIDE_DATABASE_START_TIMEOUT,
+            );
+            if let Err(start_error) = start_result {
+                // `up --wait` can fail after creating/starting the service. Only
+                // stop it when this request observed it stopped beforehand.
+                let stop_result = self.runner.run_long_bounded(
+                    "docker",
+                    &compose_args(&record.compose_file, &["stop", "database"]),
+                    Some(server_root),
+                    &record
+                        .runtime_root
+                        .join("logs/local-guide-database-stop.log"),
+                    LOCAL_GUIDE_DATABASE_STOP_TIMEOUT,
+                );
+                return Err(match stop_result {
+                    Ok(()) => start_error,
+                    Err(stop_error) => format!(
+                        "guide local indisponible : {start_error} ; arrêt de la base à vérifier : {stop_error}"
+                    ),
+                });
+            }
+        }
+
+        let response = LocalGuideSearch::new(DockerLocalGuideSource {
+            runner: &self.runner,
+            compose_file: &record.compose_file,
+            server_root,
+            observed_at_unix_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .and_then(|duration| u64::try_from(duration.as_millis()).ok()),
+        })
+        .search(&query);
+
+        if !database_was_running {
+            self.runner.run_long_bounded(
+                "docker",
+                &compose_args(&record.compose_file, &["stop", "database"]),
+                Some(server_root),
+                &record
+                    .runtime_root
+                    .join("logs/local-guide-database-stop.log"),
+                LOCAL_GUIDE_DATABASE_STOP_TIMEOUT,
+            )?;
+        }
+        Ok(response)
     }
 
     pub fn create_realm_backup(&mut self) -> Result<RealmBackupSummary, String> {
@@ -2683,6 +3175,12 @@ impl<R: CommandRunner> LauncherService<R> {
             .compose_file
             .parent()
             .ok_or_else(|| "chemin serveur invalide".to_string())?;
+        if !docker_volume_exists(&self.runner, DATABASE_VOLUME) {
+            return Err(
+                "le volume Docker des personnages a disparu ; lancez Jouer pour restaurer le dernier point vérifié avant de créer une sauvegarde"
+                    .into(),
+            );
+        }
         let stem = next_manual_backup_stem(&self.app_data)?;
         let database_was_running = self.compose_service_is_running(&record, "database")?;
 
@@ -5063,7 +5561,7 @@ fn normalize_bot_count(requested: usize) -> usize {
     }
 }
 
-fn playerbot_capacity(memory_output: &str) -> usize {
+pub(crate) fn playerbot_capacity(memory_output: &str) -> usize {
     let memory_bytes = memory_output.trim().parse::<u64>().unwrap_or_default();
     const GIB: u64 = 1024 * 1024 * 1024;
     match memory_bytes {
@@ -5325,6 +5823,8 @@ fn write_ollama_chat_config(
                 "OllamaChat.Url",
                 format!("http://host.docker.internal:{OLLAMA_PORT}/api/generate"),
             ),
+            ("OllamaChat.CapabilityProbeTimeoutSeconds", "5".into()),
+            ("OllamaChat.HttpTimeoutSeconds", "120".into()),
             ("OllamaChat.Model", model.to_owned()),
             ("OllamaChat.NumPredict", "96".into()),
             ("OllamaChat.ReasoningTokenReserve", "256".into()),
@@ -6083,12 +6583,95 @@ fn validate_live_database_after_restore<R: CommandRunner>(
     fs::remove_file(&validation).map_err(|error| error.to_string())
 }
 
+struct DockerLocalGuideSource<'a, R: CommandRunner> {
+    runner: &'a R,
+    compose_file: &'a Path,
+    server_root: &'a Path,
+    observed_at_unix_ms: Option<u64>,
+}
+
+impl<R: CommandRunner> DockerLocalGuideSource<'_, R> {
+    fn rows(
+        &self,
+        sql_template: &str,
+        term_hex: &HexEncodedGuideTerm,
+        locale: LocalGuideLocale,
+    ) -> Result<Option<LocalGuideTabularSnapshot>, LocalSourceError> {
+        let locale = match locale {
+            LocalGuideLocale::FrFr => "frFR",
+            LocalGuideLocale::EnUs => "enUS",
+        };
+        let sql = sql_template.replace("__LOCALE__", locale);
+        let shell_command = format!(
+            "export MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\"; exec mysql --batch --raw --skip-column-names --connect-timeout=5 --user=root --database=acore_world --execute=\"{sql}\""
+        );
+        let mut args = compose_args(self.compose_file, &["exec", "-T", "-e"]);
+        args.push(format!("REALMBOX_GUIDE_TERM_HEX={}", term_hex.as_str()).into());
+        args.extend([
+            "database".into(),
+            "sh".into(),
+            "-c".into(),
+            shell_command.into(),
+        ]);
+        let rows = self
+            .runner
+            .run_bounded(
+                "docker",
+                &args,
+                Some(self.server_root),
+                LOCAL_GUIDE_QUERY_TIMEOUT,
+            )
+            .map_err(|_| LocalSourceError::Unavailable)?;
+        Ok(Some(LocalGuideTabularSnapshot {
+            rows,
+            provenance: LocalProvenance {
+                scope: LocalSourceScope::RuntimeSnapshot,
+                source_id: "realmbox-world-catalog".into(),
+                observed_at_unix_ms: self.observed_at_unix_ms,
+            },
+        }))
+    }
+}
+
+impl<R: CommandRunner> LocalGuideSearchDataSource for DockerLocalGuideSource<'_, R> {
+    fn quest_rows(
+        &self,
+        term_hex: &HexEncodedGuideTerm,
+        locale: LocalGuideLocale,
+    ) -> Result<Option<LocalGuideTabularSnapshot>, LocalSourceError> {
+        self.rows(LOCAL_GUIDE_QUEST_SQL, term_hex, locale)
+    }
+
+    fn item_rows(
+        &self,
+        term_hex: &HexEncodedGuideTerm,
+        locale: LocalGuideLocale,
+    ) -> Result<Option<LocalGuideTabularSnapshot>, LocalSourceError> {
+        self.rows(LOCAL_GUIDE_ITEM_SQL, term_hex, locale)
+    }
+}
+
 fn docker_volume_exists<R: CommandRunner>(runner: &R, name: &str) -> bool {
     runner
         .run(
             "docker",
             &["volume".into(), "inspect".into(), name.into()],
             None,
+        )
+        .is_ok()
+}
+
+fn docker_volume_exists_bounded<R: CommandRunner>(
+    runner: &R,
+    name: &str,
+    timeout: Duration,
+) -> bool {
+    runner
+        .run_bounded(
+            "docker",
+            &["volume".into(), "inspect".into(), name.into()],
+            None,
+            timeout,
         )
         .is_ok()
 }
@@ -6652,7 +7235,7 @@ mod tests {
         }
         fs::write(
             path,
-            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.WorkerThreads = 4\nOllamaChat.MaxQueueDepth = 64\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.EnableChatHistory = 1\nOllamaChat.ConversationHistorySaveInterval = 10\nOllamaChat.EnableChatBotSnapshotTemplate = 1\nOllamaChat.Memory.Enable = 1\nOllamaChat.Relationship.Enable = 1\nOllamaChat.EnableRAG = 1\nOllamaChat.EnableEmoteReactions = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.BotConversation.MaxChainDepth = 3\nOllamaChat.BotConversation.ChanceDecayPct = 50\nOllamaChat.BotConversation.RequireRecentHuman = 1\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.MinRandomInterval = 45\nOllamaChat.MaxRandomInterval = 180\nOllamaChat.RandomChatterRealPlayerDistance = 200.0\nOllamaChat.RandomChatterPromptTemplate = \"test random\"\nOllamaChat.RandomChatterPromptVariations = \"test one|test two\"\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EventChatterPromptTemplate = \"test event\"\nOllamaChat.DisableRepliesInCombat = 0\nOllamaChat.DisableForCustomChannels = 0\nOllamaChat.DisableForGuild = 0\nOllamaChat.DisableForParty = 0\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
+            "OllamaChat.Enable = 0\nOllamaChat.Url = http://localhost\nOllamaChat.CapabilityProbeTimeoutSeconds = 10\nOllamaChat.HttpTimeoutSeconds = 120\nOllamaChat.Model = test\nOllamaChat.NumPredict = 1\nOllamaChat.ReasoningTokenReserve = 1\nOllamaChat.Temperature = 1\nOllamaChat.TopP = 1\nOllamaChat.NumCtx = 1\nOllamaChat.SystemPrompt = \"test\"\nOllamaChat.ChatPromptTemplate = \"test {player_message}\"\nOllamaChat.MaxConcurrentQueries = 0\nOllamaChat.WorkerThreads = 4\nOllamaChat.MaxQueueDepth = 64\nOllamaChat.ThinkMode = \"auto\"\nOllamaChat.ThinkModeEnableForModule = 1\nOllamaChat.DebugEnabled = 1\nOllamaChat.DebugShowFullPrompt = 1\nOllamaChat.EnableChatHistory = 1\nOllamaChat.ConversationHistorySaveInterval = 10\nOllamaChat.EnableChatBotSnapshotTemplate = 1\nOllamaChat.Memory.Enable = 1\nOllamaChat.Relationship.Enable = 1\nOllamaChat.EnableRAG = 1\nOllamaChat.EnableEmoteReactions = 1\nOllamaChat.PlayerReplyChance.Say = 1\nOllamaChat.PlayerReplyChance.Channel = 1\nOllamaChat.PlayerReplyChance.Party = 1\nOllamaChat.PlayerReplyChance.Guild = 1\nOllamaChat.BotReplyChance.Say = 1\nOllamaChat.BotReplyChance.Channel = 1\nOllamaChat.BotReplyChance.Party = 1\nOllamaChat.BotReplyChance.Guild = 1\nOllamaChat.EnableWhisperReplies = 0\nOllamaChat.MaxBotsToPick = 2\nOllamaChat.BotConversation.MaxChainDepth = 3\nOllamaChat.BotConversation.ChanceDecayPct = 50\nOllamaChat.BotConversation.RequireRecentHuman = 1\nOllamaChat.Cooldown.PerBotSeconds = 45\nOllamaChat.Cooldown.PerScopeSeconds = 15\nOllamaChat.RateLimit.ScopePerMinute = 8\nOllamaChat.RateLimit.GlobalPerMinute = 40\nOllamaChat.EnableRandomChatter = 0\nOllamaChat.MinRandomInterval = 45\nOllamaChat.MaxRandomInterval = 180\nOllamaChat.RandomChatterRealPlayerDistance = 200.0\nOllamaChat.RandomChatterPromptTemplate = \"test random\"\nOllamaChat.RandomChatterPromptVariations = \"test one|test two\"\nOllamaChat.RandomChatterBotCommentChance = 1\nOllamaChat.RandomChatterMaxBotsPerPlayer = 2\nOllamaChat.EnableEventChatter = 0\nOllamaChat.EventChatterBotCommentChance = 1\nOllamaChat.EventChatterBotSelfCommentChance = 1\nOllamaChat.EventChatterMaxBotsPerPlayer = 2\nOllamaChat.EventChatterPromptTemplate = \"test event\"\nOllamaChat.DisableRepliesInCombat = 0\nOllamaChat.DisableForCustomChannels = 0\nOllamaChat.DisableForGuild = 0\nOllamaChat.DisableForParty = 0\nOllamaChat.EnableSentimentTracking = 1\nOllamaChat.UnmanagedDefault = keep\n",
         )
         .expect("module config");
     }
@@ -6698,6 +7281,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingRunner {
         commands: Mutex<Vec<String>>,
+        bounded_commands: Mutex<Vec<(String, Duration)>>,
         fail_next_input: Mutex<bool>,
         fail_next_ps: Mutex<bool>,
         empty_next_ps: Mutex<bool>,
@@ -6705,6 +7289,10 @@ mod tests {
         docker_volumes_present: Mutex<Option<bool>>,
         docker_images_present: Mutex<Option<bool>>,
         running_services: Mutex<Vec<String>>,
+        local_guide_output: Mutex<Option<Result<String, String>>>,
+        timeout_next_local_guide_query: Mutex<bool>,
+        fail_next_database_start: Mutex<bool>,
+        fail_next_database_stop: Mutex<bool>,
     }
 
     impl CommandRunner for RecordingRunner {
@@ -6792,6 +7380,17 @@ mod tests {
                     .clone()
                     .unwrap_or_else(|| "34359738368".into()));
             }
+            if args.iter().any(|arg| {
+                arg.to_string_lossy()
+                    .starts_with("REALMBOX_GUIDE_TERM_HEX=")
+            }) {
+                return self
+                    .local_guide_output
+                    .lock()
+                    .expect("guide output")
+                    .clone()
+                    .unwrap_or_else(|| Ok(String::new()));
+            }
             Ok(String::new())
         }
         fn run_long(
@@ -6808,7 +7407,81 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join(" ")
             ));
+            if args.last() == Some(&OsString::from("database")) {
+                let failure = if args.iter().any(|arg| arg == "up") {
+                    Some(&self.fail_next_database_start)
+                } else if args.iter().any(|arg| arg == "stop") {
+                    Some(&self.fail_next_database_stop)
+                } else {
+                    None
+                };
+                if let Some(failure) = failure {
+                    let mut failure = failure.lock().expect("database lifecycle failure");
+                    if *failure {
+                        *failure = false;
+                        return Err("injected database lifecycle failure".into());
+                    }
+                }
+            }
             Ok(())
+        }
+        fn run_bounded(
+            &self,
+            program: &str,
+            args: &[OsString],
+            current_dir: Option<&Path>,
+            timeout: Duration,
+        ) -> Result<String, String> {
+            self.bounded_commands
+                .lock()
+                .expect("bounded commands")
+                .push((
+                    format!(
+                        "{program} {}",
+                        args.iter()
+                            .map(|arg| arg.to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ),
+                    timeout,
+                ));
+            if args.iter().any(|arg| {
+                arg.to_string_lossy()
+                    .starts_with("REALMBOX_GUIDE_TERM_HEX=")
+            }) {
+                let mut timeout_next = self
+                    .timeout_next_local_guide_query
+                    .lock()
+                    .expect("guide timeout");
+                if *timeout_next {
+                    *timeout_next = false;
+                    return Err("injected bounded command timeout".into());
+                }
+            }
+            self.run(program, args, current_dir)
+        }
+        fn run_long_bounded(
+            &self,
+            program: &str,
+            args: &[OsString],
+            current_dir: Option<&Path>,
+            log_path: &Path,
+            timeout: Duration,
+        ) -> Result<(), String> {
+            self.bounded_commands
+                .lock()
+                .expect("bounded commands")
+                .push((
+                    format!(
+                        "{program} {}",
+                        args.iter()
+                            .map(|arg| arg.to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ),
+                    timeout,
+                ));
+            self.run_long(program, args, current_dir, log_path)
         }
         fn run_to_file(
             &self,
@@ -6962,6 +7635,330 @@ mod tests {
         let inspection = inspect_game_data_root(&root).expect("inspection");
         assert_eq!(inspection.locale, "frFR");
         assert!(inspection.detail.contains("build 12340"));
+    }
+
+    #[test]
+    fn local_guide_uses_fixed_read_only_sql_and_cleans_up_its_database() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner::default();
+        *runner.local_guide_output.lock().expect("guide output") =
+            Some(Ok("17\t54657374\t46616374\t5\t7175657374".into()));
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        let query = LocalGuideQuery::new(
+            crate::local_guide::LocalGuideKind::Quest,
+            "L’épreuve",
+            LocalGuideLocale::FrFr,
+        )
+        .expect("query");
+        let response = service.query_local_guide(query).expect("guide");
+        assert_eq!(response.entries[0].title, "Test");
+        let commands = service.runner.commands.lock().expect("commands");
+        let commands = commands.join("\n");
+        assert!(commands.contains(
+            "up -d --no-build --pull never --no-deps --wait --wait-timeout 120 database"
+        ));
+        assert!(commands.contains("START TRANSACTION READ ONLY"));
+        assert!(commands.contains("MAX_EXECUTION_TIME(2000)"));
+        assert!(commands.contains("LIMIT 8; COMMIT"));
+        assert!(commands.contains("quest_template_locale"));
+        assert!(commands.contains("l.locale = 'frFR'"));
+        assert!(commands.contains("REALMBOX_GUIDE_TERM_HEX="));
+        assert!(commands.contains("export MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\""));
+        assert!(!commands.contains("--password="));
+        assert!(!commands.contains("L’épreuve"));
+        assert!(commands.contains("stop database"));
+        for forbidden in [
+            "db-import",
+            "DROP ",
+            "DELETE ",
+            "INSERT ",
+            "UPDATE ",
+            "worldserver",
+        ] {
+            assert!(!commands.contains(forbidden));
+        }
+        let bounded = service
+            .runner
+            .bounded_commands
+            .lock()
+            .expect("bounded commands");
+        assert_eq!(bounded.len(), 5);
+        for ((command, timeout), (expected, seconds)) in bounded.iter().zip([
+            ("volume inspect", 10),
+            ("ps --status running --services database", 10),
+            ("up -d", 125),
+            ("REALMBOX_GUIDE_TERM_HEX=", 10),
+            ("stop database", 15),
+        ]) {
+            assert!(command.contains(expected));
+            assert_eq!(*timeout, Duration::from_secs(seconds));
+        }
+    }
+
+    #[test]
+    fn local_guide_never_starts_a_missing_player_volume() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner::default();
+        *runner.docker_volumes_present.lock().expect("volumes") = Some(false);
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        let response = service
+            .query_local_guide(
+                LocalGuideQuery::new(
+                    crate::local_guide::LocalGuideKind::Item,
+                    "Sword",
+                    LocalGuideLocale::EnUs,
+                )
+                .expect("query"),
+            )
+            .expect("unavailable guide");
+        assert!(response.entries.is_empty());
+        let commands = service.runner.commands.lock().expect("commands").join("\n");
+        assert!(commands.contains("volume inspect"));
+        assert!(!commands.contains(" up "));
+        assert!(!commands.contains("mysql"));
+    }
+
+    #[test]
+    fn local_guide_preserves_an_online_database_and_fails_quietly() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner::default();
+        runner
+            .running_services
+            .lock()
+            .expect("services")
+            .push("database".into());
+        *runner.local_guide_output.lock().expect("guide output") =
+            Some(Err("private SQL error".into()));
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        let response = service
+            .query_local_guide(
+                LocalGuideQuery::new(
+                    crate::local_guide::LocalGuideKind::Item,
+                    "Sword",
+                    LocalGuideLocale::EnUs,
+                )
+                .expect("query"),
+            )
+            .expect("quiet fallback");
+        assert!(response.entries.is_empty());
+        assert!(
+            !serde_json::to_string(&response)
+                .expect("response")
+                .contains("private")
+        );
+        let commands = service.runner.commands.lock().expect("commands").join("\n");
+        assert!(commands.contains("item_template_locale"));
+        assert!(commands.contains("l.locale = 'enUS'"));
+        assert!(!commands.contains(" up "));
+        assert!(!commands.contains(" stop "));
+    }
+
+    fn write_solo_config_fixture(root: &Path) -> PathBuf {
+        let path = root
+            .join(RUNTIME_DIRECTORY)
+            .join("server/env/dist/etc/worldserver.conf");
+        fs::create_dir_all(path.parent().expect("config dir")).expect("config dir");
+        let catalog = crate::solo_profiles::ProfileCatalog::realm_box_v1().expect("catalog");
+        let values = &catalog
+            .definition(SoloProfile::Normal)
+            .expect("normal profile")
+            .values;
+        let mut text = "# fixture\nUnmanaged.Option = keep\n".to_string();
+        for (key, value) in values {
+            text.push_str(&format!(
+                "{} = {}\n",
+                key.config_key(),
+                value.config_value()
+            ));
+        }
+        fs::write(&path, text).expect("config fixture");
+        path
+    }
+
+    #[test]
+    fn solo_profile_commands_are_reversible_without_database_or_runtime_start() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        let config = write_solo_config_fixture(temporary.path());
+        let before = fs::read_to_string(&config).expect("before");
+        let result = service
+            .configure_solo_profile(SoloProfile::Comfortable)
+            .expect("profile");
+        assert_eq!(result.active_profile, Some(SoloProfile::Comfortable));
+        assert!(result.rollback_available);
+        let changed = fs::read_to_string(&config).expect("changed");
+        assert!(changed.contains("Rate.XP.Kill = 2"));
+        assert!(changed.contains("MaxPrimaryTradeSkill = 11"));
+        assert!(changed.contains("Unmanaged.Option = keep"));
+        let restored = service.rollback_solo_profile().expect("rollback");
+        assert_eq!(restored.active_profile, Some(SoloProfile::Normal));
+        assert_eq!(fs::read_to_string(&config).expect("restored"), before);
+        let commands = service.runner.commands.lock().expect("commands").join("\n");
+        assert!(commands.contains("ps --status running --services worldserver"));
+        for forbidden in [" up ", "mysql", "db-import", " down ", " stop "] {
+            assert!(!commands.contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn solo_profile_commands_refuse_a_running_world_before_any_write() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner::default();
+        runner
+            .running_services
+            .lock()
+            .expect("services")
+            .push("worldserver".into());
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        let config = write_solo_config_fixture(temporary.path());
+        let before = fs::read(&config).expect("before");
+        assert!(
+            service
+                .configure_solo_profile(SoloProfile::Accelerated)
+                .is_err()
+        );
+        assert!(service.rollback_solo_profile().is_err());
+        assert_eq!(fs::read(&config).expect("after"), before);
+        assert!(!temporary.path().join("solo-profiles-v1").exists());
+    }
+
+    #[test]
+    fn local_guide_closes_a_temporarily_started_database_after_query_failure() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner::default();
+        *runner.local_guide_output.lock().expect("guide output") =
+            Some(Err("query unavailable".into()));
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        service
+            .query_local_guide(
+                LocalGuideQuery::new(
+                    crate::local_guide::LocalGuideKind::Quest,
+                    "Test",
+                    LocalGuideLocale::EnUs,
+                )
+                .expect("query"),
+            )
+            .expect("quiet fallback");
+        let commands = service.runner.commands.lock().expect("commands").join("\n");
+        assert!(commands.contains(
+            "up -d --no-build --pull never --no-deps --wait --wait-timeout 120 database"
+        ));
+        assert!(commands.contains("stop database"));
+    }
+
+    #[test]
+    fn local_guide_query_timeout_still_attempts_bounded_database_cleanup() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner::default();
+        *runner
+            .timeout_next_local_guide_query
+            .lock()
+            .expect("guide timeout") = true;
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+        let response = service
+            .query_local_guide(
+                LocalGuideQuery::new(
+                    crate::local_guide::LocalGuideKind::Quest,
+                    "Test",
+                    LocalGuideLocale::EnUs,
+                )
+                .expect("query"),
+            )
+            .expect("quiet timeout fallback");
+        assert_eq!(
+            response.uncertainty,
+            crate::local_guide::LocalGuideUncertainty::Unavailable
+        );
+        let bounded = service
+            .runner
+            .bounded_commands
+            .lock()
+            .expect("bounded commands");
+        assert_eq!(bounded.len(), 5);
+        assert!(bounded[3].0.contains("REALMBOX_GUIDE_TERM_HEX="));
+        assert_eq!(bounded[3].1, Duration::from_secs(10));
+        assert!(bounded[4].0.contains("stop database"));
+        assert_eq!(bounded[4].1, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn local_guide_cleans_up_a_partial_start_and_reports_cleanup_failure() {
+        for stop_fails in [false, true] {
+            let temporary = tempfile::tempdir().expect("tempdir");
+            let runner = RecordingRunner::default();
+            *runner
+                .fail_next_database_start
+                .lock()
+                .expect("start failure") = true;
+            *runner.fail_next_database_stop.lock().expect("stop failure") = stop_fails;
+            let service = LauncherService::new(
+                temporary.path().to_path_buf(),
+                temporary.path().join("addon"),
+                runner,
+            )
+            .expect("service");
+            save_test_installation(&service, temporary.path());
+            let error = service
+                .query_local_guide(
+                    LocalGuideQuery::new(
+                        crate::local_guide::LocalGuideKind::Quest,
+                        "Test",
+                        LocalGuideLocale::EnUs,
+                    )
+                    .expect("query"),
+                )
+                .expect_err("partial start must fail");
+            assert_eq!(error.contains("arrêt de la base à vérifier"), stop_fails);
+            let commands = service.runner.commands.lock().expect("commands").join("\n");
+            assert!(commands.contains(
+                "up -d --no-build --pull never --no-deps --wait --wait-timeout 120 database"
+            ));
+            assert!(commands.contains("stop database"));
+            assert!(!commands.contains("REALMBOX_GUIDE_TERM_HEX="));
+            assert!(!commands.contains("db-import"));
+        }
     }
 
     #[test]
@@ -7858,6 +8855,8 @@ mod tests {
         )
         .expect("config");
         assert!(config.contains("http://host.docker.internal:11435/api/generate"));
+        assert!(config.contains("OllamaChat.CapabilityProbeTimeoutSeconds = 5"));
+        assert!(config.contains("OllamaChat.HttpTimeoutSeconds = 120"));
         assert!(config.contains("OllamaChat.MaxConcurrentQueries = 1"));
         assert!(config.contains("OllamaChat.WorkerThreads = 1"));
         assert!(config.contains("OllamaChat.MaxQueueDepth = 4"));
@@ -8753,6 +9752,38 @@ mod tests {
     }
 
     #[test]
+    fn manual_backup_refuses_a_missing_player_volume_before_starting_mysql() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = RecordingRunner {
+            docker_volumes_present: Mutex::new(Some(false)),
+            ..Default::default()
+        };
+        let mut service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            runner,
+        )
+        .expect("service");
+        save_test_installation(&service, temporary.path());
+
+        let error = service
+            .create_realm_backup()
+            .expect_err("a missing volume must never become an empty backup target");
+        assert!(error.contains("volume Docker des personnages a disparu"));
+        let commands = service.runner.commands.lock().expect("commands");
+        assert!(
+            commands
+                .iter()
+                .any(|command| command.contains("volume inspect"))
+        );
+        assert!(!commands.iter().any(|command| {
+            command.contains(" up -d --wait")
+                || command.contains("mysqldump")
+                || command.contains(" stop database")
+        }));
+    }
+
+    #[test]
     fn docker_purge_selects_a_verified_manual_backup_and_resumes_from_its_marker() {
         let temporary = tempfile::tempdir().expect("tempdir");
         let backup_root = temporary.path().join(PLAYER_DATA_BACKUP_DIRECTORY);
@@ -9063,6 +10094,52 @@ mod tests {
     }
 
     #[test]
+    fn setup_check_preserves_existing_realm_and_rejects_unknown_model() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            temporary.path().join("installation.json"),
+            "unknown schema sentinel",
+        )
+        .unwrap();
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .unwrap();
+        assert!(!service.inspect_installation(None).unwrap().fresh_target);
+        assert!(
+            service
+                .inspect_installation(Some("untrusted:latest"))
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(temporary.path().join("installation.json")).unwrap(),
+            "unknown schema sentinel"
+        );
+        assert!(!temporary.path().join(".installing-v3").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_installation_link_is_not_a_fresh_realm() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        std::os::unix::fs::symlink(
+            temporary.path().join("missing"),
+            temporary.path().join("installation.json"),
+        )
+        .unwrap();
+        let service = LauncherService::new(
+            temporary.path().to_path_buf(),
+            temporary.path().join("addon"),
+            RecordingRunner::default(),
+        )
+        .unwrap();
+        assert!(service.ensure_fresh_install_target().is_err());
+        assert!(!service.inspect_installation(None).unwrap().fresh_target);
+    }
+
+    #[test]
     fn unknown_installation_schema_is_an_error_not_an_empty_realm() {
         let temporary = tempfile::tempdir().expect("tempdir");
         fs::write(
@@ -9277,6 +10354,99 @@ mod tests {
                 .is_process_running(process_id)
                 .expect("ownership is cleared after termination")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_runner_bounded_commands_kill_owned_groups_at_the_deadline() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let runner = SystemCommandRunner::default();
+        let args = ["-c".into(), "trap '' TERM; sleep 30".into()];
+        let started = Instant::now();
+        let error = runner
+            .run_bounded("/bin/sh", &args, None, Duration::from_millis(50))
+            .expect_err("deadline");
+        assert!(error.contains("dépassé le délai"));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(runner.owned_processes.lock().expect("owned").is_empty());
+
+        let started = Instant::now();
+        let error = runner
+            .run_long_bounded(
+                "/bin/sh",
+                &args,
+                None,
+                &temporary.path().join("bounded.log"),
+                Duration::from_millis(50),
+            )
+            .expect_err("logged deadline");
+        assert!(error.contains("dépassé le délai"));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(runner.owned_processes.lock().expect("owned").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_runner_bounded_capture_rejects_large_output_without_pipe_deadlock() {
+        let runner = SystemCommandRunner::default();
+        let started = Instant::now();
+        let error = runner
+            .run_bounded(
+                "/bin/dd",
+                &["if=/dev/zero".into(), "bs=1024".into(), "count=128".into()],
+                None,
+                Duration::from_secs(2),
+            )
+            .expect_err("output cap");
+        assert!(error.contains("64 KiB"));
+        assert!(!error.contains("dépassé le délai"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(runner.owned_processes.lock().expect("owned").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_runner_bounded_capture_closes_descendants_inheriting_output() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let marker = temporary.path().join("orphan-marker");
+        let runner = SystemCommandRunner::default();
+        let started = Instant::now();
+        let output = runner
+            .run_bounded(
+                "/bin/sh",
+                &[
+                    "-c".into(),
+                    "(sleep 0.2; printf late > \"$1\") & printf ready".into(),
+                    "realmbox-bounded-test".into(),
+                    marker.as_os_str().into(),
+                ],
+                None,
+                Duration::from_secs(2),
+            )
+            .expect("completed parent");
+        assert_eq!(output, "ready");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(runner.owned_processes.lock().expect("owned").is_empty());
+        thread::sleep(Duration::from_millis(300));
+        assert!(
+            !marker.exists(),
+            "owned descendant must not survive completion"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_capture_is_private_and_removed_on_drop() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let capture = BoundedCommandCapture::new().expect("capture");
+        let path = capture.path.clone();
+        assert_eq!(
+            fs::metadata(&path).expect("metadata").permissions().mode() & 0o777,
+            0o600
+        );
+        drop(capture);
+        assert!(!path.exists());
     }
 
     #[test]

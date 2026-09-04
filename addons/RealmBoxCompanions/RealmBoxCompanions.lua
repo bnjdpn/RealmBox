@@ -2,6 +2,9 @@ local ADDON_NAME = "RealmBoxCompanions"
 local MINIMAP_RADIUS = 80
 local BEHAVIOR_REAPPLY_DELAY = 1.5
 local BEHAVIOR_REAPPLY_TIMEOUT = 30
+local FORMATION_CAPTURE_TIMEOUT = 30
+local FORMATION_COMMAND_TIMEOUT = 30
+local CONFIRMATION_TIMEOUT = 8
 
 local COMMANDS = {
   follow = "follow",
@@ -17,11 +20,52 @@ local BEHAVIOR_COMMANDS = {
   autonomous = "nc +new rpg,+grind,-follow,-stay",
 }
 
-local PARTY_TEMPLATE = {
-  { classToken = "PALADIN", command = ".playerbots bot addclass paladin" },
-  { classToken = "PRIEST", command = ".playerbots bot addclass priest" },
-  { classToken = "MAGE", command = ".playerbots bot addclass mage" },
-  { classToken = "HUNTER", command = ".playerbots bot addclass hunter" },
+-- Playerbots 2f7d9f774987d0157c6a0d0cc08c40bec3db3945:
+-- Script/Playerbots.cpp routes WHISPER to the receiver's PlayerbotAI only.
+-- ChatCommandHandlerStrategy.cpp registers follow/stay/co/nc. No free-text command.
+local TARGET_ACTIONS = {
+  follow = true,
+  stay = true,
+  escort = true,
+  guard = true,
+  autonomous = true,
+  boost = true,
+}
+
+-- This allow-list only contains addclass commands already exercised by RealmBox.
+-- Presets may repeat a verified class, but never construct a command from player input.
+local VERIFIED_CLASS_COMMANDS = {
+  PALADIN = ".playerbots bot addclass paladin",
+  PRIEST = ".playerbots bot addclass priest",
+  MAGE = ".playerbots bot addclass mage",
+  HUNTER = ".playerbots bot addclass hunter",
+}
+
+local SQUAD_PRESETS = {
+  balanced = {
+    slots = {
+      { classToken = "PALADIN", role = "tank" },
+      { classToken = "PRIEST", role = "healer" },
+      { classToken = "MAGE", role = "damage" },
+      { classToken = "HUNTER", role = "damage" },
+    },
+  },
+  arcane = {
+    slots = {
+      { classToken = "PALADIN", role = "tank" },
+      { classToken = "PRIEST", role = "healer" },
+      { classToken = "MAGE", role = "damage" },
+      { classToken = "MAGE", role = "damage" },
+    },
+  },
+  wilderness = {
+    slots = {
+      { classToken = "PALADIN", role = "tank" },
+      { classToken = "PRIEST", role = "healer" },
+      { classToken = "HUNTER", role = "damage" },
+      { classToken = "HUNTER", role = "damage" },
+    },
+  },
 }
 
 local CLASS_NAMES = {
@@ -54,12 +98,23 @@ local CLASS_NAMES = {
 local STRINGS = {
   fr = {
     title = "COMPAGNONS",
+    preset = "Équipe de 5 · intention des rôles",
+    presetBalanced = "Polyvalente",
+    presetArcane = "Arcanes",
+    presetWilderness = "Pistage",
+    presetSelected = "Préréglage conservé : %s",
+    roleTank = "Tank",
+    roleHealer = "Soin",
+    roleDamage = "Dégâts",
+    savedNamesEmpty = "Membres observés : aucun",
+    savedNames = "Membres observés : %s",
     formParty = "Former mon équipe",
     follow = "Me suivre",
     attack = "Attaquer",
     stay = "Attendre ici",
     regroup = "Se regrouper",
     leave = "Libérer l'équipe",
+    confirmLeave = "Confirmer la libération",
     behavior = "Comportement",
     behaviorEscort = "Escorte",
     behaviorGuard = "Garde",
@@ -67,24 +122,51 @@ local STRINGS = {
     behaviorHelp = "Applique une stratégie non-combat bornée. La sélection indique uniquement la dernière préférence envoyée, sans accusé du serveur.",
     behaviorSent = "Préférence envoyée : %s",
     behaviorReapplied = "Préférence réappliquée : %s",
-    released = "Équipe libérée · les bots reprennent leurs activités",
+    released = "Libération envoyée · autonomie puis départ du groupe",
     boostDefault = "Capacités fortes : serveur",
     boostOn = "Capacités fortes : demandées",
     boostOff = "Capacités fortes : limitées",
     ready = "Aventuriers autonomes actifs",
-    groupEmpty = "Équipe : 0/4",
-    groupState = "Équipe : %d/4 · %s",
+    groupEmpty = "Équipe : 1 joueur · 0/4 compagnon",
+    groupState = "Équipe : 1 joueur + %d/4 · %s",
     offline = "%d hors ligne",
-    noTarget = "Sélectionnez une cible ennemie",
+    noTarget = "Sélectionnez une cible ennemie vivante",
+    noPartyTarget = "Ciblez d'abord un membre de votre groupe",
     noParty = "Formez d'abord une équipe",
-    complete = "Votre groupe est déjà complet",
-    reconnecting = "Reconnexion des compagnons hors ligne…",
-    forming = "Formation d'une équipe équilibrée…",
+    noConnectedParty = "Aucun membre du groupe n'est connecté",
+    complete = "Votre groupe de cinq est déjà complet",
+    forming = "Formation sûre · les membres existants restent dans le groupe",
     remaining = "Formation de l'équipe · %d restant(s)",
     regrouping = "Équipe demandée · regroupement en cours",
+    formationPaused = "Formation suspendue pendant le combat",
+    formationInProgress = "Attendez la fin de la formation en cours",
+    formationExpired = "Formation expirée · les commandes restantes sont annulées",
+    namesCaptured = "Composition observée et mémorisée",
     actionRefused = "RealmBox : action refusée",
     commandSent = "Ordre envoyé : %s",
     available = "Action disponible",
+    unavailableCombat = "Indisponible en combat · aucune commande ne sera envoyée",
+    groupScopeRequired = "Cette action concerne le groupe : choisissez Groupe",
+    targetDispatchUnavailable = "Cette action est disponible uniquement pour le groupe",
+    targetRequiresPrimary = "Ciblez le compagnon principal enregistré, connecté dans ce groupe",
+    targetHelp = "Ordres privés bornés vers le compagnon principal ciblé et connecté. Aucune commande vers un nom saisi.",
+    confirmationLeave = "Cliquez encore pour confirmer · la composition actuelle doit rester inchangée",
+    confirmationExpired = "Confirmation expirée · aucune commande envoyée",
+    scope = "Portée",
+    scopeGroup = "Groupe",
+    scopeTarget = "Cible",
+    scopeSelected = "Portée sélectionnée : %s",
+    primary = "Compagnon principal : %s",
+    primaryNone = "Compagnon principal : aucun",
+    primaryMissing = " (absent)",
+    setPrimary = "Définir la cible principale",
+    primarySaved = "Compagnon principal conservé : %s",
+    preview = "Aperçu",
+    previewEmpty = "Survolez une action pour voir la commande exacte",
+    previewUnavailable = "Indisponible · %s",
+    previewGroup = "Groupe · %s",
+    previewTarget = "Cible %s · %s",
+    previewLocal = "Local uniquement · aucune commande serveur",
     boostHelp = "Préférence envoyée à la stratégie Playerbots ; le serveur ne fournit pas d'accusé de réception.",
     boostRequestedOn = "Capacités fortes demandées",
     boostRequestedOff = "Capacités fortes limitées",
@@ -96,12 +178,23 @@ local STRINGS = {
   },
   en = {
     title = "COMPANIONS",
+    preset = "Party of 5 · intended roles",
+    presetBalanced = "Versatile",
+    presetArcane = "Arcane",
+    presetWilderness = "Tracking",
+    presetSelected = "Saved preset: %s",
+    roleTank = "Tank",
+    roleHealer = "Heal",
+    roleDamage = "Damage",
+    savedNamesEmpty = "Observed members: none",
+    savedNames = "Observed members: %s",
     formParty = "Build my party",
     follow = "Follow me",
     attack = "Attack",
     stay = "Stay here",
     regroup = "Regroup",
     leave = "Release party",
+    confirmLeave = "Confirm release",
     behavior = "Behavior",
     behaviorEscort = "Escort",
     behaviorGuard = "Guard",
@@ -109,24 +202,51 @@ local STRINGS = {
     behaviorHelp = "Applies one bounded non-combat strategy. The selection only shows the last preference sent, without server acknowledgement.",
     behaviorSent = "Preference sent: %s",
     behaviorReapplied = "Preference reapplied: %s",
-    released = "Party released · bots resume their activities",
+    released = "Release sent · autonomy then leave the party",
     boostDefault = "Strong abilities: server",
     boostOn = "Strong abilities: requested",
     boostOff = "Strong abilities: limited",
     ready = "Autonomous adventurers active",
-    groupEmpty = "Party: 0/4",
-    groupState = "Party: %d/4 · %s",
+    groupEmpty = "Party: 1 player · 0/4 companion",
+    groupState = "Party: 1 player + %d/4 · %s",
     offline = "%d offline",
-    noTarget = "Select an enemy target",
+    noTarget = "Select a living enemy target",
+    noPartyTarget = "Target a member of your party first",
     noParty = "Build a party first",
-    complete = "Your party is already full",
-    reconnecting = "Replacing offline companions…",
-    forming = "Building a balanced party…",
+    noConnectedParty = "No party member is connected",
+    complete = "Your party of five is already full",
+    forming = "Safe formation · existing members stay in the party",
     remaining = "Building party · %d remaining",
     regrouping = "Party requested · regrouping",
+    formationPaused = "Party formation paused during combat",
+    formationInProgress = "Wait for the current party formation to finish",
+    formationExpired = "Party formation expired · remaining commands cancelled",
+    namesCaptured = "Observed composition saved",
     actionRefused = "RealmBox: action refused",
     commandSent = "Command sent: %s",
     available = "Action available",
+    unavailableCombat = "Unavailable in combat · no command will be sent",
+    groupScopeRequired = "This action affects the party: select Party",
+    targetDispatchUnavailable = "This action is available only for the party",
+    targetRequiresPrimary = "Target your saved primary companion, connected in this party",
+    targetHelp = "Bounded private commands to the targeted, connected primary companion. Never sends to a typed name.",
+    confirmationLeave = "Click again to confirm · the current composition must remain unchanged",
+    confirmationExpired = "Confirmation expired · no command sent",
+    scope = "Scope",
+    scopeGroup = "Party",
+    scopeTarget = "Target",
+    scopeSelected = "Selected scope: %s",
+    primary = "Primary companion: %s",
+    primaryNone = "Primary companion: none",
+    primaryMissing = " (absent)",
+    setPrimary = "Set targeted companion as primary",
+    primarySaved = "Primary companion saved: %s",
+    preview = "Preview",
+    previewEmpty = "Hover over an action to see its exact command",
+    previewUnavailable = "Unavailable · %s",
+    previewGroup = "Party · %s",
+    previewTarget = "Target %s · %s",
+    previewLocal = "Local only · no server command",
     boostHelp = "Preference sent to the Playerbots strategy; the server does not provide an acknowledgement.",
     boostRequestedOn = "Strong abilities requested",
     boostRequestedOff = "Strong abilities limited",
@@ -140,6 +260,7 @@ local STRINGS = {
 
 local partyQueue = {}
 local partyQueueElapsed = 0
+local partyQueueAge = 0
 local initialized = false
 local minimapDragging = false
 local behaviorReapplyPending = false
@@ -147,6 +268,11 @@ local behaviorReapplyElapsed = 0
 local behaviorReapplyAge = 0
 local behaviorReapplyMinimumMembers = 1
 local enteringWorldHandled = false
+local formationCapturePending = false
+local formationCaptureAge = 0
+local formationCapturePreset = nil
+local pendingConfirmation = nil
+local previewAction = nil
 
 local function CurrentLanguage()
   if RealmBoxCompanionsDB and RealmBoxCompanionsDB.language == "en" then
@@ -165,6 +291,21 @@ local function SetStatus(message)
   end
 end
 
+local function IsInCombat()
+  if (UnitAffectingCombat and UnitAffectingCombat("player"))
+      or (InCombatLockdown and InCombatLockdown()) then
+    return true
+  end
+  if UnitAffectingCombat then
+    for index = 1, GetNumPartyMembers() do
+      if UnitAffectingCombat("party" .. index) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function IsAttackableTarget()
   return UnitExists("target") and UnitCanAttack("player", "target") and not UnitIsDeadOrGhost("target")
 end
@@ -178,19 +319,24 @@ local function SetButtonEnabled(button, enabled)
 end
 
 local function PartySnapshot()
-  local connectedClasses = {}
+  local classCounts = {}
   local connectedClassTokens = {}
   local connectedCount = 0
   local offlineNames = {}
+  local members = {}
 
   for index = 1, GetNumPartyMembers() do
     local unit = "party" .. index
     local name = UnitName(unit)
     if name then
-      if UnitIsConnected(unit) then
-        local _, classToken = UnitClass(unit)
+      local _, classToken = UnitClass(unit)
+      if classToken then
+        classCounts[classToken] = (classCounts[classToken] or 0) + 1
+      end
+      local connected = UnitIsConnected(unit)
+      table.insert(members, { name = name, classToken = classToken, connected = connected })
+      if connected then
         if classToken then
-          connectedClasses[classToken] = true
           table.insert(connectedClassTokens, classToken)
         end
         connectedCount = connectedCount + 1
@@ -200,14 +346,198 @@ local function PartySnapshot()
     end
   end
 
-  return connectedClasses, connectedClassTokens, connectedCount, offlineNames
+  return classCounts, connectedClassTokens, connectedCount, offlineNames, members
+end
+
+local function CurrentTargetPartyMember()
+  if not UnitExists("target") then
+    return nil, nil
+  end
+  local targetName = UnitName("target")
+  if not targetName then
+    return nil, nil
+  end
+  for index = 1, GetNumPartyMembers() do
+    local unit = "party" .. index
+    if UnitName(unit) == targetName then
+      local _, classToken = UnitClass(unit)
+      return targetName, classToken, UnitIsConnected(unit)
+    end
+  end
+  return nil, nil
+end
+
+local function TargetDispatchName()
+  local name, _, connected = CurrentTargetPartyMember()
+  if connected and name == RealmBoxCompanionsDB.primaryCompanionName then
+    return name
+  end
+  return nil
+end
+
+local function CurrentBehaviorPreference()
+  if RealmBoxCompanionsDB.commandScope == "target" then
+    return RealmBoxCompanionsDB.primaryBehaviorPreference
+  end
+  return RealmBoxCompanionsDB.behaviorPreference
+end
+
+local function CurrentBoostPreference()
+  if RealmBoxCompanionsDB.commandScope == "target" then
+    return RealmBoxCompanionsDB.primaryBoostPreference
+  end
+  return RealmBoxCompanionsDB.boostPreference
+end
+
+local function DispatchCommand(command)
+  if RealmBoxCompanionsDB.commandScope == "target" then
+    local name = TargetDispatchName()
+    if not name then
+      return false
+    end
+    SendChatMessage(command, "WHISPER", nil, name)
+  else
+    SendChatMessage(command, "PARTY")
+  end
+  return true
+end
+
+local function PresetName(preset)
+  if preset == "arcane" then
+    return Text("presetArcane")
+  end
+  if preset == "wilderness" then
+    return Text("presetWilderness")
+  end
+  return Text("presetBalanced")
+end
+
+local function RoleName(role)
+  if role == "tank" then
+    return Text("roleTank")
+  end
+  if role == "healer" then
+    return Text("roleHealer")
+  end
+  return Text("roleDamage")
+end
+
+local function BehaviorText(behavior)
+  behavior = behavior or CurrentBehaviorPreference()
+  if behavior == "guard" then
+    return Text("behaviorGuard")
+  end
+  if behavior == "autonomous" then
+    return Text("behaviorAutonomous")
+  end
+  return Text("behaviorEscort")
+end
+
+local function SetButtonSelected(button, selected)
+  if selected then
+    button:LockHighlight()
+  else
+    button:UnlockHighlight()
+  end
+end
+
+local function ActivePreset()
+  return SQUAD_PRESETS[RealmBoxCompanionsDB.activePreset] or SQUAD_PRESETS.balanced
+end
+
+local function SaveActivePresetPreferences()
+  RealmBoxCompanionsDB.presetPreferences[RealmBoxCompanionsDB.activePreset] = {
+    behaviorPreference = RealmBoxCompanionsDB.behaviorPreference,
+    boostPreference = RealmBoxCompanionsDB.boostPreference,
+  }
+end
+
+local function LoadActivePresetPreferences()
+  local saved = RealmBoxCompanionsDB.presetPreferences[RealmBoxCompanionsDB.activePreset] or {}
+  RealmBoxCompanionsDB.behaviorPreference = saved.behaviorPreference
+  RealmBoxCompanionsDB.boostPreference = saved.boostPreference
+end
+
+local function PresetSummary(preset)
+  local parts = {}
+  local selected = SQUAD_PRESETS[preset] or ActivePreset()
+  for _, slot in ipairs(selected.slots) do
+    local className = CLASS_NAMES[CurrentLanguage()][slot.classToken] or slot.classToken
+    table.insert(parts, RoleName(slot.role) .. " " .. className)
+  end
+  return table.concat(parts, " · ")
+end
+
+local function BuildFormationQueue()
+  local classCounts = PartySnapshot()
+  local slotsRemaining = math.max(0, 4 - GetNumPartyMembers())
+  local result = {}
+  local availableClasses = {}
+  for classToken, count in pairs(classCounts) do
+    availableClasses[classToken] = count
+  end
+  for _, slot in ipairs(ActivePreset().slots) do
+    if slotsRemaining == 0 then
+      break
+    end
+    if (availableClasses[slot.classToken] or 0) > 0 then
+      availableClasses[slot.classToken] = availableClasses[slot.classToken] - 1
+    else
+      table.insert(result, VERIFIED_CLASS_COMMANDS[slot.classToken])
+      slotsRemaining = slotsRemaining - 1
+    end
+  end
+  return result
+end
+
+local function PartySignature()
+  local names = {}
+  for index = 1, GetNumPartyMembers() do
+    table.insert(names, UnitName("party" .. index) or "?")
+  end
+  table.sort(names)
+  return table.concat(names, "|")
+end
+
+local function SavedNamesSummary()
+  local saved = RealmBoxCompanionsDB.squadMembers[RealmBoxCompanionsDB.activePreset]
+  if type(saved) ~= "table" or table.getn(saved) == 0 then
+    return Text("savedNamesEmpty")
+  end
+  local names = {}
+  for index = 1, math.min(4, table.getn(saved)) do
+    local member = saved[index]
+    local prefix = ""
+    if member.name == RealmBoxCompanionsDB.primaryCompanionName then
+      prefix = "★"
+    end
+    table.insert(names, prefix .. member.name)
+  end
+  return string.format(Text("savedNames"), table.concat(names, ", "))
+end
+
+local function PrimarySummary()
+  local primary = RealmBoxCompanionsDB.primaryCompanionName
+  if type(primary) ~= "string" or primary == "" then
+    return Text("primaryNone")
+  end
+  local present = false
+  for index = 1, GetNumPartyMembers() do
+    if UnitName("party" .. index) == primary then
+      present = true
+      break
+    end
+  end
+  if present then
+    return string.format(Text("primary"), primary)
+  end
+  return string.format(Text("primary"), primary .. Text("primaryMissing"))
 end
 
 local function UpdatePanelPosition()
   if not RealmBoxCompanionsDB or not RealmBoxCompanionsFrame then
     return
   end
-
   local point, _, relativePoint, x, y = RealmBoxCompanionsFrame:GetPoint(1)
   if point and relativePoint and x and y then
     RealmBoxCompanionsDB.panelPoint = point
@@ -221,7 +551,6 @@ local function PositionMinimapButton()
   if not RealmBoxCompanionsMinimapButton then
     return
   end
-
   local angle = 225
   if RealmBoxCompanionsDB and type(RealmBoxCompanionsDB.minimapAngle) == "number" then
     angle = RealmBoxCompanionsDB.minimapAngle
@@ -243,7 +572,6 @@ local function CursorAngleFromMinimap()
   local centerX, centerY = Minimap:GetCenter()
   cursorX = cursorX / scale
   cursorY = cursorY / scale
-
   local deltaX = cursorX - centerX
   local deltaY = cursorY - centerY
   if deltaX == 0 then
@@ -252,7 +580,6 @@ local function CursorAngleFromMinimap()
     end
     return 270
   end
-
   local angle = math.deg(math.atan(deltaY / deltaX))
   if deltaX < 0 then
     angle = angle + 180
@@ -264,7 +591,15 @@ end
 
 local function ApplyTranslations()
   RealmBoxCompanionsFrameTitle:SetText(Text("title"))
+  RealmBoxCompanionsFramePresetLabel:SetText(Text("preset"))
+  RealmBoxCompanionsFramePresetBalanced:SetText(Text("presetBalanced"))
+  RealmBoxCompanionsFramePresetArcane:SetText(Text("presetArcane"))
+  RealmBoxCompanionsFramePresetWilderness:SetText(Text("presetWilderness"))
   RealmBoxCompanionsFrameFormParty:SetText(Text("formParty"))
+  RealmBoxCompanionsFrameScopeLabel:SetText(Text("scope"))
+  RealmBoxCompanionsFrameScopeGroup:SetText(Text("scopeGroup"))
+  RealmBoxCompanionsFrameScopeTarget:SetText(Text("scopeTarget"))
+  RealmBoxCompanionsFrameSetPrimary:SetText(Text("setPrimary"))
   RealmBoxCompanionsFrameFollow:SetText(Text("follow"))
   RealmBoxCompanionsFrameAttack:SetText(Text("attack"))
   RealmBoxCompanionsFrameStay:SetText(Text("stay"))
@@ -274,26 +609,36 @@ local function ApplyTranslations()
   RealmBoxCompanionsFrameBehaviorGuard:SetText(Text("behaviorGuard"))
   RealmBoxCompanionsFrameBehaviorFree:SetText(Text("behaviorAutonomous"))
   RealmBoxCompanionsFrameLeave:SetText(Text("leave"))
+  RealmBoxCompanionsFramePreviewLabel:SetText(Text("preview"))
   RealmBoxCompanionsFrameLanguage:SetText(Text("language"))
 end
 
-local function BehaviorText(behavior)
-  behavior = behavior or RealmBoxCompanionsDB.behaviorPreference
-  if behavior == "guard" then
-    return Text("behaviorGuard")
+local function ClearConfirmation(expired)
+  if pendingConfirmation and expired then
+    SetStatus(Text("confirmationExpired"))
   end
-  if behavior == "autonomous" then
-    return Text("behaviorAutonomous")
+  pendingConfirmation = nil
+  if RealmBoxCompanionsFrameLeave then
+    RealmBoxCompanionsFrameLeave:SetText(Text("leave"))
   end
-  return Text("behaviorEscort")
 end
 
-local function SetButtonSelected(button, selected)
-  if selected then
-    button:LockHighlight()
-  else
-    button:UnlockHighlight()
-  end
+local function ConfirmationMatches(action)
+  return pendingConfirmation
+      and pendingConfirmation.action == action
+      and pendingConfirmation.partySignature == PartySignature()
+      and pendingConfirmation.scope == RealmBoxCompanionsDB.commandScope
+end
+
+local function RequestConfirmation(action)
+  pendingConfirmation = {
+    action = action,
+    age = 0,
+    partySignature = PartySignature(),
+    scope = RealmBoxCompanionsDB.commandScope,
+  }
+  RealmBoxCompanionsFrameLeave:SetText(Text("confirmLeave"))
+  SetStatus(Text("confirmationLeave"))
 end
 
 local function CancelBehaviorReapply()
@@ -318,16 +663,18 @@ local function TryReapplyBehavior(elapsed)
   if not behaviorReapplyPending then
     return
   end
-
   behaviorReapplyAge = behaviorReapplyAge + elapsed
   if behaviorReapplyAge > BEHAVIOR_REAPPLY_TIMEOUT then
     CancelBehaviorReapply()
     return
   end
+  if IsInCombat() or RealmBoxCompanionsDB.commandScope ~= "group" then
+    behaviorReapplyElapsed = 0
+    return
+  end
   if table.getn(partyQueue) > 0 then
     return
   end
-
   local _, _, connectedCount, offlineNames = PartySnapshot()
   local partyCount = GetNumPartyMembers()
   if partyCount < behaviorReapplyMinimumMembers
@@ -336,12 +683,10 @@ local function TryReapplyBehavior(elapsed)
     behaviorReapplyElapsed = 0
     return
   end
-
   behaviorReapplyElapsed = behaviorReapplyElapsed + elapsed
   if behaviorReapplyElapsed < BEHAVIOR_REAPPLY_DELAY then
     return
   end
-
   local behavior = RealmBoxCompanionsDB.behaviorPreference
   local command = BEHAVIOR_COMMANDS[behavior]
   CancelBehaviorReapply()
@@ -352,17 +697,132 @@ local function TryReapplyBehavior(elapsed)
   SetStatus(string.format(Text("behaviorReapplied"), BehaviorText(behavior)))
 end
 
+local function TryCapturePresetMembers(elapsed)
+  if not formationCapturePending then
+    return
+  end
+  formationCaptureAge = formationCaptureAge + elapsed
+  if formationCaptureAge > FORMATION_CAPTURE_TIMEOUT then
+    formationCapturePending = false
+    formationCaptureAge = 0
+    return
+  end
+  if IsInCombat() then
+    return
+  end
+  if table.getn(partyQueue) > 0 then
+    return
+  end
+  local _, _, connectedCount, offlineNames, members = PartySnapshot()
+  if GetNumPartyMembers() ~= 4 or connectedCount ~= 4 or table.getn(offlineNames) > 0 then
+    return
+  end
+  local saved = {}
+  for index = 1, math.min(4, table.getn(members)) do
+    table.insert(saved, { name = members[index].name, classToken = members[index].classToken })
+  end
+  RealmBoxCompanionsDB.squadMembers[formationCapturePreset] = saved
+  formationCapturePending = false
+  formationCaptureAge = 0
+  SetStatus(Text("namesCaptured"))
+  return true
+end
+
+local function Availability(action)
+  if IsInCombat() then
+    return false, Text("unavailableCombat")
+  end
+  if RealmBoxCompanionsDB.commandScope ~= "group" then
+    local targetName = CurrentTargetPartyMember()
+    if not targetName then
+      return false, Text("noPartyTarget")
+    end
+    if not TargetDispatchName() then
+      return false, Text("targetRequiresPrimary")
+    end
+    if not TARGET_ACTIONS[action] then
+      return false, Text("targetDispatchUnavailable")
+    end
+    return true, Text("available")
+  end
+  if GetNumPartyMembers() == 0 then
+    return false, Text("noParty")
+  end
+  local _, _, connectedCount = PartySnapshot()
+  if connectedCount == 0 then
+    return false, Text("noConnectedParty")
+  end
+  if action == "attack" and not IsAttackableTarget() then
+    return false, Text("noTarget")
+  end
+  return true, Text("available")
+end
+
+local function CommandForPreview(action)
+  if COMMANDS[action] then
+    if action == "leave" then
+      return BEHAVIOR_COMMANDS.autonomous .. " ; " .. COMMANDS.leave
+    end
+    return COMMANDS[action]
+  end
+  if BEHAVIOR_COMMANDS[action] then
+    return BEHAVIOR_COMMANDS[action]
+  end
+  if action == "boost" then
+    if CurrentBoostPreference() == true then
+      return "co -boost"
+    end
+    return "co +boost"
+  end
+  if action == "form" then
+    local commands = table.getn(partyQueue) > 0 and partyQueue or BuildFormationQueue()
+    return table.concat(commands, " ; ")
+  end
+  return nil
+end
+
+local function SetCommandPreview(action)
+  previewAction = action
+  if action == "primary" or action == "preset" or action == "scope" then
+    RealmBoxCompanionsFramePreview:SetText(Text("previewLocal"))
+    return
+  end
+  local command = CommandForPreview(action)
+  if not command then
+    RealmBoxCompanionsFramePreview:SetText(Text("previewEmpty"))
+    return
+  end
+  if action == "form" then
+    if IsInCombat() then
+      RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewUnavailable"), Text("unavailableCombat")))
+    elseif RealmBoxCompanionsDB.commandScope ~= "group" then
+      RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewUnavailable"), Text("groupScopeRequired")))
+    elseif GetNumPartyMembers() >= 4 then
+      RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewUnavailable"), Text("complete")))
+    else
+      RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewGroup"), command))
+    end
+    return
+  end
+  local available, reason = Availability(action)
+  if not available then
+    RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewUnavailable"), reason))
+  elseif RealmBoxCompanionsDB.commandScope == "target" then
+    RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewTarget"), TargetDispatchName(), command))
+  else
+    RealmBoxCompanionsFramePreview:SetText(string.format(Text("previewGroup"), command))
+  end
+end
+
 local function UpdateGroupState()
   if not initialized then
     return
   end
-
   local _, connectedClassTokens, connectedCount, offlineNames = PartySnapshot()
   local classNames = {}
   for _, classToken in ipairs(connectedClassTokens) do
     table.insert(classNames, CLASS_NAMES[CurrentLanguage()][classToken] or classToken)
   end
-
   if connectedCount == 0 and table.getn(offlineNames) == 0 then
     RealmBoxCompanionsFrameGroupStatus:SetText(Text("groupEmpty"))
   else
@@ -376,27 +836,62 @@ local function UpdateGroupState()
     RealmBoxCompanionsFrameGroupStatus:SetText(string.format(Text("groupState"), connectedCount, details))
   end
 
-  local hasParty = GetNumPartyMembers() > 0
-  SetButtonEnabled(RealmBoxCompanionsFrameFollow, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameAttack, hasParty and IsAttackableTarget())
-  SetButtonEnabled(RealmBoxCompanionsFrameStay, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameRegroup, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameBehaviorEscort, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameBehaviorGuard, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameBehaviorFree, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameBoost, hasParty)
-  SetButtonEnabled(RealmBoxCompanionsFrameLeave, hasParty)
-  local behavior = RealmBoxCompanionsDB.behaviorPreference
+  RealmBoxCompanionsFramePresetSummary:SetText(PresetSummary())
+  RealmBoxCompanionsFrameSavedNames:SetText(SavedNamesSummary())
+  RealmBoxCompanionsFramePrimary:SetText(PrimarySummary())
+  local inCombat = IsInCombat()
+  local formationBusy = table.getn(partyQueue) > 0
+  SetButtonEnabled(RealmBoxCompanionsFramePresetBalanced, not inCombat and not formationBusy)
+  SetButtonEnabled(RealmBoxCompanionsFramePresetArcane, not inCombat and not formationBusy)
+  SetButtonEnabled(RealmBoxCompanionsFramePresetWilderness, not inCombat and not formationBusy)
+  SetButtonSelected(RealmBoxCompanionsFramePresetBalanced, RealmBoxCompanionsDB.activePreset == "balanced")
+  SetButtonSelected(RealmBoxCompanionsFramePresetArcane, RealmBoxCompanionsDB.activePreset == "arcane")
+  SetButtonSelected(RealmBoxCompanionsFramePresetWilderness, RealmBoxCompanionsDB.activePreset == "wilderness")
+  SetButtonEnabled(RealmBoxCompanionsFrameScopeGroup, not inCombat and not formationBusy)
+  SetButtonEnabled(RealmBoxCompanionsFrameScopeTarget, not inCombat and not formationBusy)
+  SetButtonSelected(RealmBoxCompanionsFrameScopeGroup, RealmBoxCompanionsDB.commandScope == "group")
+  SetButtonSelected(RealmBoxCompanionsFrameScopeTarget, RealmBoxCompanionsDB.commandScope == "target")
+  SetButtonEnabled(
+    RealmBoxCompanionsFrameFormParty,
+    not inCombat and not formationBusy and RealmBoxCompanionsDB.commandScope == "group" and GetNumPartyMembers() < 4
+  )
+  local targetName = CurrentTargetPartyMember()
+  SetButtonEnabled(RealmBoxCompanionsFrameSetPrimary, not inCombat and targetName ~= nil)
+
+  local actions = { "follow", "attack", "stay", "regroup", "escort", "guard", "autonomous", "boost", "leave" }
+  local buttons = {
+    RealmBoxCompanionsFrameFollow,
+    RealmBoxCompanionsFrameAttack,
+    RealmBoxCompanionsFrameStay,
+    RealmBoxCompanionsFrameRegroup,
+    RealmBoxCompanionsFrameBehaviorEscort,
+    RealmBoxCompanionsFrameBehaviorGuard,
+    RealmBoxCompanionsFrameBehaviorFree,
+    RealmBoxCompanionsFrameBoost,
+    RealmBoxCompanionsFrameLeave,
+  }
+  for index, action in ipairs(actions) do
+    local available = Availability(action)
+    SetButtonEnabled(buttons[index], available)
+  end
+  local behavior = CurrentBehaviorPreference()
   SetButtonSelected(RealmBoxCompanionsFrameBehaviorEscort, behavior == "escort")
   SetButtonSelected(RealmBoxCompanionsFrameBehaviorGuard, behavior == "guard")
   SetButtonSelected(RealmBoxCompanionsFrameBehaviorFree, behavior == "autonomous")
-
-  if RealmBoxCompanionsDB.boostPreference == true then
+  if CurrentBoostPreference() == true then
     RealmBoxCompanionsFrameBoost:SetText(Text("boostOn"))
-  elseif RealmBoxCompanionsDB.boostPreference == false then
+  elseif CurrentBoostPreference() == false then
     RealmBoxCompanionsFrameBoost:SetText(Text("boostOff"))
   else
     RealmBoxCompanionsFrameBoost:SetText(Text("boostDefault"))
+  end
+  if ConfirmationMatches("leave") then
+    RealmBoxCompanionsFrameLeave:SetText(Text("confirmLeave"))
+  else
+    RealmBoxCompanionsFrameLeave:SetText(Text("leave"))
+  end
+  if previewAction then
+    SetCommandPreview(previewAction)
   end
 end
 
@@ -418,18 +913,36 @@ local function RestorePanelPosition()
   end
 end
 
+local function SanitizeSavedMembers()
+  if type(RealmBoxCompanionsDB.squadMembers) ~= "table" then
+    RealmBoxCompanionsDB.squadMembers = {}
+    return
+  end
+  for preset in pairs(SQUAD_PRESETS) do
+    local source = RealmBoxCompanionsDB.squadMembers[preset]
+    local clean = {}
+    if type(source) == "table" then
+      for index = 1, math.min(4, table.getn(source)) do
+        local member = source[index]
+        if type(member) == "table" and type(member.name) == "string" and member.name ~= "" then
+          table.insert(clean, {
+            name = string.sub(member.name, 1, 48),
+            classToken = type(member.classToken) == "string" and string.sub(member.classToken, 1, 24) or nil,
+          })
+        end
+      end
+    end
+    RealmBoxCompanionsDB.squadMembers[preset] = clean
+  end
+end
+
 local function Initialize()
   local firstRun = type(RealmBoxCompanionsDB) ~= "table" or not RealmBoxCompanionsDB.seen
   if type(RealmBoxCompanionsDB) ~= "table" then
     RealmBoxCompanionsDB = {}
   end
-
   if RealmBoxCompanionsDB.language ~= "fr" and RealmBoxCompanionsDB.language ~= "en" then
-    if GetLocale and string.sub(GetLocale(), 1, 2) == "fr" then
-      RealmBoxCompanionsDB.language = "fr"
-    else
-      RealmBoxCompanionsDB.language = "en"
-    end
+    RealmBoxCompanionsDB.language = GetLocale and string.sub(GetLocale(), 1, 2) == "fr" and "fr" or "en"
   end
   if type(RealmBoxCompanionsDB.minimapAngle) ~= "number" then
     RealmBoxCompanionsDB.minimapAngle = 225
@@ -438,6 +951,51 @@ local function Initialize()
       and not BEHAVIOR_COMMANDS[RealmBoxCompanionsDB.behaviorPreference] then
     RealmBoxCompanionsDB.behaviorPreference = nil
   end
+  if RealmBoxCompanionsDB.primaryBehaviorPreference ~= nil
+      and not BEHAVIOR_COMMANDS[RealmBoxCompanionsDB.primaryBehaviorPreference] then
+    RealmBoxCompanionsDB.primaryBehaviorPreference = nil
+  end
+  if type(RealmBoxCompanionsDB.boostPreference) ~= "boolean" then
+    RealmBoxCompanionsDB.boostPreference = nil
+  end
+  if type(RealmBoxCompanionsDB.primaryBoostPreference) ~= "boolean" then
+    RealmBoxCompanionsDB.primaryBoostPreference = nil
+  end
+  if not SQUAD_PRESETS[RealmBoxCompanionsDB.activePreset] then
+    RealmBoxCompanionsDB.activePreset = "balanced"
+  end
+  if type(RealmBoxCompanionsDB.presetPreferences) ~= "table" then
+    RealmBoxCompanionsDB.presetPreferences = {}
+  end
+  for preset in pairs(SQUAD_PRESETS) do
+    local saved = RealmBoxCompanionsDB.presetPreferences[preset]
+    if type(saved) == "table" then
+      if not BEHAVIOR_COMMANDS[saved.behaviorPreference] then
+        saved.behaviorPreference = nil
+      end
+      if type(saved.boostPreference) ~= "boolean" then
+        saved.boostPreference = nil
+      end
+    else
+      RealmBoxCompanionsDB.presetPreferences[preset] = nil
+    end
+  end
+  if RealmBoxCompanionsDB.presetPreferences[RealmBoxCompanionsDB.activePreset] then
+    LoadActivePresetPreferences()
+  else
+    SaveActivePresetPreferences()
+  end
+  if RealmBoxCompanionsDB.commandScope ~= "target" then
+    RealmBoxCompanionsDB.commandScope = "group"
+  end
+  if type(RealmBoxCompanionsDB.primaryCompanionName) ~= "string" or RealmBoxCompanionsDB.primaryCompanionName == "" then
+    RealmBoxCompanionsDB.primaryCompanionName = nil
+    RealmBoxCompanionsDB.primaryBehaviorPreference = nil
+    RealmBoxCompanionsDB.primaryBoostPreference = nil
+  else
+    RealmBoxCompanionsDB.primaryCompanionName = string.sub(RealmBoxCompanionsDB.primaryCompanionName, 1, 48)
+  end
+  SanitizeSavedMembers()
   if firstRun then
     RealmBoxCompanionsDB.panelShown = true
   end
@@ -447,9 +1005,9 @@ local function Initialize()
   ApplyTranslations()
   RestorePanelPosition()
   PositionMinimapButton()
+  RealmBoxCompanionsFramePreview:SetText(Text("previewEmpty"))
   UpdateGroupState()
   SetStatus(Text("ready"))
-
   if RealmBoxCompanionsDB.panelShown then
     RealmBoxCompanionsFrame:Show()
   else
@@ -465,6 +1023,9 @@ function RealmBoxCompanions_OnLoad(frame)
   frame:RegisterEvent("PARTY_MEMBERS_CHANGED")
   frame:RegisterEvent("PLAYER_ENTERING_WORLD")
   frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+  frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+  frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+  frame:RegisterEvent("UNIT_FLAGS")
   table.insert(UISpecialFrames, "RealmBoxCompanionsFrame")
 end
 
@@ -473,31 +1034,68 @@ function RealmBoxCompanions_OnEvent(frame, event, argument)
     Initialize()
     return
   end
-  if initialized then
-    if event == "PLAYER_ENTERING_WORLD" and not enteringWorldHandled then
-      enteringWorldHandled = true
-      ScheduleBehaviorReapply(1)
-    elseif event == "PARTY_MEMBERS_CHANGED" and behaviorReapplyPending then
+  if not initialized then
+    return
+  end
+  if event == "PLAYER_ENTERING_WORLD" and not enteringWorldHandled then
+    enteringWorldHandled = true
+    ScheduleBehaviorReapply(1)
+  elseif event == "PARTY_MEMBERS_CHANGED" then
+    ClearConfirmation(false)
+    if behaviorReapplyPending then
       behaviorReapplyElapsed = 0
     end
-    UpdateGroupState()
+  elseif event == "PLAYER_REGEN_DISABLED" or (event == "UNIT_FLAGS" and IsInCombat()) then
+    ClearConfirmation(false)
+    behaviorReapplyElapsed = 0
+    SetStatus(Text("unavailableCombat"))
+  elseif event == "PLAYER_REGEN_ENABLED" and table.getn(partyQueue) > 0 then
+    SetStatus(string.format(Text("remaining"), table.getn(partyQueue)))
   end
+  UpdateGroupState()
 end
 
 function RealmBoxCompanions_OnUpdate(frame, elapsed)
+  if pendingConfirmation then
+    pendingConfirmation.age = pendingConfirmation.age + elapsed
+    if pendingConfirmation.age > CONFIRMATION_TIMEOUT then
+      ClearConfirmation(true)
+      UpdateGroupState()
+    end
+  end
   if table.getn(partyQueue) > 0 then
-    partyQueueElapsed = partyQueueElapsed + elapsed
-    if partyQueueElapsed >= 0.8 then
-      partyQueueElapsed = 0
-
-      local command = table.remove(partyQueue, 1)
-      SendChatMessage(command, "SAY")
-      if table.getn(partyQueue) == 0 then
-        SetStatus(Text("regrouping"))
-      else
-        SetStatus(string.format(Text("remaining"), table.getn(partyQueue)))
+    partyQueueAge = partyQueueAge + elapsed
+    if partyQueueAge > FORMATION_COMMAND_TIMEOUT then
+      partyQueue = {}
+      formationCapturePending = false
+      CancelBehaviorReapply()
+      SetStatus(Text("formationExpired"))
+      UpdateGroupState()
+      return
+    end
+    if IsInCombat() then
+      SetStatus(Text("formationPaused"))
+    elseif GetNumPartyMembers() >= 4 then
+      partyQueue = {}
+      SetStatus(Text("complete"))
+      UpdateGroupState()
+    else
+      partyQueueElapsed = partyQueueElapsed + elapsed
+      if partyQueueElapsed >= 0.8 then
+        partyQueueElapsed = 0
+        local command = table.remove(partyQueue, 1)
+        SendChatMessage(command, "SAY")
+        if table.getn(partyQueue) == 0 then
+          SetStatus(Text("regrouping"))
+        else
+          SetStatus(string.format(Text("remaining"), table.getn(partyQueue)))
+        end
+        UpdateGroupState()
       end
     end
+  end
+  if TryCapturePresetMembers(elapsed) then
+    UpdateGroupState()
   end
   TryReapplyBehavior(elapsed)
 end
@@ -529,54 +1127,115 @@ function RealmBoxCompanions_Toggle()
 end
 
 function RealmBoxCompanions_ToggleLanguage()
-  if CurrentLanguage() == "fr" then
-    RealmBoxCompanionsDB.language = "en"
-  else
-    RealmBoxCompanionsDB.language = "fr"
-  end
+  RealmBoxCompanionsDB.language = CurrentLanguage() == "fr" and "en" or "fr"
+  previewAction = nil
   ApplyTranslations()
   UpdateGroupState()
+  RealmBoxCompanionsFramePreview:SetText(Text("previewEmpty"))
   SetStatus(Text("ready"))
 end
 
-function RealmBoxCompanions_FormParty()
-  local connectedClasses, _, connectedCount, offlineNames = PartySnapshot()
+function RealmBoxCompanions_SelectPreset(preset)
+  if not SQUAD_PRESETS[preset] then
+    DEFAULT_CHAT_FRAME:AddMessage(Text("actionRefused"))
+    return
+  end
+  if IsInCombat() then
+    SetStatus(Text("unavailableCombat"))
+    return
+  end
+  if table.getn(partyQueue) > 0 then
+    SetStatus(Text("formationInProgress"))
+    return
+  end
+  ClearConfirmation(false)
+  CancelBehaviorReapply()
+  formationCapturePending = false
+  SaveActivePresetPreferences()
+  RealmBoxCompanionsDB.activePreset = preset
+  LoadActivePresetPreferences()
+  SetStatus(string.format(Text("presetSelected"), PresetName(preset)))
+  SetCommandPreview("preset")
+  UpdateGroupState()
+end
 
-  if connectedCount >= 4 and table.getn(offlineNames) == 0 then
+function RealmBoxCompanions_SelectScope(scope)
+  if scope ~= "group" and scope ~= "target" then
+    DEFAULT_CHAT_FRAME:AddMessage(Text("actionRefused"))
+    return
+  end
+  if IsInCombat() then
+    SetStatus(Text("unavailableCombat"))
+    return
+  end
+  if table.getn(partyQueue) > 0 then
+    SetStatus(Text("formationInProgress"))
+    return
+  end
+  ClearConfirmation(false)
+  CancelBehaviorReapply()
+  RealmBoxCompanionsDB.commandScope = scope
+  local scopeName = scope == "group" and Text("scopeGroup") or Text("scopeTarget")
+  SetStatus(string.format(Text("scopeSelected"), scopeName))
+  SetCommandPreview("scope")
+  UpdateGroupState()
+end
+
+function RealmBoxCompanions_SetPrimary()
+  if IsInCombat() then
+    SetStatus(Text("unavailableCombat"))
+    return
+  end
+  local name, classToken = CurrentTargetPartyMember()
+  if not name then
+    SetStatus(Text("noPartyTarget"))
+    return
+  end
+  if RealmBoxCompanionsDB.primaryCompanionName ~= name then
+    RealmBoxCompanionsDB.primaryBehaviorPreference = nil
+    RealmBoxCompanionsDB.primaryBoostPreference = nil
+  end
+  RealmBoxCompanionsDB.primaryCompanionName = string.sub(name, 1, 48)
+  RealmBoxCompanionsDB.primaryCompanionClassToken = classToken
+  SetStatus(string.format(Text("primarySaved"), name))
+  SetCommandPreview("primary")
+  UpdateGroupState()
+end
+
+function RealmBoxCompanions_FormParty()
+  if IsInCombat() then
+    SetStatus(Text("unavailableCombat"))
+    return
+  end
+  if RealmBoxCompanionsDB.commandScope ~= "group" then
+    SetStatus(Text("groupScopeRequired"))
+    return
+  end
+  if table.getn(partyQueue) > 0 then
+    SetStatus(Text("formationInProgress"))
+    return
+  end
+  local partyCount = GetNumPartyMembers()
+  if partyCount >= 4 then
     ScheduleBehaviorReapply(4)
     SetStatus(Text("complete"))
     return
   end
-
-  for _, name in ipairs(offlineNames) do
-    UninviteUnit(name)
-  end
-
-  partyQueue = {}
-  local slotsRemaining = 4 - connectedCount
-  for _, companion in ipairs(PARTY_TEMPLATE) do
-    if slotsRemaining == 0 then
-      break
-    end
-    if not connectedClasses[companion.classToken] then
-      table.insert(partyQueue, companion.command)
-      slotsRemaining = slotsRemaining - 1
-    end
-  end
-
+  partyQueue = BuildFormationQueue()
   if table.getn(partyQueue) == 0 then
     ScheduleBehaviorReapply(4)
     SetStatus(Text("complete"))
     return
   end
-
   ScheduleBehaviorReapply(4)
+  formationCapturePending = true
+  formationCaptureAge = 0
+  formationCapturePreset = RealmBoxCompanionsDB.activePreset
   partyQueueElapsed = 0.8
-  if table.getn(offlineNames) > 0 then
-    SetStatus(Text("reconnecting"))
-  else
-    SetStatus(Text("forming"))
-  end
+  partyQueueAge = 0
+  SetStatus(Text("forming"))
+  SetCommandPreview("form")
+  UpdateGroupState()
 end
 
 function RealmBoxCompanions_Run(action)
@@ -585,25 +1244,35 @@ function RealmBoxCompanions_Run(action)
     DEFAULT_CHAT_FRAME:AddMessage(Text("actionRefused"))
     return
   end
-  if GetNumPartyMembers() == 0 then
-    SetStatus(Text("noParty"))
-    return
-  end
-  if action == "attack" and not IsAttackableTarget() then
-    SetStatus(Text("noTarget"))
+  local available, reason = Availability(action)
+  if not available then
+    if IsInCombat() then
+      ClearConfirmation(false)
+    end
+    SetStatus(reason)
     return
   end
   if action == "leave" then
+    if not ConfirmationMatches("leave") then
+      RequestConfirmation("leave")
+      SetCommandPreview("leave")
+      return
+    end
+    ClearConfirmation(false)
     CancelBehaviorReapply()
+    formationCapturePending = false
+    partyQueue = {}
     RealmBoxCompanionsDB.behaviorPreference = "autonomous"
+    SaveActivePresetPreferences()
     SendChatMessage(BEHAVIOR_COMMANDS.autonomous, "PARTY")
     SendChatMessage(command, "PARTY")
     SetStatus(Text("released"))
     UpdateGroupState()
     return
   end
-  SendChatMessage(command, "PARTY")
+  DispatchCommand(command)
   SetStatus(string.format(Text("commandSent"), Text(action)))
+  SetCommandPreview(action)
   UpdateGroupState()
 end
 
@@ -613,23 +1282,29 @@ function RealmBoxCompanions_SetBehavior(behavior)
     DEFAULT_CHAT_FRAME:AddMessage(Text("actionRefused"))
     return
   end
-  if GetNumPartyMembers() == 0 then
-    SetStatus(Text("noParty"))
+  local available, reason = Availability(behavior)
+  if not available then
+    SetStatus(reason)
     return
   end
-
   CancelBehaviorReapply()
-  RealmBoxCompanionsDB.behaviorPreference = behavior
-  SendChatMessage(command, "PARTY")
-  if table.getn(partyQueue) > 0 then
+  if RealmBoxCompanionsDB.commandScope == "target" then
+    RealmBoxCompanionsDB.primaryBehaviorPreference = behavior
+  else
+    RealmBoxCompanionsDB.behaviorPreference = behavior
+    SaveActivePresetPreferences()
+  end
+  DispatchCommand(command)
+  if RealmBoxCompanionsDB.commandScope == "group" and table.getn(partyQueue) > 0 then
     ScheduleBehaviorReapply(4)
   end
   SetStatus(string.format(Text("behaviorSent"), BehaviorText(behavior)))
+  SetCommandPreview(behavior)
   UpdateGroupState()
 end
 
 function RealmBoxCompanions_CycleBehavior()
-  local current = RealmBoxCompanionsDB.behaviorPreference
+  local current = CurrentBehaviorPreference()
   local nextBehavior = "escort"
   if current == "escort" or current == nil then
     nextBehavior = "guard"
@@ -640,19 +1315,26 @@ function RealmBoxCompanions_CycleBehavior()
 end
 
 function RealmBoxCompanions_ToggleBoost()
-  if GetNumPartyMembers() == 0 then
-    SetStatus(Text("noParty"))
+  local available, reason = Availability("boost")
+  if not available then
+    SetStatus(reason)
     return
   end
-
-  RealmBoxCompanionsDB.boostPreference = RealmBoxCompanionsDB.boostPreference ~= true
-  if RealmBoxCompanionsDB.boostPreference then
-    SendChatMessage("co +boost", "PARTY")
+  local nextPreference = CurrentBoostPreference() ~= true
+  if RealmBoxCompanionsDB.commandScope == "target" then
+    RealmBoxCompanionsDB.primaryBoostPreference = nextPreference
+  else
+    RealmBoxCompanionsDB.boostPreference = nextPreference
+    SaveActivePresetPreferences()
+  end
+  if nextPreference then
+    DispatchCommand("co +boost")
     SetStatus(Text("boostRequestedOn"))
   else
-    SendChatMessage("co -boost", "PARTY")
+    DispatchCommand("co -boost")
     SetStatus(Text("boostRequestedOff"))
   end
+  SetCommandPreview("boost")
   UpdateGroupState()
 end
 
@@ -690,26 +1372,41 @@ function RealmBoxCompanions_Minimap_OnEnter(button)
 end
 
 function RealmBoxCompanions_Action_OnEnter(button, action)
+  SetCommandPreview(action)
   local title = Text(action)
-  if action == "behavior" then
-    title = BehaviorText()
-  elseif action == "boost" then
-    if RealmBoxCompanionsDB.boostPreference == true then
+  if action == "boost" then
+    if CurrentBoostPreference() == true then
       title = Text("boostOn")
-    elseif RealmBoxCompanionsDB.boostPreference == false then
+    elseif CurrentBoostPreference() == false then
       title = Text("boostOff")
     else
       title = Text("boostDefault")
     end
+  elseif action == "form" then
+    title = Text("formParty")
   end
   GameTooltip:SetOwner(button, "ANCHOR_LEFT")
   GameTooltip:SetText(title)
-  if GetNumPartyMembers() == 0 then
-    GameTooltip:AddLine(Text("noParty"), 1, 0.35, 0.35)
-  elseif action == "attack" and not IsAttackableTarget() then
-    GameTooltip:AddLine(Text("noTarget"), 1, 0.35, 0.35)
-  elseif action == "behavior" then
-    GameTooltip:AddLine(Text("behaviorHelp"), 0.8, 0.8, 0.8, true)
+  local available, reason = Availability(action)
+  if action == "form" then
+    available = not IsInCombat()
+        and RealmBoxCompanionsDB.commandScope == "group"
+        and table.getn(partyQueue) == 0
+        and GetNumPartyMembers() < 4
+    if not available then
+      if IsInCombat() then
+        reason = Text("unavailableCombat")
+      elseif RealmBoxCompanionsDB.commandScope ~= "group" then
+        reason = Text("groupScopeRequired")
+      elseif GetNumPartyMembers() >= 4 then
+        reason = Text("complete")
+      else
+        reason = Text("formationInProgress")
+      end
+    end
+  end
+  if not available then
+    GameTooltip:AddLine(reason, 1, 0.35, 0.35)
   elseif action == "boost" then
     GameTooltip:AddLine(Text("boostHelp"), 0.8, 0.8, 0.8, true)
   else
@@ -719,12 +1416,52 @@ function RealmBoxCompanions_Action_OnEnter(button, action)
 end
 
 function RealmBoxCompanions_Behavior_OnEnter(button, behavior)
+  SetCommandPreview(behavior)
   GameTooltip:SetOwner(button, "ANCHOR_LEFT")
   GameTooltip:SetText(BehaviorText(behavior))
-  if GetNumPartyMembers() == 0 then
-    GameTooltip:AddLine(Text("noParty"), 1, 0.35, 0.35)
+  local available, reason = Availability(behavior)
+  if not available then
+    GameTooltip:AddLine(reason, 1, 0.35, 0.35)
   else
     GameTooltip:AddLine(Text("behaviorHelp"), 0.8, 0.8, 0.8, true)
+  end
+  GameTooltip:Show()
+end
+
+function RealmBoxCompanions_Preset_OnEnter(button, preset)
+  SetCommandPreview("preset")
+  GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+  GameTooltip:SetText(PresetName(preset))
+  GameTooltip:AddLine(PresetSummary(preset), 0.8, 0.8, 0.8, true)
+  if IsInCombat() then
+    GameTooltip:AddLine(Text("unavailableCombat"), 1, 0.35, 0.35)
+  end
+  GameTooltip:Show()
+end
+
+function RealmBoxCompanions_Scope_OnEnter(button, scope)
+  SetCommandPreview("scope")
+  GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+  GameTooltip:SetText(scope == "group" and Text("scopeGroup") or Text("scopeTarget"))
+  if scope == "target" then
+    GameTooltip:AddLine(Text("targetHelp"), 0.8, 0.8, 0.8, true)
+  else
+    GameTooltip:AddLine(Text("available"), 0.8, 0.8, 0.8)
+  end
+  GameTooltip:Show()
+end
+
+function RealmBoxCompanions_Primary_OnEnter(button)
+  SetCommandPreview("primary")
+  GameTooltip:SetOwner(button, "ANCHOR_LEFT")
+  GameTooltip:SetText(Text("setPrimary"))
+  local targetName = CurrentTargetPartyMember()
+  if IsInCombat() then
+    GameTooltip:AddLine(Text("unavailableCombat"), 1, 0.35, 0.35)
+  elseif not targetName then
+    GameTooltip:AddLine(Text("noPartyTarget"), 1, 0.35, 0.35)
+  else
+    GameTooltip:AddLine(Text("previewLocal"), 0.8, 0.8, 0.8)
   end
   GameTooltip:Show()
 end
@@ -735,8 +1472,10 @@ SlashCmdList.REALMBOXCOMPANIONS = function(message)
   local command = string.lower(message or "")
   if command == "fr" or command == "en" then
     RealmBoxCompanionsDB.language = command
+    previewAction = nil
     ApplyTranslations()
     UpdateGroupState()
+    RealmBoxCompanionsFramePreview:SetText(Text("previewEmpty"))
     SetStatus(Text("ready"))
     RealmBoxCompanionsFrame:Show()
     return

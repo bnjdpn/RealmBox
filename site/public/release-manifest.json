@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "channel": "technical-preview",
-  "productVersion": "0.4.0",
-  "updatedAt": "2026-09-03",
+  "productVersion": "0.5.0",
+  "updatedAt": "2026-09-04",
   "publicRelease": null,
   "latestPreview": {
     "version": "0.2.0",

@@ -20,6 +20,8 @@ Le mode reste indépendant de la population, de la présence des bots et du comp
 
 Un seul bot est choisi par message et un seul worker LLM traite une file de quatre demandes maximum. Les combats, canaux personnalisés et guildes restent exclus. Les pourcentages sont des chances de soumission avant les plafonds de file et de débit : ils ne décrivent ni un nombre garanti de messages ni une fréquence observée.
 
+Tous les types de requêtes partagent aussi un coupe-circuit local. Trois échecs consécutifs suspendent les nouveaux appels pendant cinq secondes. Une seule requête sert ensuite de sonde ; si elle échoue, les fenêtres passent à 10, 20, 40 puis 60 secondes au maximum. Une réussite ou un rechargement de configuration réinitialise la politique. Une génération empêche une réponse ancienne de rouvrir ou refermer un circuit reconfiguré. Cette politique ne crée ni nouvelle tentative, ni sommeil, ni thread : le repli reste silencieux pour le monde.
+
 Le prompt transmis au petit modèle reste volontairement minimal. Les profils RealmBox désactivent l’historique de discussion, la mémoire et les relations évolutives, le RAG, le suivi de sentiment ainsi que les emotes générées. Aucun de ces éléments n’est injecté ou persisté pour simuler une personnalité durable. La température est fixée à zéro.
 
 Pour une réponse directe, le prompt demande au modèle de répondre dans la langue du dernier message joueur. Pour un échange ambiant sans ce signal, RealmBox inspecte la locale de la copie client gérée : les prompts aléatoires, leurs variations et les prompts événementiels sont français avec `frFR`, anglais avec les autres locales prises en charge. Le test Rust couvre la sélection et la génération des deux variantes ; le respect linguistique par le modèle reste à qualifier dans OpenWoW.
@@ -41,6 +43,8 @@ Les clés du gouverneur pour **Party** et **Raid** incluent désormais le GUID d
 ## Niveau de preuve et risques
 
 Les garanties de priorité, de réservation, d’isolation et de sélection FR/EN ci-dessus sont des garanties structurelles du patch source, de la configuration générée et de leurs contrôles automatisés. Elles ne prouvent ni la compatibilité d’un build serveur combiné, ni la latence du modèle, ni la cadence perçue, ni la qualité et la langue des répliques dans le vrai client.
+
+Le coupe-circuit est vérifié en compilant et exécutant la politique C++ exacte extraite du patch, et le patch s’applique proprement au commit upstream épinglé. Le worldserver complet et une nouvelle image serveur n’ont cependant pas été reconstruits dans ce lot : cette preuve ciblée n’est pas une preuve de runtime.
 
 Une preuve réelle antérieure avait obtenu une réponse anglaise puis une réponse française avec le preset direct de l’époque. Elle ne qualifie pas les nouveaux modes **Immersif** et **Vivant**, les échanges entre bots, l’isolation simultanée de plusieurs groupes ni l’absence de flood. Un build combiné, un chargement worldserver puis un parcours OpenWoW réel restent nécessaires.
 

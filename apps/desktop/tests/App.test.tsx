@@ -1,9 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
-import type { LauncherStatus } from "../src/types";
+import type { InstallationCheck, LauncherStatus, SoloProfileView } from "../src/types";
 
 const missing: LauncherStatus = {
   phase: "needsGameData",
@@ -55,6 +55,24 @@ const running: LauncherStatus = {
   components: ready.components.map((component) => ({ ...component, state: "running", detail: "Actif" })),
 };
 
+const soloView: SoloProfileView = {
+  activeProfile: "normal", rollbackAvailable: false, pendingChange: false,
+  profiles: (["normal", "comfortable", "accelerated"] as const).map((profile, index) => ({
+    profile, catalogVersion: 1,
+    labelFr: ["Normal", "Confort", "Accéléré"][index],
+    labelEn: ["Normal", "Comfortable", "Accelerated"][index],
+    settings: [
+      { key: "Rate.XP.Kill", value: String(index + 1) },
+      { key: "Rate.Reputation.Gain", value: String(index + 1) },
+      { key: "Rate.Drop.Money", value: index === 2 ? "2" : "1" },
+      { key: "MaxPrimaryTradeSkill", value: index ? "11" : "2" },
+      { key: "Instance.IgnoreRaid", value: index ? "1" : "0" },
+      { key: "Instance.IgnoreLevel", value: index ? "1" : "0" },
+      { key: "Quests.IgnoreRaid", value: index ? "1" : "0" },
+    ],
+  })),
+};
+
 const runtime = vi.hoisted(() => ({
   bootstrapLauncher: vi.fn(),
   changeGameDataPath: vi.fn(),
@@ -70,7 +88,13 @@ const runtime = vi.hoisted(() => ({
   subscribeLauncherStatus: vi.fn(),
   inspectAiCapability: vi.fn(),
   inspectGameData: vi.fn(),
+  inspectInstallation: vi.fn(),
+  openSetupResource: vi.fn(),
   inspectRealmBackup: vi.fn(),
+  queryLocalGuide: vi.fn(),
+  inspectSoloProfiles: vi.fn(),
+  configureSoloProfile: vi.fn(),
+  rollbackSoloProfile: vi.fn(),
   updatePlayerbotPopulation: vi.fn(),
   getRealmDiagnostics: vi.fn(),
 }));
@@ -90,6 +114,8 @@ describe("RealmBox launcher", () => {
       detail: "Données WotLK frFR reconnues ; la build 12340 sera confirmée par les extracteurs locaux.",
     });
     runtime.installRealm.mockResolvedValue(ready);
+    runtime.inspectInstallation.mockResolvedValue({ freshTarget: true, platformSupported: true, dockerReady: true, composeReady: true, availableBytes: 80 * 1024 ** 3, requiredBytes: 24 * 1024 ** 3, botCapacity: 50 });
+    runtime.openSetupResource.mockResolvedValue(undefined);
     runtime.restoreLastRecovery.mockResolvedValue(ready);
     runtime.startRealm.mockResolvedValue(running);
     runtime.stopRealm.mockResolvedValue(ready);
@@ -97,6 +123,10 @@ describe("RealmBox launcher", () => {
     runtime.configureDialogueChattiness.mockResolvedValue({ ...ready, aiEnabled: true, aiModel: "llama3.2:3b", dialogueChattiness: "lively" });
     runtime.inspectRealmBackup.mockResolvedValue({ createdAtUnixMs: 1_788_437_400_000, sizeBytes: 4_194_304 });
     runtime.createRealmBackup.mockResolvedValue({ createdAtUnixMs: 1_788_437_460_000, sizeBytes: 4_325_376 });
+    runtime.queryLocalGuide.mockResolvedValue({ entries: [], provenance: null, uncertainty: "none" });
+    runtime.inspectSoloProfiles.mockResolvedValue(soloView);
+    runtime.configureSoloProfile.mockResolvedValue({ ...soloView, activeProfile: "comfortable", rollbackAvailable: true });
+    runtime.rollbackSoloProfile.mockResolvedValue(soloView);
     runtime.updatePlayerbotPopulation.mockResolvedValue({ ...running, botCount: 100, requestedBotCount: 100, appliedBotCount: 100, botPresence: "close" });
     runtime.getRealmDiagnostics.mockResolvedValue({
       summary: "Aucune erreur récente détectée dans les journaux gérés.",
@@ -132,16 +162,160 @@ describe("RealmBox launcher", () => {
     await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
     expect(runtime.inspectGameData).toHaveBeenCalledWith("/Jeux/Wrath");
     expect(screen.getByText("/Jeux/Wrath")).toBeVisible();
-    expect(screen.getByText(/Data frFR · build 12340/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: /^installer$/i })).toBeEnabled();
-
-    await user.click(screen.getByRole("button", { name: /réglages/i }));
+    expect(screen.getByText(/archives reconnues/i)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^installer$/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
     await screen.findByText(/Llama 3\.2 3B/i);
     await user.click(screen.getByRole("checkbox", { name: /dialogues locaux/i }));
-    await user.click(screen.getByRole("button", { name: /fermer/i }));
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+    expect(await screen.findByRole("button", { name: /^installer$/i })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: /^installer$/i }));
     expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, 50, "natural", true, "llama3.2:3b");
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
+  });
+
+  async function reachReview(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: /choisir le dossier/i }));
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+  }
+
+  it("gates setup steps on inspection and preserves the selected folder when the picker is cancelled", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /^continuer$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /votre installation/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
+    runtime.chooseGameData.mockResolvedValueOnce(null);
+    await user.click(screen.getByRole("button", { name: /changer de dossier/i }));
+    expect(screen.getByText("/Jeux/Wrath")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^continuer$/i })).toBeEnabled();
+    expect(runtime.installRealm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Docker", { dockerReady: false }], ["Compose", { composeReady: false }],
+    ["platform", { platformSupported: false }], ["existing realm", { freshTarget: false }],
+    ["unknown disk", { availableBytes: null }], ["insufficient disk", { availableBytes: 1 }],
+  ])("blocks installation when the %s check fails", async (_, failure) => {
+    const user = userEvent.setup();
+    const baseline = await runtime.inspectInstallation();
+    runtime.inspectInstallation.mockResolvedValue({ ...baseline, ...failure });
+    render(<App />);
+    await reachReview(user);
+    expect(screen.getByRole("button", { name: /^installer$/i })).toBeDisabled();
+    expect(runtime.installRealm).not.toHaveBeenCalled();
+  });
+
+  it("keeps install disabled during the check and offers a retry after a check error", async () => {
+    const user = userEvent.setup();
+    let rejectCheck: (reason: unknown) => void = () => undefined;
+    runtime.inspectInstallation.mockImplementationOnce(() => new Promise((_, reject) => { rejectCheck = reject; }));
+    render(<App />);
+    await reachReview(user);
+    expect(screen.getByRole("button", { name: /^installer$/i })).toBeDisabled();
+    expect(screen.getAllByText(/vérification de cet ordinateur/i)[0]).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /votre installation/i }));
+    expect(runtime.inspectInstallation).toHaveBeenCalledTimes(1);
+    await act(async () => rejectCheck(new Error("probe failed")));
+    expect(screen.getByRole("alert")).toHaveTextContent(/rien n’a été installé/i);
+    await user.click(screen.getByRole("button", { name: /vérifier à nouveau/i }));
+    expect(screen.getByRole("button", { name: /^installer$/i })).toBeEnabled();
+  });
+
+  it("preserves independent choices across back navigation and never silently raises the detected bot limit", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /choisir le dossier/i }));
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
+    await user.click(screen.getByRole("radio", { name: /monde dense/i }));
+    await user.click(screen.getByRole("radio", { name: /dispersés/i }));
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+    expect(screen.getByText(/prévu avec cette mémoire : 50 bots/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^retour$/i }));
+    expect(screen.getByRole("radio", { name: /monde dense/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /dispersés/i })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+    await user.click(screen.getByRole("button", { name: /^installer$/i }));
+    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, 100, "dispersed", false, null);
+  });
+
+  it("invalidates a stale disk check when the optional model changes", async () => {
+    const user = userEvent.setup();
+    let resolveOld: (value: InstallationCheck) => void = () => undefined;
+    const baseline = await runtime.inspectInstallation();
+    runtime.inspectInstallation.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    render(<App />);
+    await reachReview(user);
+    await user.click(screen.getByRole("button", { name: /^retour$/i }));
+    await user.click(screen.getByRole("checkbox", { name: /dialogues locaux/i }));
+    runtime.inspectInstallation.mockResolvedValue({ ...baseline, availableBytes: 24 * 1024 ** 3, requiredBytes: 26 * 1024 ** 3 });
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+    await act(async () => resolveOld(baseline));
+    expect(runtime.inspectInstallation).toHaveBeenLastCalledWith("llama3.2:3b");
+    expect(screen.getByRole("button", { name: /^installer$/i })).toBeDisabled();
+  });
+
+  it("keeps the setup draft after install failure and retry, without automatically installing again", async () => {
+    const user = userEvent.setup();
+    runtime.installRealm.mockRejectedValueOnce({ code: "downloadInterrupted" });
+    render(<App />);
+    await reachReview(user);
+    await user.click(screen.getByRole("button", { name: /^retour$/i }));
+    await user.click(screen.getByRole("radio", { name: /aventure tranquille/i }));
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+    await user.click(screen.getByRole("button", { name: /^installer$/i }));
+    await user.click(await screen.findByRole("button", { name: /réessayer/i }));
+    expect(screen.getByText("/Jeux/Wrath")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
+    expect(screen.getByRole("radio", { name: /aventure tranquille/i })).toBeChecked();
+    expect(runtime.installRealm).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens only the chosen language help page and leaves the game selection untouched", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText(/je n’ai pas encore les fichiers/i));
+    await user.click(screen.getByRole("button", { name: /chromiecraft/i }));
+    expect(runtime.openSetupResource).toHaveBeenCalledWith("gameFr");
+    expect(runtime.chooseGameData).not.toHaveBeenCalled();
+    expect(runtime.installRealm).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^continuer$/i })).toBeDisabled();
+  });
+
+  it("has no automated accessibility violation across the three setup steps", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const options = { rules: { "color-contrast": { enabled: false } } };
+    await screen.findByRole("button", { name: /^continuer$/i });
+    expect((await axe.run(container, options)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
+    expect((await axe.run(container, options)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^installer$/i })).toBeEnabled());
+    expect((await axe.run(container, options)).violations).toEqual([]);
+  });
+
+  it("reviews and installs in English with explicit model consent and localized download help", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("realmbox-language", "en");
+    render(<App />);
+    await user.click(await screen.findByText(/I don’t have the WoW files yet/i));
+    await user.click(screen.getByRole("button", { name: /ChromieCraft downloads/i }));
+    expect(runtime.openSetupResource).toHaveBeenCalledWith("gameEn");
+    await user.click(screen.getByRole("button", { name: /choose the folder/i }));
+    expect(runtime.chooseGameData).toHaveBeenCalledWith("en");
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(screen.getByRole("checkbox", { name: /local dialogue/i })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: /local dialogue/i }));
+    expect(screen.getByText(/No paid dialogue service is activated/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /check my installation/i }));
+    expect(screen.getByText(/24 GiB required/i)).toBeVisible();
+    expect(screen.getByText(/Planned with this memory/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^install$/i }));
+    expect(await screen.findByRole("button", { name: /^play$/i })).toBeVisible();
+    expect(runtime.installRealm).toHaveBeenCalledWith("/Jeux/Wrath", "managedOpenWow", true, 50, "natural", true, "llama3.2:3b");
   });
 
   it("rejects incomplete game data before installation starts", async () => {
@@ -152,9 +326,12 @@ describe("RealmBox launcher", () => {
     await screen.findByRole("heading", { name: /préparer mon monde/i });
     await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
 
-    expect(await screen.findByText(/lichking\.MPQ/i)).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ce dossier n’a pas pu être utilisé/i);
     expect(screen.queryByRole("button", { name: /^installer$/i })).not.toBeInTheDocument();
     expect(runtime.installRealm).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /voir le diagnostic/i }));
+    await user.click(await screen.findByText(/^cause$/i));
+    expect(screen.getByText(/lichking\.MPQ/i)).toBeVisible();
   });
 
   it("surfaces a native folder-picker failure instead of leaving the button inert", async () => {
@@ -165,7 +342,8 @@ describe("RealmBox launcher", () => {
     await screen.findByRole("heading", { name: /préparer mon monde/i });
     await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
 
-    expect(await screen.findByText(/dialog\.open not allowed/i)).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ce dossier n’a pas pu être utilisé/i);
+    expect(screen.queryByText(/dialog\.open not allowed/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^installer$/i })).not.toBeInTheDocument();
     expect(runtime.inspectGameData).not.toHaveBeenCalled();
   });
@@ -175,10 +353,10 @@ describe("RealmBox launcher", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: /préparer mon monde/i });
-    await user.click(screen.getByRole("button", { name: /réglages/i }));
     await user.click(screen.getByRole("radio", { name: /mon client original/i }));
-    await user.click(screen.getByRole("button", { name: /fermer/i }));
     await user.click(screen.getByRole("button", { name: /choisir le dossier/i }));
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
+    await user.click(screen.getByRole("button", { name: /vérifier mon installation/i }));
     await user.click(screen.getByRole("button", { name: /^installer$/i }));
 
     expect(runtime.installRealm).toHaveBeenCalledWith(
@@ -209,7 +387,9 @@ describe("RealmBox launcher", () => {
     });
     render(<App />);
 
-    await userEvent.setup().click(await screen.findByRole("button", { name: /réglages/i }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /choisir le dossier/i }));
+    await user.click(screen.getByRole("button", { name: /^continuer$/i }));
     expect(await screen.findByText(/aucun petit modèle confortable/i)).toBeVisible();
     expect(screen.getByRole("checkbox", { name: /dialogues locaux/i })).toBeDisabled();
   });
@@ -261,12 +441,13 @@ describe("RealmBox launcher", () => {
 
     await user.click(screen.getByRole("button", { name: /réglages/i }));
     await user.click(screen.getByRole("button", { name: "English" }));
-
+    await user.click(screen.getByRole("button", { name: /^close$/i }));
     expect(screen.getByRole("heading", { name: /set up my world/i })).toBeVisible();
     expect(screen.getByText(/does not download proprietary game data/i)).toBeVisible();
-    expect(screen.getByRole("radio", { name: /natural/i })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /^close$/i }));
     expect(screen.getByRole("button", { name: /choose the folder/i })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /choose the folder/i }));
+    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(screen.getByRole("radio", { name: /natural/i })).toBeVisible();
   });
 
   it("applies a running bot population without stopping the client", async () => {
@@ -339,6 +520,118 @@ describe("RealmBox launcher", () => {
 
     expect(runtime.updatePlayerbotPopulation).toHaveBeenCalledWith(false, 50, "natural");
     expect(runtime.startRealm).toHaveBeenCalledWith(false, 50, "natural", false);
+  });
+
+  it("searches local references only after an explicit player request", async () => {
+    const user = userEvent.setup();
+    const source = { scope: "runtimeSnapshot", sourceId: "world-fixture", observedAtUnixMs: 1_788_437_400_000 };
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    runtime.queryLocalGuide.mockResolvedValue({
+      entries: [{ id: 17, title: "Épreuve locale", summary: "Description issue du monde de test.", metadata: { level: 5, category: null }, source }],
+      provenance: source, uncertainty: "none",
+    });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^guide local/i }));
+    expect(runtime.queryLocalGuide).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^rechercher$/i })).toBeDisabled();
+    await user.type(screen.getByRole("searchbox", { name: /nom à rechercher/i }), "Épreuve");
+    await user.click(screen.getByRole("button", { name: /^rechercher$/i }));
+    expect(runtime.queryLocalGuide).toHaveBeenCalledWith("quest", "Épreuve", "frFR");
+    expect(await screen.findByRole("heading", { name: "Épreuve locale" })).toBeVisible();
+    expect(screen.getByText(/source : références de votre monde/i)).toBeVisible();
+    expect(runtime.configureLocalDialogue).not.toHaveBeenCalled();
+  });
+
+  it("previews a solo profile before applying it and can restore previous rules", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^profils solo/i }));
+    await user.click(await screen.findByRole("radio", { name: /^confort$/i }));
+    expect(runtime.configureSoloProfile).not.toHaveBeenCalled();
+    expect(screen.getByText("11")).toBeVisible();
+    expect(screen.getByText(/pas l’expérience, l’argent ou les métiers déjà acquis/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /appliquer ce profil/i }));
+    expect(runtime.configureSoloProfile).toHaveBeenCalledWith("comfortable");
+    expect(await screen.findByText(/profil enregistré pour la prochaine partie/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /revenir aux règles précédentes/i }));
+    expect(runtime.rollbackSoloProfile).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/règles précédentes restaurées/i)).toBeVisible();
+  });
+
+  it("blocks solo changes during gameplay and offers an explicit stop", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(running);
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^profils solo/i }));
+    expect(await screen.findByRole("radio", { name: /^confort$/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /appliquer ce profil/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /arrêter le monde pour changer les règles/i }));
+    expect(runtime.stopRealm).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: /appliquer ce profil/i })).toBeEnabled();
+    expect(runtime.configureSoloProfile).not.toHaveBeenCalled();
+  });
+
+  it("keeps unknown solo state unavailable instead of presenting a fresh default", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    runtime.inspectSoloProfiles.mockRejectedValue("unknown schema");
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^profils solo/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/impossible de confirmer/i);
+    expect(screen.queryByRole("button", { name: /appliquer ce profil/i })).not.toBeInTheDocument();
+    expect(runtime.configureSoloProfile).not.toHaveBeenCalled();
+  });
+
+  it("reads back a partially applied solo change without promising rollback", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    runtime.configureSoloProfile.mockRejectedValue("pointer write interrupted");
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^profils solo/i }));
+    await user.click(await screen.findByRole("radio", { name: /^confort$/i }));
+    runtime.inspectSoloProfiles.mockResolvedValue({ ...soloView, activeProfile: "comfortable", pendingChange: true });
+    await user.click(screen.getByRole("button", { name: /appliquer ce profil/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/un retour arrière n’est pas garanti/i);
+    expect(await screen.findByText(/une modification interrompue sera reprise/i)).toBeVisible();
+    expect(runtime.inspectSoloProfiles).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("radio", { name: /^confort$/i })).toBeChecked();
+    expect(screen.queryByText(/profil enregistré pour la prochaine partie/i)).not.toBeInTheDocument();
+  });
+
+  it("distinguishes no guide results from unavailable local references", async () => {
+    const user = userEvent.setup();
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /réglages/i }));
+    await user.click(screen.getByRole("button", { name: /^guide local/i }));
+    await user.type(screen.getByRole("searchbox", { name: /nom à rechercher/i }), "Absent");
+    await user.click(screen.getByRole("button", { name: /^rechercher$/i }));
+    expect(await screen.findByText(/aucun résultat pour ce nom/i)).toBeVisible();
+    runtime.queryLocalGuide.mockResolvedValue({ entries: [], provenance: null, uncertainty: "unavailable" });
+    await user.click(screen.getByRole("button", { name: /^rechercher$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/références locales sont indisponibles/i);
+    expect(screen.queryByText(/aucun résultat pour ce nom/i)).not.toBeInTheDocument();
+  });
+
+  it("uses English references for the English guide and keeps partial evidence explicit", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("realmbox-language", "en");
+    runtime.bootstrapLauncher.mockResolvedValue(ready);
+    runtime.queryLocalGuide.mockResolvedValue({ entries: [], provenance: null, uncertainty: "partial" });
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^local guide/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /search for/i }), "item");
+    await user.type(screen.getByRole("searchbox", { name: /name to find/i }), "Sword");
+    await user.click(screen.getByRole("button", { name: /^search$/i }));
+    expect(runtime.queryLocalGuide).toHaveBeenCalledWith("item", "Sword", "enUS");
+    expect(await screen.findByText(/partial excerpt/i)).toBeVisible();
   });
 
   it("lets RealmBox present and activate its CanIRun decision after installation", async () => {
@@ -597,14 +890,16 @@ describe("RealmBox launcher", () => {
     expect(screen.queryByText(/Docker Desktop n’est pas prêt/i)).not.toBeInTheDocument();
   });
 
-  it("keeps the home screen launcher-like and hides secondary features", async () => {
+  it("keeps Play primary with player-facing realm shortcuts and no diagnostic clutter", async () => {
     runtime.bootstrapLauncher.mockResolvedValue(ready);
     render(<App />);
 
     expect(await screen.findByRole("button", { name: /jouer/i })).toBeVisible();
     expect(screen.getAllByText("RealmBox")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /compagnons/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^dialogues$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^dialogues$/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /population & présence/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /protéger ma progression/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^diagnostic$/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/local uniquement/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/3\.3\.5a/i)).not.toBeInTheDocument();
@@ -674,6 +969,14 @@ describe("RealmBox launcher", () => {
     await user.click(screen.getByRole("button", { name: /retour/i }));
     await user.click(screen.getByRole("button", { name: /^protection/i }));
     expect(await screen.findByRole("heading", { name: /protection du monde/i })).toBeVisible();
+    expect((await axe.run(container, options)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: /retour/i }));
+    await user.click(screen.getByRole("button", { name: /^guide local/i }));
+    expect(await screen.findByRole("heading", { name: /guide de votre monde/i })).toBeVisible();
+    expect((await axe.run(container, options)).violations).toEqual([]);
+    await user.click(screen.getByRole("button", { name: /retour/i }));
+    await user.click(screen.getByRole("button", { name: /^profils solo/i }));
+    expect(await screen.findByRole("radio", { name: /^confort$/i })).toBeVisible();
     expect((await axe.run(container, options)).violations).toEqual([]);
   });
 });

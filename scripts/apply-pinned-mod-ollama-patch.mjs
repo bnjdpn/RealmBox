@@ -9,6 +9,7 @@ const PATCH_PATH = fileURLToPath(
   new URL("../patches/mod-ollama-chat-realmbox.patch", import.meta.url),
 );
 const PATCHED_FILES = [
+  "src/mod-ollama-chat_api.cpp",
   "src/mod-ollama-chat_command.cpp",
   "src/mod-ollama-chat_dispatch.cpp",
   "src/mod-ollama-chat_dispatch.h",
@@ -19,6 +20,7 @@ const PATCHED_FILES = [
   "src/mod-ollama-chat_random.h",
 ];
 const CRLF_SOURCE_FILES = [
+  "src/mod-ollama-chat_api.cpp",
   "src/mod-ollama-chat_command.cpp",
   "src/mod-ollama-chat_events.cpp",
   "src/mod-ollama-chat_handler.cpp",
@@ -109,7 +111,7 @@ function snapshotPinnedSources(sourceDirectory) {
 }
 
 function normalizePinnedSourceLineEndings(sourceDirectory) {
-  // The pinned upstream stores these four files with CRLF bytes in Git. A
+  // The pinned upstream stores these five files with CRLF bytes in Git. A
   // normal LF patch is intentionally kept reviewable in RealmBox, so the
   // helper normalizes the checkout before both `git apply --check` and apply.
   for (const relativePath of CRLF_SOURCE_FILES) {

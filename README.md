@@ -11,10 +11,13 @@ RealmBox is an open-source desktop launcher for playing World of Warcraft locall
 ## What the project provides
 
 - one player-oriented application for setup, start, stop, configuration, and diagnostics;
+- a three-step setup assistant with a pre-download readiness check, plus direct realm shortcuts on the home screen;
 - a local AzerothCore authentication and world server with MySQL;
 - autonomous Playerbots with separate population and proximity controls, plus a controllable companion party in game;
 - managed OpenWoW on Apple Silicon macOS, plus `Wow.exe` or OpenWoW on Windows x64;
 - optional, rate-limited local dialogue with direct, immersive, and lively conversation modes powered by a RealmBox-managed Ollama runtime;
+- three reversible solo-progression profiles with an exact preview, durable recovery, and no character-data rewrite;
+- an explicit local quest/item lookup that reads only the existing world catalogue, without AI or an external service;
 - atomic installation, immutable server images, persistent character data, and complete verified backups, either automatic before migrations or created on demand.
 
 RealmBox contains no World of Warcraft client, MPQ archive, extracted map, credential, character database, or other proprietary game data. Those files are read from the player's own compatible copy and remain local.
@@ -94,16 +97,22 @@ Eligible player messages have a configured 100% reply chance, are placed ahead o
 
 None of the three modes keeps conversation history, evolving memory or relationships, and RealmBox enables neither RAG nor generated emotes. For a direct reply, the prompt asks the model to answer in the language of the latest player message. Ambient dialogue uses French prompts for a `frFR` client copy and English prompts for the other supported locales; this automated selection has not yet been qualified in OpenWoW.
 
+The current source tree also adds named five-player squad presets, an observed primary companion, explicit party/target scope, and a preview of the exact bounded command. It never removes a group member. Remembered names are observations, not proof of bot identity, so RealmBox deliberately does not promise to recall the same bots until Playerbots provides an atomic typed server contract. See [the addon contract](docs/COMPANION_ADDON.md).
+
+Solo profiles and local lookup are available in the source tree after 0.4.0. They are not yet part of a distributed, gameplay-qualified release. See [their exact values, recovery contract, and limitations](docs/SOLO_PROFILES_AND_LOCAL_GUIDE.md).
+
 ## Installation
 
 1. Install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 2. Download the compatible WoW data from the [French](https://chromiecraft.com/fr/telechargements/) or [English](https://chromiecraft.com/en/downloads/) ChromieCraft page.
 3. Download RealmBox from [GitHub Releases](https://github.com/bnjdpn/RealmBox/releases) and compare the artifact with `SHA256SUMS.txt`.
-4. Open RealmBox and select the folder containing `Data`.
-5. Choose the bot population, presence, and optional local dialogue, then select **Install**.
+4. In **Your copy of WoW**, select the game folder or `Data`; download help is available in the same view.
+5. Choose **Your companions**, then review **Your installation**. Resolve any readiness warning before selecting **Install**.
 6. Select **Play** when RealmBox reports that Azeroth is ready.
 
 Current distributed binaries are not signed or notarized. Do not bypass an operating-system warning unless the downloaded artifact's SHA-256 matches the published checksum. See the [complete installation guide](docs/INSTALLATION.md) for platform details.
+
+The guided setup and home shortcuts above describe unreleased source after 0.4.0, not a newly distributed binary. See [the UX and safety contract](docs/SETUP_EXPERIENCE.md).
 
 ## Persistence and update safety
 
@@ -154,6 +163,7 @@ Useful focused commands:
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:guide-sql # isolated MySQL proof; never uses the player's database
 pnpm site:build
 cargo test --workspace
 cargo xtask release check
@@ -170,6 +180,8 @@ cargo xtask release check
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Playerbots population, presence, and party behavior](docs/PLAYERBOTS_INTEGRATION.md)
 - [Local dialogue](docs/OLLAMA_CHAT_INTEGRATION.md)
+- [Solo profiles and local guide](docs/SOLO_PROFILES_AND_LOCAL_GUIDE.md)
+- [Companion addon and bounded commands](docs/COMPANION_ADDON.md)
 - [Review of the solo and bot projects studied](docs/ECOSYSTEM_REVIEW_2026-09-03.md)
 - [Distribution and licenses](docs/LEGAL_AND_DISTRIBUTION.md)
 

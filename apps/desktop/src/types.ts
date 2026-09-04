@@ -92,6 +92,18 @@ export interface GameDataInspection {
   detail: string;
 }
 
+export interface InstallationCheck {
+  freshTarget: boolean;
+  platformSupported: boolean;
+  dockerReady: boolean;
+  composeReady: boolean;
+  availableBytes: number | null;
+  requiredBytes: number;
+  botCapacity: number | null;
+}
+
+export type SetupResource = "gameFr" | "gameEn" | "docker";
+
 export interface LauncherProgress {
   operationId: string;
   component: "launcher" | "gameData" | "client" | "server" | "database" | "bots" | "ai";
@@ -123,4 +135,44 @@ export interface RealmDiagnostics {
 export interface RealmBackupSummary {
   createdAtUnixMs: number;
   sizeBytes: number;
+}
+
+export type LocalGuideKind = "quest" | "item";
+export type LocalGuideLocale = "frFR" | "enUS";
+
+export interface LocalGuideProvenance {
+  scope: "bundledReference" | "installationState" | "runtimeSnapshot";
+  sourceId: string;
+  observedAtUnixMs: number | null;
+}
+
+export interface LocalGuideEntry {
+  id: number;
+  title: string;
+  summary: string;
+  metadata: { level: number | null; category: string | null };
+  source: LocalGuideProvenance;
+}
+
+export interface LocalGuideResponse {
+  entries: LocalGuideEntry[];
+  provenance: LocalGuideProvenance | null;
+  uncertainty: "none" | "partial" | "unavailable";
+}
+
+export type SoloProfile = "normal" | "comfortable" | "accelerated";
+
+export interface SoloProfileSummary {
+  catalogVersion: number;
+  profile: SoloProfile;
+  labelFr: string;
+  labelEn: string;
+  settings: Array<{ key: string; value: string }>;
+}
+
+export interface SoloProfileView {
+  activeProfile: SoloProfile | null;
+  profiles: SoloProfileSummary[];
+  rollbackAvailable: boolean;
+  pendingChange: boolean;
 }

@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AiCapability, BotPresence, ClientChoice, DialogueChattiness, GameDataInspection, LauncherProgress, LauncherStatus, RealmBackupSummary, RealmDiagnostics } from "./types";
+import type { InstallationCheck, SetupResource } from "./types";
+import type { AiCapability, BotPresence, ClientChoice, DialogueChattiness, GameDataInspection, LauncherProgress, LauncherStatus, LocalGuideKind, LocalGuideLocale, LocalGuideResponse, RealmBackupSummary, RealmDiagnostics, SoloProfile, SoloProfileView } from "./types";
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown }
@@ -46,6 +47,7 @@ function browserStatus(): LauncherStatus {
     ...base,
     phase: "installing",
     message: "Préparation du serveur précompilé",
+    component: "server", step: "download",
     progress: 63,
     components: base.components.map((component, index) => ({
       ...component,
@@ -77,15 +79,34 @@ export async function bootstrapLauncher(): Promise<LauncherStatus> {
   return invoke<LauncherStatus>("bootstrap_launcher");
 }
 
-export async function chooseGameData(): Promise<string | null> {
-  if (!window.__TAURI_INTERNALS__) return null;
-  const selected = await open({ directory: true, multiple: false, title: "Choisir le dossier WoW 3.3.5a" });
+export async function chooseGameData(language: "fr" | "en" = "fr"): Promise<string | null> {
+  if (!window.__TAURI_INTERNALS__) return import.meta.env.DEV && new URLSearchParams(window.location.search).get("previewState") === "setup" ? "/Preview/WoW" : null;
+  const selected = await open({ directory: true, multiple: false, title: language === "fr" ? "Choisir le dossier WoW 3.3.5a" : "Choose your WoW 3.3.5a folder" });
   return typeof selected === "string" ? selected : null;
+}
+
+export async function inspectInstallation(model: string | null): Promise<InstallationCheck> {
+  if (!window.__TAURI_INTERNALS__) {
+    // Development fixtures only: a web page cannot attest to local readiness.
+    const preview = import.meta.env.DEV && new URLSearchParams(window.location.search).get("previewState") === "setup";
+    return { freshTarget: preview, platformSupported: preview, dockerReady: preview, composeReady: preview,
+      availableBytes: preview ? 80 * 1024 ** 3 : null, requiredBytes: (model ? 26 : 24) * 1024 ** 3, botCapacity: preview ? 50 : null };
+  }
+  return invoke<InstallationCheck>("inspect_installation", { model });
+}
+
+export async function openSetupResource(resource: SetupResource): Promise<void> {
+  if (!window.__TAURI_INTERNALS__) {
+    const urls: Record<SetupResource, string> = { gameFr: "https://chromiecraft.com/fr/telechargements/", gameEn: "https://chromiecraft.com/en/downloads/", docker: "https://www.docker.com/products/docker-desktop/" };
+    window.open(urls[resource], "_blank", "noopener,noreferrer");
+    return;
+  }
+  return invoke<void>("open_setup_resource", { resource });
 }
 
 export async function inspectAiCapability(): Promise<AiCapability> {
   if (!window.__TAURI_INTERNALS__) {
-    const visualPreview = import.meta.env.DEV && ["ready", "running", "error"].includes(new URLSearchParams(window.location.search).get("previewState") ?? "");
+    const visualPreview = import.meta.env.DEV && ["setup", "ready", "running", "error"].includes(new URLSearchParams(window.location.search).get("previewState") ?? "");
     const previewEnglish = window.localStorage.getItem("realmbox-language") === "en";
     return visualPreview ? {
       state: "recommended",
@@ -194,6 +215,50 @@ export async function createRealmBackup(): Promise<RealmBackupSummary> {
     return { createdAtUnixMs: Date.now(), sizeBytes: 4_194_304 };
   }
   return invoke<RealmBackupSummary>("create_realm_backup");
+}
+
+export async function queryLocalGuide(kind: LocalGuideKind, term: string, locale: LocalGuideLocale): Promise<LocalGuideResponse> {
+  if (!window.__TAURI_INTERNALS__) {
+    return { entries: [], provenance: null, uncertainty: "unavailable" };
+  }
+  return invoke<LocalGuideResponse>("query_local_guide", { query: { kind, term, locale } });
+}
+
+export async function inspectSoloProfiles(): Promise<SoloProfileView> {
+  if (!window.__TAURI_INTERNALS__) {
+    return {
+      activeProfile: "normal", rollbackAvailable: false, pendingChange: false,
+      profiles: (["normal", "comfortable", "accelerated"] as const).map((profile, index) => ({
+        catalogVersion: 1, profile,
+        labelFr: ["Normal", "Confort", "Accéléré"][index],
+        labelEn: ["Normal", "Comfortable", "Accelerated"][index],
+        settings: [
+          { key: "Rate.XP.Kill", value: String(index + 1) },
+          { key: "Rate.XP.Quest", value: String(index + 1) },
+          { key: "Rate.XP.Quest.DF", value: String(index + 1) },
+          { key: "Rate.XP.Explore", value: String(index + 1) },
+          { key: "Rate.XP.Pet", value: String(index + 1) },
+          { key: "Rate.Reputation.Gain", value: String(index + 1) },
+          { key: "Rate.Drop.Money", value: index === 2 ? "2" : "1" },
+          { key: "MaxPrimaryTradeSkill", value: index ? "11" : "2" },
+          { key: "Instance.IgnoreRaid", value: index ? "1" : "0" },
+          { key: "Instance.IgnoreLevel", value: index ? "1" : "0" },
+          { key: "Quests.IgnoreRaid", value: index ? "1" : "0" },
+        ],
+      })),
+    };
+  }
+  return invoke<SoloProfileView>("inspect_solo_profiles");
+}
+
+export async function configureSoloProfile(profile: SoloProfile): Promise<SoloProfileView> {
+  if (!window.__TAURI_INTERNALS__) return { ...await inspectSoloProfiles(), activeProfile: profile, rollbackAvailable: true };
+  return invoke<SoloProfileView>("configure_solo_profile", { profile });
+}
+
+export async function rollbackSoloProfile(): Promise<SoloProfileView> {
+  if (!window.__TAURI_INTERNALS__) return inspectSoloProfiles();
+  return invoke<SoloProfileView>("rollback_solo_profile");
 }
 
 export async function getRealmDiagnostics(): Promise<RealmDiagnostics> {

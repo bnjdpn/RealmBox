@@ -1,6 +1,6 @@
 {
   "name": "realmbox",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
@@ -12,6 +12,7 @@
     "capture:launcher": "node scripts/capture-launcher.mjs",
     "test": "pnpm --dir apps/desktop test && pnpm test:scripts",
     "test:scripts": "node --test scripts/*.test.mjs",
+    "test:guide-sql": "node scripts/check-local-guide-sql.mjs",
     "typecheck": "pnpm --dir apps/desktop typecheck",
     "lint": "pnpm --dir apps/desktop lint",
     "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",

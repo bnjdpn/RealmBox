@@ -1,6 +1,181 @@
 From: RealmBox
-Subject: [PATCH] Prioritize player replies and invalidate stale ambient chat
+Subject: [PATCH] Prioritize player replies, invalidate stale ambient chat, and back off inference failures
 Upstream-Commit: a9d14b0b8955be136e657ac168dd255f5281a535
+
+diff --git a/src/mod-ollama-chat_api.cpp b/src/mod-ollama-chat_api.cpp
+index 0f8840e..93d6e91 100644
+--- a/src/mod-ollama-chat_api.cpp
++++ b/src/mod-ollama-chat_api.cpp
+@@ -8,12 +8,124 @@
+
+ #include <algorithm>
+ #include <chrono>
++#include <limits>
+ #include <nlohmann/json.hpp>
+ #include <mutex>
+ #include <sstream>
+
+ namespace
+ {
++    // REALMBOX_BACKOFF_POLICY_BEGIN
++    // Pure policy: monotonic milliseconds are injected, and callers serialize
++    // access. No sleeps, retries, threads, I/O, or game objects belong here.
++    class RealmBoxOllamaBackoff
++    {
++    public:
++        struct Permit
++        {
++            bool allowed = false;
++            uint64_t generation = 0;
++            bool probe = false;
++        };
++
++        Permit Acquire(uint64_t nowMs)
++        {
++            if (!open_)
++                return { true, generation_, false };
++            if (probeInFlight_ || deadlineSaturated_ || nowMs < retryAtMs_)
++                return {};
++            probeInFlight_ = true;
++            return { true, generation_, true };
++        }
++
++        void Complete(Permit permit, bool success, uint64_t nowMs)
++        {
++            // Completions admitted before an opening/reset cannot close or
++            // extend the new circuit state, even with several worker threads.
++            if (!permit.allowed || permit.generation != generation_)
++                return;
++            if (permit.probe)
++            {
++                if (!open_ || !probeInFlight_)
++                    return;
++                if (success)
++                    Reset();
++                else
++                    Open(nowMs, true);
++                return;
++            }
++            if (open_)
++                return;
++            if (success)
++                failures_ = 0;
++            else if (++failures_ >= FailureThreshold)
++                Open(nowMs, false);
++        }
++
++        void Reset()
++        {
++            ++generation_;
++            failures_ = 0;
++            cooldownMs_ = InitialCooldownMs;
++            retryAtMs_ = 0;
++            open_ = false;
++            probeInFlight_ = false;
++            deadlineSaturated_ = false;
++        }
++
++    private:
++        static constexpr uint32_t FailureThreshold = 3;
++        static constexpr uint64_t InitialCooldownMs = 5000;
++        static constexpr uint64_t MaximumCooldownMs = 60000;
++
++        void Open(uint64_t nowMs, bool increase)
++        {
++            if (increase)
++                cooldownMs_ = cooldownMs_ > MaximumCooldownMs / 2
++                    ? MaximumCooldownMs : cooldownMs_ * 2;
++            ++generation_;
++            failures_ = FailureThreshold;
++            open_ = true;
++            probeInFlight_ = false;
++            const uint64_t maximum = std::numeric_limits<uint64_t>::max();
++            deadlineSaturated_ = nowMs > maximum - cooldownMs_;
++            retryAtMs_ = deadlineSaturated_ ? maximum : nowMs + cooldownMs_;
++            // A clock overflow fails closed until an explicit config reset;
++            // wrapping the deadline would otherwise create an unbounded loop.
++        }
++
++        uint64_t generation_ = 1;
++        uint32_t failures_ = 0;
++        uint64_t cooldownMs_ = InitialCooldownMs;
++        uint64_t retryAtMs_ = 0;
++        bool open_ = false;
++        bool probeInFlight_ = false;
++        bool deadlineSaturated_ = false;
++    };
++    // REALMBOX_BACKOFF_POLICY_END
++
++    std::mutex g_backoffMutex;
++    RealmBoxOllamaBackoff g_backoff;
++
++    uint64_t BackoffNowMs()
++    {
++        const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
++        return milliseconds < 0 ? 0 : static_cast<uint64_t>(milliseconds);
++    }
++
++    struct BackoffCompletion
++    {
++        RealmBoxOllamaBackoff::Permit permit;
++        bool successful = false;
++
++        ~BackoffCompletion()
++        {
++            std::lock_guard<std::mutex> lock(g_backoffMutex);
++            g_backoff.Complete(permit, successful, BackoffNowMs());
++        }
++    };
++
+     // One client per worker thread; the client itself pools keep-alive sockets.
+     thread_local OllamaHttpClient t_httpClient;
+
+@@ -230,8 +342,14 @@ void OllamaConfig_Publish()
+     next.presencePenalty  = g_OllamaPresencePenalty;
+     next.frequencyPenalty = g_OllamaFrequencyPenalty;
+
+-    std::lock_guard<std::mutex> lock(g_settingsMutex);
+-    g_settings = std::move(next);
++    {
++        std::lock_guard<std::mutex> lock(g_settingsMutex);
++        g_settings = std::move(next);
++    }
++    // A deliberate endpoint/model reload invalidates stale completions and
++    // permits an immediate attempt against the newly published settings.
++    std::lock_guard<std::mutex> lock(g_backoffMutex);
++    g_backoff.Reset();
+ }
+
+ OllamaEndpointSettings OllamaConfig_Snapshot()
+@@ -250,6 +368,20 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind)
+         return result;
+     }
+
++    RealmBoxOllamaBackoff::Permit permit;
++    {
++        std::lock_guard<std::mutex> lock(g_backoffMutex);
++        permit = g_backoff.Acquire(BackoffNowMs());
++    }
++    if (!permit.allowed)
++    {
++        result.error = "local inference temporarily paused after repeated failures";
++        return result;
++    }
++    // The guard reports every exit, including exceptions. It does not hold a
++    // mutex during HTTP and adds no retry to upstream's bounded self-healing.
++    BackoffCompletion backoff{ permit };
++
+     const OllamaEndpointSettings cfg = OllamaConfig_Snapshot();
+
+     // One place decides what the "think" field should be: policy for this
+@@ -344,6 +476,7 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind)
+             LOG_INFO("module.ollamachat", "[Ollama Chat] Model reasoning: {}", result.thinking);
+     }
+
++    backoff.successful = result.ok && !result.text.empty();
+     return result;
+ }
 
 diff --git a/src/mod-ollama-chat_command.cpp b/src/mod-ollama-chat_command.cpp
 index 22d03df..6bd9f0d 100644

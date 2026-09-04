@@ -1,28 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { messages, preferredLanguage, type Copy, type Language } from "./i18n";
 import realmIcon from "./assets/realmbox-icon.svg";
+import SetupWizard from "./SetupWizard";
+import { setupMessages } from "./setupCopy";
 import {
   bootstrapLauncher,
   changeGameDataPath,
   chooseGameData,
   configureLocalDialogue,
   configureDialogueChattiness,
+  configureSoloProfile,
   createRealmBackup,
   getRealmDiagnostics,
   inspectAiCapability,
   inspectGameData,
   inspectRealmBackup,
+  inspectSoloProfiles,
   installRealm,
+  queryLocalGuide,
   restoreLastRecovery,
+  rollbackSoloProfile,
   startRealm,
   stopRealm,
   subscribeLauncherProgress,
   subscribeLauncherStatus,
   updatePlayerbotPopulation,
 } from "./runtime";
-import type { AiCapability, BotPresence, ClientChoice, DialogueChattiness, GameDataInspection, LauncherCommandError, LauncherErrorCode, LauncherStatus, RealmBackupSummary, RealmDiagnostics } from "./types";
+import type { AiCapability, BotPresence, ClientChoice, DialogueChattiness, GameDataInspection, LauncherCommandError, LauncherErrorCode, LauncherStatus, LocalGuideKind, LocalGuideResponse, RealmBackupSummary, RealmDiagnostics, SoloProfile, SoloProfileView } from "./types";
 
-type Panel = "settings" | "companions" | "dialogues" | "backups" | "diagnostics";
+type Panel = "settings" | "companions" | "dialogues" | "backups" | "guide" | "solo" | "diagnostics";
 type WorldProfile = "quiet" | "balanced" | "dense" | "custom";
 
 const initialStatus: LauncherStatus = {
@@ -155,6 +161,7 @@ function commandError(error: unknown): Pick<LauncherStatus, "detail" | "errorCod
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => preferredLanguage());
   const copy = messages[language];
+  const setupCopy = setupMessages[language];
   const [panel, setPanel] = useState<Panel | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const panelTriggerRef = useRef<HTMLElement | null>(null);
@@ -180,6 +187,17 @@ export default function App() {
   const [backupPending, setBackupPending] = useState(false);
   const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [guideKind, setGuideKind] = useState<LocalGuideKind>("quest");
+  const [guideTerm, setGuideTerm] = useState("");
+  const [guideResponse, setGuideResponse] = useState<LocalGuideResponse | null>(null);
+  const [guidePending, setGuidePending] = useState(false);
+  const [guideError, setGuideError] = useState(false);
+  const guideRequest = useRef(0);
+  const [soloView, setSoloView] = useState<SoloProfileView | null>(null);
+  const [soloSelected, setSoloSelected] = useState<SoloProfile>("normal");
+  const [soloPending, setSoloPending] = useState(false);
+  const [soloError, setSoloError] = useState(false);
+  const [soloFeedback, setSoloFeedback] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<RealmDiagnostics | null>(null);
   const [diagnosticPending, setDiagnosticPending] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -188,6 +206,9 @@ export default function App() {
 
   function applyLauncherStatus(next: LauncherStatus) {
     setStatus(next);
+    // A retry of first-time setup must not discard the player's validated draft.
+    // Installed-state readback, on the other hand, remains authoritative.
+    if (!next.installed) return;
     setBotsEnabled(next.botsEnabled);
     setBotCount(next.requestedBotCount);
     setBotPresence(next.botPresence);
@@ -268,17 +289,19 @@ export default function App() {
   async function selectData() {
     setRequestPending(true); setGameDataError(null);
     try {
-      const selected = await chooseGameData();
+      const selected = await chooseGameData(language);
       if (!selected) return;
       const inspection = await inspectGameData(selected);
       setGameDataInspection(inspection); setGameDataPath(inspection.path);
+      setStatus((current) => ({ ...current, detail: null, errorCode: null }));
     } catch (error) {
       setGameDataInspection(null); setGameDataPath(null); setGameDataError(String(error));
+      setStatus((current) => ({ ...current, ...commandError(error) }));
     } finally { setRequestPending(false); }
   }
 
   async function install() {
-    if (!gameDataPath) return;
+    if (requestPending || status.installed || status.phase !== "needsGameData" || !gameDataPath || gameDataInspection?.path !== gameDataPath) return;
     setRequestPending(true);
     try { applyLauncherStatus(await installRealm(gameDataPath, clientChoice, botsEnabled, botCount, botPresence, aiEnabled, aiEnabled ? aiCapability.ollamaModel : null)); }
     catch (error) { setStatus((current) => ({ ...current, phase: "error", ...commandError(error) })); }
@@ -288,7 +311,7 @@ export default function App() {
   async function changeInstalledGameData() {
     setRequestPending(true); setGameDataError(null); setGameDataFeedback(null);
     try {
-      const selected = await chooseGameData();
+      const selected = await chooseGameData(language);
       if (!selected) return;
       const inspection = await inspectGameData(selected);
       const next = await changeGameDataPath(inspection.path);
@@ -394,11 +417,60 @@ export default function App() {
     } finally { setBackupPending(false); }
   }
 
+  async function searchGuide() {
+    if (guidePending || guideTerm.trim().length < 2 || Array.from(guideTerm).length > 64) return;
+    const request = ++guideRequest.current;
+    setGuidePending(true); setGuideResponse(null); setGuideError(false);
+    try {
+      const response = await queryLocalGuide(guideKind, guideTerm, language === "fr" ? "frFR" : "enUS");
+      if (request === guideRequest.current) setGuideResponse(response);
+    } catch {
+      if (request === guideRequest.current) setGuideError(true);
+    } finally {
+      if (request === guideRequest.current) setGuidePending(false);
+    }
+  }
+
+  function changeLanguage(next: Language) {
+    setLanguage(next);
+    guideRequest.current += 1;
+    setGuidePending(false); setGuideResponse(null); setGuideError(false);
+  }
+
+  async function refreshSolo() {
+    setSoloPending(true); setSoloError(false); setSoloFeedback(null);
+    try {
+      const view = await inspectSoloProfiles();
+      setSoloView(view); setSoloSelected(view.activeProfile ?? "normal");
+    } catch { setSoloView(null); setSoloError(true); }
+    finally { setSoloPending(false); }
+  }
+
+  async function applySolo(rollback = false) {
+    if (status.phase === "running" || isBusy(status)) return;
+    setSoloPending(true); setRequestPending(true); setSoloError(false); setSoloFeedback(null);
+    try {
+      const view = rollback ? await rollbackSoloProfile() : await configureSoloProfile(soloSelected);
+      setSoloView(view); setSoloSelected(view.activeProfile ?? "normal");
+      setSoloFeedback(rollback ? copy.soloRestored : copy.soloSaved);
+    } catch {
+      setSoloError(true);
+      // A durable journal may still need finalizing after the config changed.
+      // Read back the actual state instead of presenting a fictitious rollback.
+      try {
+        const view = await inspectSoloProfiles();
+        setSoloView(view); setSoloSelected(view.activeProfile ?? "normal");
+      } catch { setSoloView(null); }
+    }
+    finally { setSoloPending(false); setRequestPending(false); }
+  }
+
   function openPanel(next: Panel) {
     if (!panel && document.activeElement instanceof HTMLElement) panelTriggerRef.current = document.activeElement;
     setPanel(next);
     if (next === "diagnostics") void refreshDiagnostics();
     if (next === "backups") void refreshBackup();
+    if (next === "solo") void refreshSolo();
   }
 
   function closePanel() {
@@ -447,7 +519,10 @@ export default function App() {
     </fieldset>
   );
 
-  const panelTitle = panel === "companions" ? copy.companionsTitle : panel === "dialogues" ? copy.dialoguesTitle : panel === "backups" ? copy.backupsTitle : panel === "diagnostics" ? copy.diagnosticsTitle : copy.settings;
+  const panelTitle = panel === "companions" ? copy.companionsTitle : panel === "dialogues" ? copy.dialoguesTitle : panel === "backups" ? copy.backupsTitle : panel === "guide" ? copy.guideTitle : panel === "solo" ? copy.soloTitle : panel === "diagnostics" ? copy.diagnosticsTitle : copy.settings;
+  const selectedSoloProfile = soloView?.profiles.find((profile) => profile.profile === soloSelected);
+  const soloValue = (key: string) => selectedSoloProfile?.settings.find((setting) => setting.key === key)?.value ?? "—";
+  const activeSoloProfile = soloView?.profiles.find((profile) => profile.profile === soloView.activeProfile);
   const showProgress = ["installing", "starting", "stopping", "recovering"].includes(status.phase) && status.progress > 0 && status.progress < 100;
   const progressVolume = status.completedBytes != null
     ? status.totalBytes != null
@@ -460,6 +535,8 @@ export default function App() {
       <section className={`app-window phase-${status.phase}`} aria-busy={isBusy(status)}>
         <div className="scene-shade" aria-hidden="true" />
 
+        <div className="launcher-content" inert={panel !== null} aria-hidden={panel !== null || undefined}>
+
         <div className="launcher-brand" aria-label="RealmBox">
           <img src={realmIcon} alt="" />
           <span>RealmBox</span>
@@ -467,16 +544,31 @@ export default function App() {
 
         <button className="settings-button" onClick={() => openPanel("settings")}>{copy.settings}</button>
 
-        <section className="status-card" aria-live="polite">
+        {status.phase === "needsGameData" && !status.installed ? <SetupWizard
+          language={language} gameDataPath={gameDataPath} inspection={gameDataInspection} gameDataError={gameDataError}
+          busy={requestPending} selectData={selectData} install={install}
+          openDiagnostics={() => openPanel("diagnostics")}
+          clientChoice={clientChoice} setClientChoice={setClientChoice} originalClientSupported={status.originalClientSupported}
+          botsEnabled={botsEnabled} botCount={botCount} botPresence={botPresence}
+          aiEnabled={aiEnabled} setAiEnabled={setAiEnabled} capability={aiCapability}
+          worldControls={<>
+            <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => { setBotsEnabled(event.target.checked); if (!event.target.checked) setAiEnabled(false); }} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
+            {botsEnabled && <>
+              <fieldset className="choice-group population-cards"><legend>{copy.worldProfile}</legend>
+                {([
+                  [25, copy.quietProfile], [50, copy.balancedProfile], [100, copy.denseProfile],
+                ] as const).map(([count, label]) => <label key={count} className="choice-card"><input type="radio" name="setup-population" checked={botCount === count && worldProfile !== "custom"} onChange={() => { setBotCount(count); setWorldProfile(profileForPopulation(count)); }} /><span><strong>{label}</strong><small>{count} {setupCopy.bots}</small></span></label>)}
+                <label className="choice-card"><input type="radio" name="setup-population" checked={worldProfile === "custom"} onChange={() => setWorldProfile("custom")} /><span><strong>{copy.customProfile}</strong><small>5 – 150 {setupCopy.bots}</small></span></label>
+              </fieldset>
+              {worldProfile === "custom" && <label className="select-row"><span>{copy.population}</span>{populationSelect}</label>}
+              <p className="helper">{copy.populationHelp}</p>
+              {presenceChoices}
+            </>}
+          </>}
+        /> : <section className="status-card" aria-live="polite">
           <div className={`status-marker ${status.phase}`} aria-hidden="true" />
           <h1>{status.phase === "error" ? presentedError.cause : phase.title}</h1>
           <p>{status.phase === "error" ? presentedError.recovery : phase.body}</p>
-
-          {status.phase === "needsGameData" && gameDataPath && <div className="selected-data">
-            <strong>{gameDataInspection ? `Data ${gameDataInspection.locale} · build 12340` : copy.dataReady}</strong>
-            <span>{gameDataPath}</span>
-          </div>}
-          {status.phase === "needsGameData" && gameDataError && <p className="inline-error">{gameDataError}</p>}
 
           {showProgress && <div className="active-progress" role="progressbar" aria-label={copy.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={status.progress}>
             <span style={{ width: `${status.progress}%` }} />
@@ -484,8 +576,6 @@ export default function App() {
           {showProgress && progressVolume && <p className="progress-volume">{progressVolume}</p>}
 
           <div className="primary-zone">
-            {status.phase === "needsGameData" && !gameDataPath && <button className="primary-action" onClick={selectData} disabled={requestPending}>{copy.chooseData}</button>}
-            {status.phase === "needsGameData" && gameDataPath && <button className="primary-action" onClick={install} disabled={requestPending}>{copy.install}</button>}
             {status.phase === "ready" && <button className="primary-action" onClick={start} disabled={requestPending}>{copy.play}</button>}
             {status.phase === "running" && <button className="primary-action stop-action" onClick={stop} disabled={requestPending}>{copy.stop}</button>}
             {isBusy(status) && <button className="primary-action" disabled>{copy.wait}</button>}
@@ -493,9 +583,31 @@ export default function App() {
             {status.phase === "error" && status.recoveryAvailable && <button className="secondary-action" onClick={() => void restoreRecovery()} disabled={requestPending}>{copy.restoreLast}</button>}
           </div>
 
-          {status.phase === "needsGameData" && <button className="context-link" onClick={() => openPanel("settings")}>{gameDataPath ? copy.changeFolder : copy.installationOptions}</button>}
           {status.phase === "error" && <button className="context-link" onClick={() => openPanel("diagnostics")}>{copy.openDiagnostics}</button>}
-        </section>
+          {status.installed && ["ready", "running"].includes(status.phase) && status.accountName && <details className="login-help"><summary>{setupCopy.login}</summary><p>{setupCopy.afterPlay}</p><strong>{status.accountName} / {status.accountPassword}</strong><p>{copy.accountHelp}</p></details>}
+        </section>}
+
+        {status.phase === "installing" && <aside className="installation-followup" aria-label={setupCopy.installationDetail}>
+          <h2>{setupCopy.currentStep}</h2>
+          <strong>{status.component ? ({ gameData: setupCopy.prepareData, client: setupCopy.prepareClient, server: setupCopy.prepareWorld, bots: setupCopy.prepareWorld, database: setupCopy.prepareSave, ai: setupCopy.prepareAi, launcher: setupCopy.prepareFinish })[status.component] : phase.body}</strong>
+          <p>{setupCopy.progressBody}</p><p>{setupCopy.setupTime}</p>
+          <button className="text-button" onClick={() => openPanel("diagnostics")}>{copy.openDiagnostics}</button>
+        </aside>}
+
+        {status.installed && ["ready", "running"].includes(status.phase) && <aside className="realm-dashboard" aria-label={setupCopy.manage}>
+          <header><h2>{setupCopy.manage}</h2><p>{setupCopy.manageBody}</p></header>
+          <dl className="realm-overview"><div><dt>{setupCopy.configured}</dt><dd>{status.botsEnabled ? `${status.appliedBotCount} ${setupCopy.bots}` : copy.off}</dd></div><div><dt>{copy.presence}</dt><dd>{status.botsEnabled ? { dispersed: copy.presenceDispersed, natural: copy.presenceNatural, close: copy.presenceClose }[status.botPresence] : "—"}</dd></div><div><dt>{copy.ai}</dt><dd>{status.aiEnabled ? setupCopy.enabled : copy.off}</dd></div></dl>
+          <p className="helper">{setupCopy.limitHelp}</p>
+          <nav aria-label={setupCopy.manage}>
+            <button onClick={() => openPanel("companions")}>{setupCopy.shortcutsBots}<span aria-hidden="true">›</span></button>
+            <button onClick={() => openPanel("dialogues")}>{copy.dialogues}<span aria-hidden="true">›</span></button>
+            <button onClick={() => openPanel("solo")}>{setupCopy.shortcutsSolo}<span aria-hidden="true">›</span></button>
+            <button onClick={() => openPanel("backups")}>{setupCopy.shortcutsBackup}<span aria-hidden="true">›</span></button>
+            <button onClick={() => openPanel("guide")}>{setupCopy.shortcutsGuide}<span aria-hidden="true">›</span></button>
+          </nav>
+        </aside>}
+
+        </div>
 
         {panel && <div className="panel-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) closePanel(); }}>
           <section ref={panelRef} className="side-panel" role="dialog" aria-modal="true" aria-labelledby="panel-title">
@@ -510,23 +622,12 @@ export default function App() {
                 <section className="settings-section">
                   <h3>{copy.language}</h3>
                   <div className="language-switch" aria-label={copy.language}>
-                    <button aria-pressed={language === "fr"} className={language === "fr" ? "active" : ""} onClick={() => setLanguage("fr")}>Français</button>
-                    <button aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>English</button>
+                    <button aria-pressed={language === "fr"} className={language === "fr" ? "active" : ""} onClick={() => changeLanguage("fr")}>Français</button>
+                    <button aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => changeLanguage("en")}>English</button>
                   </div>
                 </section>
 
-                {status.phase === "needsGameData" && <section className="settings-section install-settings">
-                  <h3>{copy.installationOptions}</h3>
-                  <label className="option-row"><input type="radio" name="client" checked={clientChoice === "managedOpenWow"} onChange={() => setClientChoice("managedOpenWow")} /><span><strong>{copy.managedClient}</strong><small>{copy.managedClientHelp}</small></span></label>
-                  <label className={`option-row ${!status.originalClientSupported ? "muted" : ""}`}><input type="radio" name="client" checked={clientChoice === "originalWindows"} disabled={!status.originalClientSupported} onChange={() => setClientChoice("originalWindows")} /><span><strong>{copy.originalClient}</strong><small>{status.originalClientSupported ? copy.originalClientHelp : copy.originalUnavailable}</small></span></label>
-                  <button className="secondary-action full" onClick={selectData} disabled={requestPending}>{gameDataPath ? copy.changeFolder : copy.chooseData}</button>
-                  <p className={`helper ${gameDataError ? "error" : gameDataInspection ? "success" : ""}`}>{gameDataError ?? (gameDataInspection ? `Data ${gameDataInspection.locale} · build 12340` : copy.dataRequirement)}</p>
-                  <label className="option-row"><input type="checkbox" checked={botsEnabled} onChange={(event) => { setBotsEnabled(event.target.checked); if (!event.target.checked) setAiEnabled(false); }} /><span><strong>{copy.populate}</strong><small>{copy.populateHelp}</small></span></label>
-                  {botsEnabled && <label className="select-row"><span>{copy.worldProfile}</span>{profileSelect}</label>}
-                  {botsEnabled && worldProfile === "custom" && <label className="select-row"><span>{copy.population}</span>{populationSelect}</label>}
-                  {botsEnabled && presenceChoices}
-                  <label className={`option-row ${aiCapability.state !== "recommended" ? "muted" : ""}`}><input type="checkbox" checked={aiEnabled} disabled={!botsEnabled || aiCapability.state !== "recommended"} onChange={(event) => setAiEnabled(event.target.checked)} /><span><strong>{copy.ai}</strong><small>{aiCapability.state === "checking" ? copy.aiChecking : aiCapability.state === "recommended" ? `${aiCapability.modelName} · ${aiCapability.downloadSizeGb ?? "?"} GB · ~${aiCapability.estimatedTokensPerSecond ?? "?"} tok/s` : copy.aiUnavailable}</small></span></label>
-                </section>}
+                {status.phase === "needsGameData" && <p className="helper">{setupCopy.worldBody}</p>}
 
                 {gameDataPath && status.phase !== "needsGameData" && <section className="settings-section game-folder-settings">
                   <h3>{copy.gameClient}</h3>
@@ -539,7 +640,9 @@ export default function App() {
                 <nav className="settings-nav" aria-label={copy.settings}>
                   <button onClick={() => openPanel("companions")} disabled={!status.installed}><span><strong>{copy.companions}</strong><small>{copy.companionsBodyReady}</small></span></button>
                   <button onClick={() => openPanel("dialogues")} disabled={!status.installed}><span><strong>{copy.dialogues}</strong><small>{copy.dialoguesBody}</small></span></button>
+                  <button onClick={() => openPanel("solo")} disabled={!status.installed}><span><strong>{copy.solo}</strong><small>{copy.soloNavBody}</small></span></button>
                   <button onClick={() => openPanel("backups")} disabled={!status.installed}><span><strong>{copy.backups}</strong><small>{copy.backupsNavBody}</small></span></button>
+                  <button onClick={() => openPanel("guide")} disabled={!status.installed}><span><strong>{copy.guide}</strong><small>{copy.guideNavBody}</small></span></button>
                   <button onClick={() => openPanel("diagnostics")}><span><strong>{copy.diagnostics}</strong><small>{copy.diagnosticsBody}</small></span></button>
                 </nav>
 
@@ -609,13 +712,64 @@ export default function App() {
                 {backupError && <p className="error-message" role="alert">{backupError}</p>}
               </>}
 
+              {panel === "solo" && <>
+                <p className="panel-intro">{copy.soloBody}</p>
+                {soloPending && !soloView && <p className="helper">{copy.wait}</p>}
+                {soloView && <>
+                  <div className="model-summary"><p>{copy.soloCurrent}</p><strong>{activeSoloProfile ? language === "fr" ? activeSoloProfile.labelFr : activeSoloProfile.labelEn : copy.soloCustom}</strong></div>
+                  <fieldset className="choice-group" disabled={soloPending || status.phase === "running" || isBusy(status)}>
+                    <legend>{copy.soloSelection}</legend>
+                    {soloView.profiles.map((profile) => <label className="choice-card" key={profile.profile}><input type="radio" name="solo-profile" checked={soloSelected === profile.profile} onChange={() => { setSoloSelected(profile.profile); setSoloFeedback(null); setSoloError(false); }} /><span><strong>{language === "fr" ? profile.labelFr : profile.labelEn}</strong></span></label>)}
+                  </fieldset>
+                  <dl className="facts-list">
+                    <div><dt>{copy.soloXp}</dt><dd>×{soloValue("Rate.XP.Kill")}</dd></div>
+                    <div><dt>{copy.soloReputation}</dt><dd>×{soloValue("Rate.Reputation.Gain")}</dd></div>
+                    <div><dt>{copy.soloMoney}</dt><dd>×{soloValue("Rate.Drop.Money")}</dd></div>
+                    <div><dt>{copy.soloProfessions}</dt><dd>{soloValue("MaxPrimaryTradeSkill")}</dd></div>
+                    <div><dt>{copy.soloLevelRequirement}</dt><dd>{soloValue("Instance.IgnoreLevel") === "1" ? copy.soloRelaxed : copy.soloStandard}</dd></div>
+                    <div><dt>{copy.soloRaidGroup}</dt><dd>{soloValue("Instance.IgnoreRaid") === "1" ? copy.soloRelaxed : copy.soloStandard}</dd></div>
+                    <div><dt>{copy.soloQuestsInRaid}</dt><dd>{soloValue("Quests.IgnoreRaid") === "1" ? copy.soloAllowed : copy.soloStandard}</dd></div>
+                  </dl>
+                  <p className="helper">{copy.soloXpHelp}</p>
+                  <p className="helper">{copy.soloWarning}</p>
+                  {soloView.pendingChange && <p className="helper">{copy.soloPendingChange}</p>}
+                  {status.phase === "running" ? <><p className="helper">{copy.soloStop}</p><button className="secondary-action full" onClick={stop} disabled={requestPending}>{copy.soloStopAction}</button></> : <>
+                    <button className="secondary-action full" onClick={() => void applySolo()} disabled={soloPending || isBusy(status)}>{copy.soloApply}</button>
+                    <button className="secondary-action full" onClick={() => void applySolo(true)} disabled={soloPending || isBusy(status) || !soloView.rollbackAvailable}>{copy.soloRollback}</button>
+                  </>}
+                </>}
+                {soloError && <p className="error-message" role="alert">{copy.soloFailed}</p>}
+                {soloFeedback && <p className="success-message" role="status">{soloFeedback}</p>}
+              </>}
+
+              {panel === "guide" && <>
+                <p className="panel-intro">{copy.guideBody}</p>
+                <form onSubmit={(event) => { event.preventDefault(); void searchGuide(); }}>
+                  <label className="select-row"><span>{copy.guideKind}</span><select value={guideKind} disabled={guidePending} onChange={(event) => { setGuideKind(event.target.value as LocalGuideKind); setGuideResponse(null); setGuideError(false); }}><option value="quest">{copy.guideQuests}</option><option value="item">{copy.guideItems}</option></select></label>
+                  <label className="guide-search"><span>{copy.guideSearchLabel}</span><input type="search" value={guideTerm} minLength={2} maxLength={64} disabled={guidePending} onChange={(event) => { setGuideTerm(event.target.value); setGuideResponse(null); setGuideError(false); }} aria-describedby="guide-search-help" /></label>
+                  <p id="guide-search-help" className="helper">{copy.guideSearchHelp}</p>
+                  <button className="secondary-action full" type="submit" disabled={guidePending || guideTerm.trim().length < 2}>{guidePending ? copy.guideSearching : copy.guideSearch}</button>
+                </form>
+                <div className="guide-results" aria-live="polite" aria-busy={guidePending}>
+                  {(guideError || guideResponse?.uncertainty === "unavailable") && <p className="error-message" role="alert">{copy.guideUnavailable}</p>}
+                  {guideResponse?.uncertainty === "partial" && <p className="helper">{copy.guidePartial}</p>}
+                  {guideResponse && guideResponse.uncertainty !== "unavailable" && guideResponse.entries.length === 0 && <p className="helper">{copy.guideEmpty}</p>}
+                  {guideResponse?.entries.map((entry) => <article className="guide-entry" key={entry.id}>
+                    <h3>{entry.title}</h3>
+                    {entry.metadata.level != null && <p className="guide-level">{guideKind === "quest" ? copy.guideQuestLevel : copy.guideItemLevel} {entry.metadata.level} · #{entry.id}</p>}
+                    <p>{entry.summary || copy.guideNoDescription}</p>
+                  </article>)}
+                  {guideResponse?.provenance && <p className="helper">{copy.guideSource}{guideResponse.provenance.observedAtUnixMs != null ? ` · ${formatBackupDate(guideResponse.provenance.observedAtUnixMs, language)}` : ""}</p>}
+                </div>
+              </>}
+
               {panel === "diagnostics" && <>
                 <div className="diagnostic-actions"><p>{copy.diagnosticsBody}</p><button className="text-button" onClick={refreshDiagnostics} disabled={diagnosticPending}>{copy.refresh}</button></div>
+                {(status.phase === "error" || gameDataError) && status.detail && <details><summary>{copy.cause}</summary><code>{status.detail}</code></details>}
                 {diagnostics ? <>
                   <dl className="facts-list diagnostics-list"><div><dt>{copy.affectedComponent}</dt><dd>{({ client: copy.componentClient, database: copy.componentDatabase, server: copy.componentServer, bots: copy.componentBots, ai: copy.componentAi, launcher: copy.componentLauncher })[diagnostics.component]}</dd></div><div><dt>{copy.logsFolder}</dt><dd>{diagnostics.logsPath}</dd></div></dl>
                   <p className="diagnostic-summary">{diagnostics.summary}</p>
                   <div className="log-list">{diagnostics.recentEntries.length ? diagnostics.recentEntries.map((entry, index) => <code key={`${index}-${entry}`}>{entry}</code>) : <span>{copy.noRecentErrors}</span>}</div>
-                  {status.phase === "error" && status.detail && <details><summary>{copy.cause}</summary><code>{status.detail}</code></details>}
                   <button className="secondary-action full" onClick={copyDiagnostics}>{copied ? copy.copied : copy.copy}</button>
                 </> : <p className="helper">{copy.noDiagnostic}</p>}
               </>}

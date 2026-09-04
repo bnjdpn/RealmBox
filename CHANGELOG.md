@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-09-04 (préversion en préparation)
+
+- Remplace les options de première installation cachées par un assistant FR/EN en trois étapes, avec aide au client WoW, cartes de population, présence indépendante, dialogue facultatif et récapitulatif avant téléchargement.
+- Vérifie en lecture seule Docker/Compose, la plateforme, la destination et l’espace disque ; garde Installer désactivé si un contrôle manque ou échoue, invalide les vérifications obsolètes et conserve les choix après erreur. Un lien d’installation cassé n’est jamais considéré comme une installation neuve.
+- Ajoute à l’accueil les raccourcis du royaume, une population explicitement configurée plutôt qu’un faux compteur en ligne, l’aide de connexion et le suivi de l’étape d’installation réelle. Les détails techniques restent dans Diagnostic.
+
+- Ajoute trois profils solo FR/EN, inspectables et réversibles, limités à onze réglages AzerothCore. Les instantanés et journaux sont synchronisés, relus, publiés sans écrasement et repris avant le lancement ; aucune donnée de personnage n’est réécrite.
+- Ajoute un guide local explicite pour les noms de quêtes et d’objets : huit résultats maximum, source et incertitude visibles, aucune IA, aucun contexte personnage et deux requêtes MySQL fixes exécutées dans une transaction en lecture seule, avec délai SQL et limites distinctes des processus Docker.
+- Étend l’addon avec trois préréglages d’équipe à cinq, un compagnon principal observé, une portée groupe/cible et l’aperçu de la commande. Il ne retire aucun membre et ne promet pas le rappel nominatif tant que Playerbots ne fournit pas la validation atomique requise.
+- Ajoute au dialogue local un coupe-circuit partagé : pause après trois échecs, une seule sonde de reprise et attente exponentielle plafonnée à 60 secondes, sans nouvelle tentative ni thread non borné.
+- Empêche deux instances RealmBox de piloter simultanément le même runtime et tente de refermer une base temporairement démarrée par le guide, y compris après un échec partiel ou un timeout ; un Docker inaccessible laisse l’arrêt du conteneur à vérifier.
+- Conserve le socle et les révisions immuables existants : aucun repack, dump, client, donnée extraite, fournisseur IA distant ou nouvelle dépendance des huit projets étudiés n’est importé.
+- Cette section décrit l’arbre source. Aucun bundle, image serveur intégrant le nouveau patch C++, release publique ou parcours OpenWoW réel n’est revendiqué à ce stade ; la version Cargo passe à 0.5.0 pour déclencher la sauvegarde obligatoire avant migration.
+
 ## 0.4.0 — 2026-09-03
 
 - Ajoute dans Réglages une vue **Protection** bilingue qui crée à la demande un nouveau dump cohérent des quatre bases, vérifie son contenu et son SHA-256, le conserve hors du runtime sans écrasement et laisse un monde déjà ouvert en fonctionnement.

@@ -22,6 +22,8 @@ sentMessages = {}
 uninvited = {}
 party = {}
 targetAttackable = false
+targetName = nil
+playerCombat = false
 cursorX = 500
 cursorY = 500
 
@@ -68,7 +70,18 @@ RealmBoxCompanionsFrameTitle = NewWidget("title")
 RealmBoxCompanionsFrameGroupStatus = NewWidget("groupStatus")
 RealmBoxCompanionsFrameStatus = NewWidget("status")
 RealmBoxCompanionsFrameLanguage = NewWidget("language")
+RealmBoxCompanionsFramePresetLabel = NewWidget("presetLabel")
+RealmBoxCompanionsFramePresetBalanced = NewWidget("presetBalanced")
+RealmBoxCompanionsFramePresetArcane = NewWidget("presetArcane")
+RealmBoxCompanionsFramePresetWilderness = NewWidget("presetWilderness")
+RealmBoxCompanionsFramePresetSummary = NewWidget("presetSummary")
+RealmBoxCompanionsFrameSavedNames = NewWidget("savedNames")
 RealmBoxCompanionsFrameFormParty = NewWidget("formParty")
+RealmBoxCompanionsFrameScopeLabel = NewWidget("scopeLabel")
+RealmBoxCompanionsFrameScopeGroup = NewWidget("scopeGroup")
+RealmBoxCompanionsFrameScopeTarget = NewWidget("scopeTarget")
+RealmBoxCompanionsFramePrimary = NewWidget("primary")
+RealmBoxCompanionsFrameSetPrimary = NewWidget("setPrimary")
 RealmBoxCompanionsFrameFollow = NewWidget("follow")
 RealmBoxCompanionsFrameAttack = NewWidget("attack")
 RealmBoxCompanionsFrameStay = NewWidget("stay")
@@ -79,6 +92,8 @@ RealmBoxCompanionsFrameBehaviorGuard = NewWidget("behaviorGuard")
 RealmBoxCompanionsFrameBehaviorFree = NewWidget("behaviorFree")
 RealmBoxCompanionsFrameBoost = NewWidget("boost")
 RealmBoxCompanionsFrameLeave = NewWidget("leave")
+RealmBoxCompanionsFramePreviewLabel = NewWidget("previewLabel")
+RealmBoxCompanionsFramePreview = NewWidget("preview")
 RealmBoxCompanionsMinimapButton = NewWidget("minimapButton")
 
 Minimap = NewWidget("minimap")
@@ -95,6 +110,7 @@ function DEFAULT_CHAT_FRAME:AddMessage(message) table.insert(self.messages, mess
 function GetLocale() return "frFR" end
 function GetNumPartyMembers() return #party end
 function UnitName(unit)
+  if unit == "target" then return targetName end
   local index = tonumber(string.match(unit, "party(%d+)"))
   return index and party[index] and party[index].name or nil
 end
@@ -108,12 +124,18 @@ function UnitClass(unit)
   if not member then return nil, nil end
   return member.classToken, member.classToken
 end
-function UnitExists(unit) return unit == "target" and targetAttackable end
+function UnitExists(unit) return unit == "target" and (targetAttackable or targetName ~= nil) end
 function UnitCanAttack(source, target) return source == "player" and target == "target" and targetAttackable end
 function UnitIsDeadOrGhost() return false end
+function UnitAffectingCombat(unit)
+  if unit == "player" then return playerCombat end
+  local index = tonumber(string.match(unit, "party(%d+)"))
+  return index and party[index] and party[index].combat or false
+end
+function InCombatLockdown() return playerCombat end
 function UninviteUnit(name) table.insert(uninvited, name) end
-function SendChatMessage(message, channel)
-  table.insert(sentMessages, { message = message, channel = channel })
+function SendChatMessage(message, channel, language, recipient)
+  table.insert(sentMessages, { message = message, channel = channel, recipient = recipient })
 end
 function GetCursorPosition() return cursorX, cursorY end
 `;
@@ -153,6 +175,14 @@ test("declares a native minimap control, close button, persistence, and 3.3.5a m
   assert.match(xml, /RealmBoxCompanions_SetBehavior\("escort"\)/);
   assert.match(xml, /RealmBoxCompanions_SetBehavior\("guard"\)/);
   assert.match(xml, /RealmBoxCompanions_SetBehavior\("autonomous"\)/);
+  assert.match(xml, /RealmBoxCompanions_SelectPreset\("balanced"\)/);
+  assert.match(xml, /RealmBoxCompanions_SelectPreset\("arcane"\)/);
+  assert.match(xml, /RealmBoxCompanions_SelectPreset\("wilderness"\)/);
+  assert.match(xml, /RealmBoxCompanions_SelectScope\("target"\)/);
+  assert.match(xml, /RealmBoxCompanions_SetPrimary\(\)/);
+  assert.match(xml, /name="\$parentPreview"/);
+  assert.match(xml, /name="RealmBoxCompanionsDriver" parent="UIParent"/);
+  assert.doesNotMatch(addon, /UninviteUnit\(/);
   assert.doesNotMatch(xml, /RealmBoxCompanions_CycleBehavior\(\)/);
   assert.match(toc, /## Interface: 30300/);
   assert.match(toc, /## SavedVariables: RealmBoxCompanionsDB/);
@@ -178,6 +208,11 @@ test("opens only on first run, toggles from slash commands, and persists positio
     assert(RealmBoxCompanionsFrameBehaviorEscort.highlighted ~= true)
     assert(RealmBoxCompanionsFrameBoost.text == "Capacités fortes : serveur")
     assert(RealmBoxCompanionsDB.boostPreference == nil)
+    assert(RealmBoxCompanionsDB.activePreset == "balanced")
+    assert(RealmBoxCompanionsDB.commandScope == "group")
+    assert(RealmBoxCompanionsFramePresetBalanced.highlighted == true)
+    assert(RealmBoxCompanionsFrameScopeGroup.highlighted == true)
+    assert(RealmBoxCompanionsFrameSetPrimary.enabled == false)
     assert(SLASH_REALMBOXCOMPANIONS1 == "/realmbox")
     assert(SLASH_REALMBOXCOMPANIONS2 == "/rb")
     assert(UISpecialFrames[1] == "RealmBoxCompanionsFrame")
@@ -243,7 +278,7 @@ test("tracks the live party, localizes classes, and gates attack on an enemy tar
       { name = "Garea", connected = false, classToken = "HUNTER" },
     }
     RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PARTY_MEMBERS_CHANGED")
-    assert(RealmBoxCompanionsFrameGroupStatus.text == "Équipe : 3/4 · Paladin, Mage, Guerrier · 1 hors ligne")
+    assert(RealmBoxCompanionsFrameGroupStatus.text == "Équipe : 1 joueur + 3/4 · Paladin, Mage, Guerrier · 1 hors ligne")
     assert(RealmBoxCompanionsFrameFollow.enabled == true)
     assert(RealmBoxCompanionsFrameAttack.enabled == false)
 
@@ -257,7 +292,7 @@ test("tracks the live party, localizes classes, and gates attack on an enemy tar
     RealmBoxCompanions_ToggleLanguage()
     assert(RealmBoxCompanionsDB.language == "en")
     assert(RealmBoxCompanionsFrameTitle.text == "COMPANIONS")
-    assert(RealmBoxCompanionsFrameGroupStatus.text == "Party: 3/4 · Paladin, Mage, Warrior · 1 offline")
+    assert(RealmBoxCompanionsFrameGroupStatus.text == "Party: 1 player + 3/4 · Paladin, Mage, Warrior · 1 offline")
     assert(RealmBoxCompanionsFrameBehaviorEscort.text == "Escort")
     assert(RealmBoxCompanionsFrameBehaviorGuard.text == "Guard")
     assert(RealmBoxCompanionsFrameBehaviorFree.text == "Free")
@@ -278,7 +313,7 @@ test("runs only bounded commands and uses the pinned Playerbots boost strategy",
 
     RealmBoxCompanions_Run("attack")
     assert(#sentMessages == 0)
-    assert(RealmBoxCompanionsFrameStatus.text == "Sélectionnez une cible ennemie")
+    assert(RealmBoxCompanionsFrameStatus.text == "Sélectionnez une cible ennemie vivante")
     targetAttackable = true
     RealmBoxCompanions_Run("attack")
     assert(sentMessages[1].message == "attack")
@@ -292,17 +327,17 @@ test("runs only bounded commands and uses the pinned Playerbots boost strategy",
     assert(RealmBoxCompanionsDB.boostPreference == false)
 
     RealmBoxCompanions_FormParty()
-    assert(uninvited[1] == "Offline")
+    assert(#uninvited == 0)
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
     assert(sentMessages[4].message == ".playerbots bot addclass paladin")
     assert(sentMessages[5].message == ".playerbots bot addclass priest")
-    assert(sentMessages[6].message == ".playerbots bot addclass hunter")
+    assert(#sentMessages == 5)
     assert(sentMessages[4].channel == "SAY")
 
     RealmBoxCompanions_Run("not-allowed")
-    assert(#sentMessages == 6)
+    assert(#sentMessages == 5)
     assert(#DEFAULT_CHAT_FRAME.messages == 1)
   `);
 });
@@ -348,10 +383,13 @@ test("offers three explicit bounded behaviors and keeps the legacy cycle wrapper
     assert(RealmBoxCompanionsDB.behaviorPreference == "escort")
 
     RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 5)
+    assert(RealmBoxCompanionsFrameLeave.text == "Confirmer la libération")
+    RealmBoxCompanions_Run("leave")
     assert(sentMessages[6].message == "nc +new rpg,+grind,-follow,-stay")
     assert(sentMessages[7].message == "leave")
     assert(RealmBoxCompanionsDB.behaviorPreference == "autonomous")
-    assert(RealmBoxCompanionsFrameStatus.text == "Équipe libérée · les bots reprennent leurs activités")
+    assert(RealmBoxCompanionsFrameStatus.text == "Libération envoyée · autonomie puis départ du groupe")
   `);
 });
 
@@ -370,11 +408,11 @@ test("reapplies the saved behavior only after a formed party is complete and sta
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
-    assert(#sentMessages == 3)
+    assert(#sentMessages == 2)
     assert(sentMessages[1].channel == "SAY")
 
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 3.0)
-    assert(#sentMessages == 3)
+    assert(#sentMessages == 2)
 
     party = {
       { name = "Kayarid", connected = true, classToken = "PALADIN" },
@@ -384,10 +422,10 @@ test("reapplies the saved behavior only after a formed party is complete and sta
     }
     RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PARTY_MEMBERS_CHANGED")
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 1.0)
-    assert(#sentMessages == 3)
+    assert(#sentMessages == 2)
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.5)
-    assert(sentMessages[4].message == "nc +stay,-follow,-new rpg,-grind")
-    assert(sentMessages[4].channel == "PARTY")
+    assert(sentMessages[3].message == "nc +stay,-follow,-new rpg,-grind")
+    assert(sentMessages[3].channel == "PARTY")
     assert(RealmBoxCompanionsFrameStatus.text == "Préférence réappliquée : Garde")
   `);
 });
@@ -434,5 +472,354 @@ test("expires a reconnect behavior instead of applying it to an unrelated future
     RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PARTY_MEMBERS_CHANGED")
     RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 2.0)
     assert(#sentMessages == 0)
+  `);
+});
+
+test("persists closed squad presets and captures only names observed after formation", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    RealmBoxCompanions_SelectPreset("arcane")
+    assert(RealmBoxCompanionsDB.activePreset == "arcane")
+    assert(RealmBoxCompanionsFramePresetArcane.highlighted == true)
+    assert(string.find(RealmBoxCompanionsFramePresetSummary.text, "Dégâts Mage · Dégâts Mage", 1, true))
+    RealmBoxCompanions_FormParty()
+    for index = 1, 4 do RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8) end
+    assert(#sentMessages == 4)
+    assert(sentMessages[1].message == ".playerbots bot addclass paladin")
+    assert(sentMessages[2].message == ".playerbots bot addclass priest")
+    assert(sentMessages[3].message == ".playerbots bot addclass mage")
+    assert(sentMessages[4].message == ".playerbots bot addclass mage")
+    assert(RealmBoxCompanionsDB.squadMembers.arcane == nil)
+    party = {
+      { name = "Kayarid", connected = true, classToken = "PALADIN" },
+      { name = "Jillo", connected = true, classToken = "PRIEST" },
+      { name = "Manuela", connected = true, classToken = "MAGE" },
+      { name = "Sage", connected = true, classToken = "MAGE" },
+    }
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PARTY_MEMBERS_CHANGED")
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.1)
+    assert(#RealmBoxCompanionsDB.squadMembers.arcane == 4)
+    assert(RealmBoxCompanionsDB.squadMembers.arcane[3].name == "Manuela")
+    assert(string.find(RealmBoxCompanionsFrameSavedNames.text, "Kayarid, Jillo, Manuela, Sage", 1, true))
+    targetName = "Manuela"
+    RealmBoxCompanions_SetPrimary()
+    assert(RealmBoxCompanionsDB.primaryCompanionName == "Manuela")
+    assert(RealmBoxCompanionsDB.primaryCompanionClassToken == "MAGE")
+    assert(RealmBoxCompanionsFramePrimary.text == "Compagnon principal : Manuela")
+    assert(string.find(RealmBoxCompanionsFrameSavedNames.text, "★Manuela", 1, true))
+    assert(#uninvited == 0)
+  `);
+});
+
+test("restores preset, observed names, primary companion and scoped preferences", () => {
+  const state = createLuaState(String.raw`
+    RealmBoxCompanionsDB = {
+      seen = true,
+      language = "en",
+      activePreset = "wilderness",
+      commandScope = "target",
+      primaryCompanionName = "Garea",
+      primaryBehaviorPreference = "guard",
+      primaryBoostPreference = false,
+      behaviorPreference = "escort",
+      squadMembers = { wilderness = { { name = "Garea", classToken = "HUNTER" } } },
+    }
+  `);
+  initialize(state);
+  runLua(state, String.raw`
+    assert(RealmBoxCompanionsFramePresetWilderness.highlighted == true)
+    assert(RealmBoxCompanionsFrameScopeTarget.highlighted == true)
+    assert(RealmBoxCompanionsFramePrimary.text == "Primary companion: Garea (absent)")
+    assert(RealmBoxCompanionsFrameSavedNames.text == "Observed members: ★Garea")
+    assert(RealmBoxCompanionsFrameBehaviorGuard.highlighted == true)
+    assert(RealmBoxCompanionsFrameBoost.text == "Strong abilities: limited")
+    assert(RealmBoxCompanionsFrameFollow.enabled == false)
+    RealmBoxCompanions_SelectScope("group")
+    assert(RealmBoxCompanionsFrameBehaviorEscort.highlighted == true)
+    assert(RealmBoxCompanionsFrameBoost.text == "Strong abilities: server")
+    assert(#sentMessages == 0)
+  `);
+});
+
+test("keeps each squad's group preferences separate without sending commands on selection", () => {
+  const state = createLuaState(String.raw`
+    RealmBoxCompanionsDB = { seen = true, behaviorPreference = "guard", boostPreference = false }
+  `);
+  initialize(state);
+  runLua(state, String.raw`
+    assert(RealmBoxCompanionsDB.presetPreferences.balanced.behaviorPreference == "guard")
+    assert(RealmBoxCompanionsDB.presetPreferences.balanced.boostPreference == false)
+    RealmBoxCompanions_SelectPreset("arcane")
+    assert(RealmBoxCompanionsDB.behaviorPreference == nil)
+    assert(RealmBoxCompanionsDB.boostPreference == nil)
+    assert(#sentMessages == 0)
+    party = { { name = "Manuela", connected = true, classToken = "MAGE" } }
+    RealmBoxCompanions_SetBehavior("escort")
+    RealmBoxCompanions_ToggleBoost()
+    assert(#sentMessages == 2)
+    assert(RealmBoxCompanionsDB.presetPreferences.arcane.behaviorPreference == "escort")
+    assert(RealmBoxCompanionsDB.presetPreferences.arcane.boostPreference == true)
+    RealmBoxCompanions_SelectPreset("balanced")
+    assert(RealmBoxCompanionsDB.behaviorPreference == "guard")
+    assert(RealmBoxCompanionsDB.boostPreference == false)
+    assert(#sentMessages == 2)
+    RealmBoxCompanions_SelectPreset("arcane")
+    assert(RealmBoxCompanionsDB.behaviorPreference == "escort")
+    assert(RealmBoxCompanionsDB.boostPreference == true)
+    assert(#sentMessages == 2)
+  `);
+});
+
+test("fills only genuinely free slots and never removes offline human party members", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    party = {
+      { name = "HumanFriend", connected = false, classToken = "PALADIN" },
+      { name = "OtherHuman", connected = true, classToken = "MAGE" },
+    }
+    RealmBoxCompanions_Action_OnEnter(RealmBoxCompanionsFrameFormParty, "form")
+    assert(RealmBoxCompanionsFramePreview.text == "Groupe · .playerbots bot addclass priest ; .playerbots bot addclass hunter")
+    RealmBoxCompanions_FormParty()
+    for index = 1, 4 do RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8) end
+    assert(#uninvited == 0)
+    assert(#sentMessages == 2)
+    assert(sentMessages[1].message == ".playerbots bot addclass priest")
+    assert(sentMessages[2].message == ".playerbots bot addclass hunter")
+    party = {
+      { name = "HumanFriend", connected = false, classToken = "PALADIN" },
+      { name = "OtherHuman", connected = true, classToken = "MAGE" },
+      { name = "ThirdHuman", connected = false, classToken = "PRIEST" },
+      { name = "FourthHuman", connected = true, classToken = "HUNTER" },
+    }
+    RealmBoxCompanions_FormParty()
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 1)
+    assert(#sentMessages == 2)
+    assert(#uninvited == 0)
+    assert(RealmBoxCompanionsFrameStatus.text == "Votre groupe de cinq est déjà complet")
+  `);
+});
+
+test("targets only the saved primary currently connected in the party using verified whisper commands", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    party = {
+      { name = "Manuela", connected = true, classToken = "MAGE" },
+      { name = "Kayarid", connected = true, classToken = "PALADIN" },
+    }
+    targetName = "Manuela"
+    RealmBoxCompanions_SelectScope("target")
+    RealmBoxCompanions_Run("follow")
+    assert(#sentMessages == 0)
+    assert(RealmBoxCompanionsFrameStatus.text == "Ciblez le compagnon principal enregistré, connecté dans ce groupe")
+    RealmBoxCompanions_SetPrimary()
+    RealmBoxCompanions_Run("follow")
+    assert(sentMessages[1].message == "follow")
+    assert(sentMessages[1].channel == "WHISPER")
+    assert(sentMessages[1].recipient == "Manuela")
+    assert(RealmBoxCompanionsFramePreview.text == "Cible Manuela · follow")
+    RealmBoxCompanions_Run("stay")
+    assert(sentMessages[2].message == "stay")
+    RealmBoxCompanions_SetBehavior("guard")
+    assert(sentMessages[3].message == "nc +stay,-follow,-new rpg,-grind")
+    assert(RealmBoxCompanionsDB.primaryBehaviorPreference == "guard")
+    assert(RealmBoxCompanionsDB.behaviorPreference == nil)
+    RealmBoxCompanions_ToggleBoost()
+    assert(sentMessages[4].message == "co +boost")
+    assert(RealmBoxCompanionsDB.primaryBoostPreference == true)
+    assert(RealmBoxCompanionsDB.boostPreference == nil)
+    for index = 1, 4 do
+      assert(sentMessages[index].channel == "WHISPER")
+      assert(sentMessages[index].recipient == "Manuela")
+    end
+    RealmBoxCompanions_Run("regroup")
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 4)
+    assert(RealmBoxCompanionsFrameStatus.text == "Cette action est disponible uniquement pour le groupe")
+    RealmBoxCompanions_FormParty()
+    assert(RealmBoxCompanionsFrameStatus.text == "Cette action concerne le groupe : choisissez Groupe")
+    targetName = "Kayarid"
+    RealmBoxCompanions_Run("follow")
+    assert(#sentMessages == 4)
+    targetName = "Manuela"
+    party[1].connected = false
+    RealmBoxCompanions_Run("stay")
+    assert(#sentMessages == 4)
+    party = { { name = "Stranger", connected = true, classToken = "MAGE" } }
+    RealmBoxCompanions_Run("follow")
+    assert(#sentMessages == 4)
+  `);
+});
+
+test("suspends commands, formation and local action preferences during combat then resumes safely", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    RealmBoxCompanions_FormParty()
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
+    assert(#sentMessages == 1)
+    party = { { name = "Kayarid", connected = true, classToken = "PALADIN" } }
+    targetName = "Kayarid"
+    targetAttackable = true
+    playerCombat = true
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PLAYER_REGEN_DISABLED")
+    RealmBoxCompanions_Run("follow")
+    RealmBoxCompanions_Run("attack")
+    RealmBoxCompanions_SetBehavior("guard")
+    RealmBoxCompanions_ToggleBoost()
+    RealmBoxCompanions_FormParty()
+    RealmBoxCompanions_SelectPreset("arcane")
+    RealmBoxCompanions_SelectScope("target")
+    RealmBoxCompanions_SetPrimary()
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 2)
+    assert(#sentMessages == 1)
+    assert(RealmBoxCompanionsDB.activePreset == "balanced")
+    assert(RealmBoxCompanionsDB.commandScope == "group")
+    assert(RealmBoxCompanionsDB.behaviorPreference == nil)
+    assert(RealmBoxCompanionsDB.boostPreference == nil)
+    assert(RealmBoxCompanionsDB.primaryCompanionName == nil)
+    assert(RealmBoxCompanionsFrameFollow.enabled == false)
+    assert(RealmBoxCompanionsFrameFormParty.enabled == false)
+    assert(RealmBoxCompanionsFrameStatus.text == "Formation suspendue pendant le combat")
+    playerCombat = false
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PLAYER_REGEN_ENABLED")
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
+    assert(#sentMessages == 2)
+    assert(sentMessages[2].message == ".playerbots bot addclass priest")
+    RealmBoxCompanions_SelectScope("target")
+    assert(RealmBoxCompanionsDB.commandScope == "group")
+    assert(RealmBoxCompanionsFrameStatus.text == "Attendez la fin de la formation en cours")
+  `);
+});
+
+test("expires formation while paused and cancels queued additions when the party fills", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    RealmBoxCompanions_FormParty()
+    playerCombat = true
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 30.01)
+    assert(#sentMessages == 0)
+    assert(RealmBoxCompanionsFrameStatus.text == "Formation expirée · les commandes restantes sont annulées")
+    playerCombat = false
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 1)
+    assert(#sentMessages == 0)
+    RealmBoxCompanions_FormParty()
+    party = {
+      { name = "A", connected = true, classToken = "PALADIN" },
+      { name = "B", connected = true, classToken = "PRIEST" },
+      { name = "C", connected = true, classToken = "MAGE" },
+      { name = "D", connected = true, classToken = "HUNTER" },
+    }
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 0.8)
+    assert(#sentMessages == 0)
+    assert(#uninvited == 0)
+  `);
+});
+
+test("release confirmation expires and is invalidated by composition or combat changes", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    party = { { name = "First", connected = true, classToken = "MAGE" } }
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 0)
+    assert(RealmBoxCompanionsFrameLeave.text == "Confirmer la libération")
+    assert(RealmBoxCompanionsFramePreview.text == "Groupe · nc +new rpg,+grind,-follow,-stay ; leave")
+    RealmBoxCompanions_OnUpdate(RealmBoxCompanionsFrame, 8.01)
+    assert(RealmBoxCompanionsFrameLeave.text == "Libérer l'équipe")
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 0)
+    party[1].name = "Replacement"
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 0)
+    playerCombat = true
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PLAYER_REGEN_DISABLED")
+    playerCombat = false
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PLAYER_REGEN_ENABLED")
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 0)
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 2)
+    assert(sentMessages[1].message == "nc +new rpg,+grind,-follow,-stay")
+    assert(sentMessages[2].message == "leave")
+    assert(#uninvited == 0)
+  `);
+});
+
+test("keeps command previews and unavailable reasons bilingual and fails closed on invalid saved data", () => {
+  const state = createLuaState(String.raw`
+    RealmBoxCompanionsDB = {
+      language = "en", activePreset = "arbitrary", commandScope = "unknown",
+      primaryCompanionName = false, primaryBehaviorPreference = "guard",
+      squadMembers = { balanced = { "bad", { name = false }, { name = "Observed", classToken = 1 } } },
+    }
+  `);
+  initialize(state);
+  runLua(state, String.raw`
+    assert(RealmBoxCompanionsDB.activePreset == "balanced")
+    assert(RealmBoxCompanionsDB.commandScope == "group")
+    assert(RealmBoxCompanionsDB.primaryCompanionName == nil)
+    assert(RealmBoxCompanionsDB.primaryBehaviorPreference == nil)
+    assert(#RealmBoxCompanionsDB.squadMembers.balanced == 1)
+    RealmBoxCompanions_Action_OnEnter(RealmBoxCompanionsFrameFollow, "follow")
+    assert(RealmBoxCompanionsFramePreview.text == "Unavailable · Build a party first")
+    party = { { name = "Observed", connected = true, classToken = "MAGE" } }
+    RealmBoxCompanions_Action_OnEnter(RealmBoxCompanionsFrameFollow, "follow")
+    assert(RealmBoxCompanionsFramePreview.text == "Party · follow")
+    playerCombat = true
+    RealmBoxCompanions_Action_OnEnter(RealmBoxCompanionsFrameFollow, "follow")
+    assert(RealmBoxCompanionsFramePreview.text == "Unavailable · Unavailable in combat · no command will be sent")
+    RealmBoxCompanions_ToggleLanguage()
+    RealmBoxCompanions_Action_OnEnter(RealmBoxCompanionsFrameFollow, "follow")
+    assert(RealmBoxCompanionsFramePreview.text == "Indisponible · Indisponible en combat · aucune commande ne sera envoyée")
+    RealmBoxCompanions_SelectPreset("not-allowed")
+    RealmBoxCompanions_SelectScope("not-allowed")
+    assert(#sentMessages == 0)
+    assert(#DEFAULT_CHAT_FRAME.messages == 2)
+  `);
+});
+
+test("never turns observed names into generic add commands or a promised recall", () => {
+  assert.doesNotMatch(addon, /\.playerbots bot add(?:\s|["'])/);
+  assert.doesNotMatch(xml, /<EditBox\b/);
+  assert.match(addon, /\.playerbots bot addclass paladin/);
+  assert.match(addon, /\.playerbots bot addclass priest/);
+  assert.match(addon, /\.playerbots bot addclass mage/);
+  assert.match(addon, /\.playerbots bot addclass hunter/);
+});
+
+test("blocks commands for an entirely offline party or any fighting party member", () => {
+  const state = createLuaState();
+  initialize(state);
+  runLua(state, String.raw`
+    party = { { name = "Offline", connected = false, classToken = "MAGE" } }
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "PARTY_MEMBERS_CHANGED")
+    RealmBoxCompanions_Run("follow")
+    assert(#sentMessages == 0)
+    assert(RealmBoxCompanionsFrameFollow.enabled == false)
+    assert(RealmBoxCompanionsFrameStatus.text == "Aucun membre du groupe n'est connecté")
+    party[1].connected = true
+    RealmBoxCompanions_Run("leave")
+    assert(RealmBoxCompanionsFrameLeave.text == "Confirmer la libération")
+    party[1].combat = true
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "UNIT_FLAGS", "party1")
+    RealmBoxCompanions_Run("follow")
+    RealmBoxCompanions_ToggleBoost()
+    assert(#sentMessages == 0)
+    assert(RealmBoxCompanionsFrameLeave.text == "Libérer l'équipe")
+    assert(RealmBoxCompanionsFrameFollow.enabled == false)
+    assert(RealmBoxCompanionsFrameStatus.text == "Indisponible en combat · aucune commande ne sera envoyée")
+    party[1].combat = false
+    RealmBoxCompanions_OnEvent(RealmBoxCompanionsFrame, "UNIT_FLAGS", "party1")
+    RealmBoxCompanions_Run("leave")
+    assert(#sentMessages == 0)
+    assert(RealmBoxCompanionsFrameLeave.text == "Confirmer la libération")
+    RealmBoxCompanions_ToggleLanguage()
+    party[1].connected = false
+    RealmBoxCompanions_Run("follow")
+    assert(RealmBoxCompanionsFrameStatus.text == "No party member is connected")
   `);
 });
