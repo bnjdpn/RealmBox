@@ -116,6 +116,8 @@ The guided setup and home shortcuts above describe unreleased source after 0.4.0
 
 ## Persistence and update safety
 
+Release installers wait for freshly built server images from the exact release commit and embed their immutable digests. They do not reuse repository-level image variables. See [build and release provenance](docs/BUILDING.md).
+
 The Docker Compose project name is permanently `realmbox-v3`; it is not an application version. Keeping it stable preserves the player database volume across application releases.
 
 Before the first migration performed by each desktop version, RealmBox:

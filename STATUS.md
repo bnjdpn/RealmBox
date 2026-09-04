@@ -2,6 +2,12 @@
 
 Mis à jour le 4 septembre 2026. Les preuves de parcours natif antérieures restent datées séparément ci-dessous.
 
+## Synchronisation de la release — 4 septembre 2026
+
+Correction d’orchestration : construction serveur appelée par la release, images isolées par commit/exécution/tentative, quatre empreintes transmises directement aux installateurs après validation. Reprise manuelle d’un tag existant sans déplacement, et fichiers de provenance joints aux artefacts. Tests de régression de dépendances et exécution du contrôle shell sur références valides/invalides ajoutés. Aucun code produit ni donnée joueur modifié dans ce correctif. La 0.5.0 est publique ; le workflow précédent a été arrêté avant publication d’installateurs. La réussite de la nouvelle chaîne CI et les nouveaux artefacts restent à vérifier séparément.
+
+Validation locale du correctif : `actionlint` réussi pour les deux workflows ; `pnpm verify` réussi avec 52 tests React, 32 tests de scripts (dont les quatre nouveaux), 141 tests desktop Rust et 5 tests xtask. Ce résultat n’est pas une preuve de construction ou publication des images/installateurs distants.
+
 ## RealmBox 0.5.0 — préparation de la préversion
 
 La version produit et Cargo est incrémentée à 0.5.0 pour la sauvegarde obligatoire avant migration. La publication visée reste un brouillon de préversion : les nouvelles images serveur, les installateurs CI et le parcours réel doivent être vérifiés séparément. Les preuves ci-dessous restent datées ; elles ne qualifient pas automatiquement cette nouvelle version.

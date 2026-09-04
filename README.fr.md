@@ -23,6 +23,8 @@ RealmBox ne contient aucun client World of Warcraft, MPQ, carte extraite, identi
 
 ## Architecture
 
+Les installateurs de release attendent les images serveur reconstruites depuis le commit exact de la release et embarquent leurs empreintes immuables, sans réutiliser les variables d’images du dépôt. Voir [la construction et la provenance](docs/BUILDING.md).
+
 ```text
 React 19 + TypeScript
         │ commandes Tauri étroites

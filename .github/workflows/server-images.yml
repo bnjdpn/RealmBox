@@ -8,12 +8,38 @@ on:
         required: true
         default: false
         type: boolean
+      build_bundles:
+        description: Construire aussi les bundles de développement
+        default: true
+        type: boolean
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      publish:
+        required: true
+        type: boolean
+      build_bundles:
+        default: false
+        type: boolean
+    outputs:
+      authserver:
+        value: ${{ jobs.manifest.outputs.authserver }}
+      worldserver:
+        value: ${{ jobs.manifest.outputs.worldserver }}
+      db_import:
+        value: ${{ jobs.manifest.outputs.db_import }}
+      tools:
+        value: ${{ jobs.manifest.outputs.tools }}
 
 permissions:
   contents: read
   packages: write
 
 env:
+  SOURCE_SHA: ${{ inputs.source_ref || github.sha }}
+  BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
   SERVER_COMMIT: 47960183bb03b83e8943eb2f0f39c16df9710c9d
   PLAYERBOTS_COMMIT: 2f7d9f774987d0157c6a0d0cc08c40bec3db3945
   OLLAMA_CHAT_COMMIT: a9d14b0b8955be136e657ac168dd255f5281a535
@@ -33,6 +59,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Vérifier la provenance exacte de la source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: mod-playerbots/azerothcore-wotlk
@@ -82,7 +116,7 @@ jobs:
               --build-arg REALMBOX_BUILD_JOBS=4 \
               --cache-from "type=gha,scope=server-$SUFFIX" \
               --cache-to "type=gha,mode=max,scope=server-$SUFFIX" \
-              --tag "$registry_root/server-$target:$SERVER_COMMIT-$SUFFIX" \
+              --tag "$registry_root/server-$target:rb-$SOURCE_SHA-$BUILD_ID-$SUFFIX" \
               "$output" \
               --file apps/docker/Dockerfile .
           done
@@ -113,11 +147,11 @@ jobs:
           registry_root="ghcr.io/${REPOSITORY,,}"
           : > server-images.env
           for target in authserver worldserver db-import tools; do
-            destination="$registry_root/server-$target:$SERVER_COMMIT"
+            destination="$registry_root/server-$target:rb-$SOURCE_SHA-$BUILD_ID"
             docker buildx imagetools create \
               --tag "$destination" \
-              "$registry_root/server-$target:$SERVER_COMMIT-linux-amd64" \
-              "$registry_root/server-$target:$SERVER_COMMIT-linux-arm64"
+              "$registry_root/server-$target:rb-$SOURCE_SHA-$BUILD_ID-linux-amd64" \
+              "$registry_root/server-$target:rb-$SOURCE_SHA-$BUILD_ID-linux-arm64"
             docker buildx imagetools inspect "$destination"
             digest="$(docker buildx imagetools inspect "$destination" --raw | sha256sum | cut -d ' ' -f 1)"
             case "$target" in
@@ -143,7 +177,7 @@ jobs:
           path: server-images.env
 
   bundle-macos-arm64:
-    if: inputs.publish
+    if: inputs.publish && inputs.build_bundles
     needs: manifest
     runs-on: macos-15
     env:
@@ -153,6 +187,8 @@ jobs:
       REALMBOX_TOOLS_IMAGE: ${{ needs.manifest.outputs.tools }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
       - run: test "$(uname -m)" = "arm64"
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10.33.0 }
@@ -170,7 +206,7 @@ jobs:
           if-no-files-found: error
 
   bundle-windows-x64:
-    if: inputs.publish
+    if: inputs.publish && inputs.build_bundles
     needs: manifest
     runs-on: windows-2025
     env:
@@ -180,6 +216,8 @@ jobs:
       REALMBOX_TOOLS_IMAGE: ${{ needs.manifest.outputs.tools }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10.33.0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

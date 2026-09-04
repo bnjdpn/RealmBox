@@ -3,21 +3,43 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag existant à reconstruire sans le déplacer
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
-
-env:
-  REALMBOX_AUTH_SERVER_IMAGE: ${{ vars.REALMBOX_AUTH_SERVER_IMAGE }}
-  REALMBOX_WORLD_SERVER_IMAGE: ${{ vars.REALMBOX_WORLD_SERVER_IMAGE }}
-  REALMBOX_DB_IMPORT_IMAGE: ${{ vars.REALMBOX_DB_IMPORT_IMAGE }}
-  REALMBOX_TOOLS_IMAGE: ${{ vars.REALMBOX_TOOLS_IMAGE }}
+  packages: write
 
 jobs:
   validate:
     runs-on: macos-15
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      tag: ${{ steps.source.outputs.tag }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Refuser un tag invalide
+        shell: bash
+        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - name: Figer le commit du tag
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10.33.0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -29,11 +51,26 @@ jobs:
       - name: Valider le tag de version
         shell: bash
         run: |
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::tag de release invalide: $GITHUB_REF_NAME"
-            exit 1
-          fi
-          cargo xtask release check --tag "$GITHUB_REF_NAME"
+          cargo xtask release check --tag "$RELEASE_TAG"
+
+  server-images:
+    needs: validate
+    uses: ./.github/workflows/server-images.yml
+    with:
+      source_ref: ${{ needs.validate.outputs.source_sha }}
+      publish: true
+      build_bundles: false
+
+  image-lock:
+    needs: [validate, server-images]
+    runs-on: ubuntu-24.04
+    env:
+      REALMBOX_AUTH_SERVER_IMAGE: ${{ needs.server-images.outputs.authserver }}
+      REALMBOX_WORLD_SERVER_IMAGE: ${{ needs.server-images.outputs.worldserver }}
+      REALMBOX_DB_IMPORT_IMAGE: ${{ needs.server-images.outputs.db_import }}
+      REALMBOX_TOOLS_IMAGE: ${{ needs.server-images.outputs.tools }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+    steps:
       - name: Refuser une release sans les quatre images immuables
         shell: bash
         run: |
@@ -44,13 +81,33 @@ jobs:
               echo "::error::$name doit contenir une référence GHCR immuable"
               exit 1
             fi
+            if [[ "$value" != *":rb-$SOURCE_SHA-$GITHUB_RUN_ID-"* ]]; then
+              echo "::error::$name provient d’une autre source ou exécution"
+              exit 1
+            fi
+            printf '%s=%s\n' "$name" "$value" >> release-images.env
           done
+          printf '%s\n' "$SOURCE_SHA" > release-source.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-provenance
+          path: |
+            release-images.env
+            release-source.txt
+          if-no-files-found: error
 
   macos-arm64:
-    needs: validate
+    needs: [validate, server-images, image-lock]
     runs-on: macos-15
+    env:
+      REALMBOX_AUTH_SERVER_IMAGE: ${{ needs.server-images.outputs.authserver }}
+      REALMBOX_WORLD_SERVER_IMAGE: ${{ needs.server-images.outputs.worldserver }}
+      REALMBOX_DB_IMPORT_IMAGE: ${{ needs.server-images.outputs.db_import }}
+      REALMBOX_TOOLS_IMAGE: ${{ needs.server-images.outputs.tools }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
       - run: test "$(uname -m)" = "arm64"
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10.33.0 }
@@ -74,10 +131,17 @@ jobs:
           if-no-files-found: error
 
   windows-x64:
-    needs: validate
+    needs: [validate, server-images, image-lock]
     runs-on: windows-2025
+    env:
+      REALMBOX_AUTH_SERVER_IMAGE: ${{ needs.server-images.outputs.authserver }}
+      REALMBOX_WORLD_SERVER_IMAGE: ${{ needs.server-images.outputs.worldserver }}
+      REALMBOX_DB_IMPORT_IMAGE: ${{ needs.server-images.outputs.db_import }}
+      REALMBOX_TOOLS_IMAGE: ${{ needs.server-images.outputs.tools }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10.33.0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -97,6 +161,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10.33.0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -111,9 +177,21 @@ jobs:
           if-no-files-found: error
 
   github-release:
-    needs: [macos-arm64, windows-x64, launcher-screenshots]
+    needs: [validate, macos-arm64, windows-x64, launcher-screenshots]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - name: Refuser un tag déplacé pendant la construction
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/tags/$RELEASE_TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$SOURCE_SHA"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
@@ -131,9 +209,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
           if ! gh release view "$tag" >/dev/null 2>&1; then
             cat > release-notes.md <<EOF
           ## RealmBox $tag — préversion / preview
@@ -150,4 +229,4 @@ jobs:
           EOF
             gh release create "$tag" --draft --prerelease --notes-file release-notes.md --title "RealmBox $tag"
           fi
-          gh release upload "$tag" dist/RealmBox-macOS-arm64-unsigned/*.dmg dist/RealmBox-Windows-x64-unsigned/*.exe dist/RealmBox-launcher-screenshots/*.webp SHA256SUMS.txt --clobber
+          gh release upload "$tag" dist/RealmBox-macOS-arm64-unsigned/*.dmg dist/RealmBox-Windows-x64-unsigned/*.exe dist/RealmBox-launcher-screenshots/*.webp dist/release-provenance/* SHA256SUMS.txt --clobber
