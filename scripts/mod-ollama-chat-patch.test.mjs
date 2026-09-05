@@ -105,7 +105,12 @@ function resolveMsvcEnvironment() {
       "/c",
       `call "${developerCommand}" -no_logo -arch=x64 -host_arch=x64 >nul && set`,
     ],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      // This argument already uses cmd.exe quoting, not Windows argv escaping.
+      windowsVerbatimArguments: true,
+    },
   );
   return mergeWindowsEnvironment(process.env, output);
 }

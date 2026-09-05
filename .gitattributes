@@ -1,0 +1,4 @@
+# Release validation parses workflow jobs and verifies canonical patch bytes.
+# Keep these inputs identical when Windows checks out with core.autocrlf=true.
+.github/workflows/*.yml text eol=lf
+patches/*.patch text eol=lf
