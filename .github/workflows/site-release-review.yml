@@ -1,0 +1,30 @@
+name: Public site release review
+
+# No store submission, Pages deployment or external write occurs in this workflow.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Ruby for site release checks
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b
+        with:
+          ruby-version: "4.0.6"
+      - name: Verify the site release workflow
+        run: |
+          ruby .agents/skills/site-release-sync/scripts/check.rb --check
+          ruby .agents/skills/site-release-sync/scripts/check_test.rb
+      - name: Record the remaining editorial review
+        run: |
+          echo 'Deterministic site checks ran. They do not establish product, screenshot or public release accuracy.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Apply .agents/skills/site-release-sync/SKILL.md to this change. Record updated pages, prepared-but-held pages, or a concrete no-public-impact reason in the PR/release review.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'New availability promises require current public readback for each platform. A tag, merge or store submission is not release confirmation.' >> "$GITHUB_STEP_SUMMARY"

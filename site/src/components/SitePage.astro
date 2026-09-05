@@ -12,19 +12,8 @@ const base = import.meta.env.BASE_URL;
 
 <PageLayout lang={copy.lang} title={copy.title} description={copy.description}>
   <Header copy={copy} />
-  <main id="content">
+  <main id="content" tabindex="-1">
     <Hero copy={copy} />
-
-    <section class="launcher-showcase" aria-labelledby="launcher-showcase-title">
-      <div class="shell">
-        <h2 class="sr-only" id="launcher-showcase-title">{copy.hero.screenshotAlt}</h2>
-        <figure class="showcase-frame">
-          <div class="frame-heading"><i aria-hidden="true"></i><span>RealmBox</span><i aria-hidden="true"></i></div>
-          <img src={`${base}assets/${copy.hero.screenshotAsset}`} width="1024" height="640" alt={copy.hero.screenshotAlt} loading="lazy" />
-          <figcaption>{copy.hero.screenshotCaption}</figcaption>
-        </figure>
-      </div>
-    </section>
 
     <section class="section updates" id="updates" aria-labelledby="updates-title">
       <div class="shell">
@@ -150,7 +139,7 @@ const base = import.meta.env.BASE_URL;
         <a href="https://github.com/bnjdpn/RealmBox/blob/main/LICENSE">{copy.footer.license}</a>
         <a href="https://github.com/bnjdpn/RealmBox/tree/main/docs">{copy.footer.documentation}</a>
         <a href="https://github.com/bnjdpn/RealmBox">{copy.footer.source}</a>
-        <a href="https://bnjdpn.github.io/">{copy.footer.portfolio}</a>
+        <a href={copy.lang === "fr" ? "https://bnjdpn.github.io/fr/" : "https://bnjdpn.github.io/"}>{copy.footer.portfolio}</a>
       </nav>
     </div>
   </footer>

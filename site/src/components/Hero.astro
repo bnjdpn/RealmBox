@@ -8,7 +8,6 @@ const downloadUrl = "https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0";
 ---
 
 <section class="hero">
-  <img class="hero-art" src={`${base}assets/hero-azeroth-companions.webp`} width="1672" height="941" alt="" fetchpriority="high" aria-hidden="true" />
   <div class="shell hero-grid">
     <div class="hero-copy">
       <p class="kicker"><i></i>{copy.hero.eyebrow}</p>
@@ -19,9 +18,12 @@ const downloadUrl = "https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0";
         <a class="button ghost" href="#install">{copy.hero.install}<span aria-hidden="true">↘</span></a>
       </div>
       <p class="release-note">{copy.hero.availability}</p>
-      <ul class="hero-tech" aria-label="Technologies">
-        <li>AzerothCore</li><li>Playerbots</li><li>OpenWoW</li><li>Docker</li>
-      </ul>
+
     </div>
+    <figure class="hero-product">
+      <div class="product-heading"><span>RealmBox</span><span>{copy.lang === "fr" ? "Votre monde, prêt à partir" : "Your world, ready to go"}</span></div>
+      <img src={`${base}assets/${copy.hero.screenshotAsset}`} width="1024" height="640" alt={copy.hero.screenshotAlt} fetchpriority="high" />
+      <figcaption>{copy.hero.screenshotCaption}</figcaption>
+    </figure>
   </div>
 </section>

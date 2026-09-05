@@ -1,0 +1,20 @@
+---
+import '../styles/global.css';
+const base=import.meta.env.BASE_URL;
+---
+<!doctype html>
+<html lang="fr">
+  <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="robots" content="noindex,follow"/><title>Page introuvable · RealmBox</title><link rel="icon" href={`${base}assets/icon.svg`} type="image/svg+xml"/></head>
+  <body>
+    <main class="shell section" id="content">
+      <p class="kicker">RealmBox · 404</p>
+      <h1>Un autre chemin.</h1>
+      <p>Cette page n’existe pas ou a changé d’adresse.</p>
+      <p lang="en">This page could not be found. Choose your language to return to RealmBox.</p>
+      <nav class="actions" aria-label="Retour à RealmBox">
+        <a class="button primary" href={`${base}fr/`}>Accueil en français ↗</a>
+        <a class="button ghost" lang="en" href={`${base}en/`}>Home in English ↗</a>
+      </nav>
+    </main>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 /target
-node_modules/
+node_modules
 /apps/desktop/dist
 /site/.astro
 /site/dist
