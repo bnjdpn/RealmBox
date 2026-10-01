@@ -21,6 +21,6 @@
   },
   "devDependencies": {
     "fengari": "0.1.5",
-    "playwright": "1.62.1"
+    "playwright": "1.63.0"
   }
 }
