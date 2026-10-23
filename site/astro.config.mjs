@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: "https://bnjdpn.github.io",
+  site: "https://bnjdpn.com",
   base: "/RealmBox/",
   output: "static",
   trailingSlash: "always",
