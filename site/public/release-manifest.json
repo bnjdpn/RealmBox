@@ -2,8 +2,14 @@
   "schemaVersion": 1,
   "channel": "technical-preview",
   "productVersion": "0.5.0",
-  "updatedAt": "2026-09-04",
-  "publicRelease": null,
+  "updatedAt": "2026-10-23",
+  "publicRelease": {
+    "version": "0.5.0",
+    "tag": "v0.5.0",
+    "prerelease": true,
+    "publishedAt": "2026-09-04T08:21:13Z",
+    "url": "https://github.com/bnjdpn/RealmBox/releases/tag/v0.5.0"
+  },
   "latestPreview": {
     "version": "0.2.0",
     "visibility": "draft"
@@ -11,15 +17,15 @@
   "platforms": {
     "macosAppleSilicon": {
       "status": "qualified",
-      "assetUrl": null,
-      "assetName": null,
-      "sha256": null
+      "assetUrl": "https://github.com/bnjdpn/RealmBox/releases/download/v0.5.0/RealmBox_0.5.0_aarch64.dmg",
+      "assetName": "RealmBox_0.5.0_aarch64.dmg",
+      "sha256": "54c61dce0bd4a464e9c8444ffe65bd6665698ba479c436ad8693957d46d7ecf4"
     },
     "windowsX64": {
       "status": "experimental",
-      "assetUrl": null,
-      "assetName": null,
-      "sha256": null
+      "assetUrl": "https://github.com/bnjdpn/RealmBox/releases/download/v0.5.0/RealmBox_0.5.0_x64-setup.exe",
+      "assetName": "RealmBox_0.5.0_x64-setup.exe",
+      "sha256": "01be04c39cd4b1cbec6e0ac1876bbf1e9f159461a3d7b4abff2701eca30632b2"
     },
     "linux": {
       "status": "unsupported",
